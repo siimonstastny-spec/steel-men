@@ -392,8 +392,10 @@ async function startGame(settings) {
   preloadModels(matchModelPaths(game.races)).catch((err) => console.warn(err));
   // ?seed=123 in the URL fixes the seed (determinism checks: same seed + same commands = same world.stateHash())
   startSimulation(seed);
-  // Idle HoverTrucks repair / finish nearby work if this player wants it (profile; a command, so every client agrees)
-  commandBus.submit({ type: 'setAutoAssist', team: localTeam(), on: getSettings().ui?.autoAssist ?? true });
+  // Idle HoverTrucks repair / finish nearby work if this player wants it (profile; a command, so every client agrees).
+  // Multiplayer submits it in startMultiplayer AFTER net.start(): before that the bus is still local and the command
+  // would run on this client only (desync 2026-11-22, docs/desync/).
+  if (!settings.multiplayer) submitAutoAssist();
   // Computer players (src/ai): outside the simulation, commands only; in multiplayer only the host runs them
   if (!settings.multiplayer || settings.isHost) {
     game.races.forEach((race, team) => {
@@ -492,6 +494,11 @@ async function showMenu() {
 let net = null; // Lockstep during a multiplayer match, otherwise null
 let netChannel = null;
 
+/** The local player's auto-assist wish (profile) as a simulation command */
+function submitAutoAssist() {
+  commandBus.submit({ type: 'setAutoAssist', team: localTeam(), on: getSettings().ui?.autoAssist ?? true });
+}
+
 function stopNet() {
   net?.stop();
   netChannel?.leave();
@@ -537,6 +544,7 @@ async function startMultiplayer(info) {
     localTeam: info.localTeam ?? PLAYER_TEAM, // spectators are not supported yet
   });
   net?.start(); // after startSimulation: tick 0, empty bus; switches commandBus.schedule to the network
+  if (net && info.localTeam != null) submitAutoAssist(); // through the lockstep: runs on every client at the same tick
 }
 
 /** "Waiting for players" / desync banner (div#net-wait in index.html) */

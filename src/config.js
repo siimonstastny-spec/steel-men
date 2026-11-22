@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v22';
+export const GAME_VERSION = 'v22.1';
 export const BASE64_MODEL_SUFFIX = '.txt';
 // Model folders (path prefixes) whose textures were exported upside down (V flipped – round floor pads came out
 // inside out): the loader mirrors the texture transform once per model (src/core/AssetLoader.js), team colour copies
