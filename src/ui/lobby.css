@@ -1,0 +1,89 @@
+/* Steel Mans – multiplayer lobby screen (LobbyScreen.js). Uses the --menu-* variables and the shared classes
+   (.menu-card, .menu-btn, .faction, .swatch, .rule, ...) of menu.css; only lobby-specific rules live here. */
+.menu-card.lobby { max-width: 1120px; width: 100%; box-sizing: border-box; } /* [B1] seat grid + settings column, see setup.css */
+
+.lobby-choose { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 4px; }
+.lobby-choose .menu-btn { flex: 1 1 200px; text-align: center; }
+
+.lobby-status { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; color: var(--menu-muted); font-size: 14px; }
+.lobby-spinner {
+  width: 16px; height: 16px; border-radius: 0; flex: 0 0 auto;
+  border: 2px solid var(--menu-border); border-top-color: var(--menu-accent);
+  animation: lobby-spin 0.8s linear infinite;
+}
+@keyframes lobby-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lobby-spinner { animation-duration: 3s; } }
+
+/* join code */
+.lobby-code {
+  box-sizing: border-box; width: 100%; max-width: 320px; padding: 10px 12px;
+  border: 1px solid var(--menu-border); border-radius: 0; background: var(--menu-faction-bg); color: var(--menu-text-bright);
+  box-shadow: inset 1px 1px 4px rgba(0,0,0,0.7);
+  font: 700 22px ui-monospace, Consolas, monospace; letter-spacing: 0.12em;
+}
+.lobby-code:focus { outline: none; border-color: var(--menu-accent); box-shadow: inset 1px 1px 4px rgba(0,0,0,0.7), var(--menu-neon-glow); }
+.lobby-code::placeholder { color: var(--menu-faint); letter-spacing: 0.04em; font-weight: 400; font-size: 16px; }
+.lobby-code-box { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-bottom: 12px; }
+.lobby-code-box .row-label { margin: 0; }
+.lobby-code-value {
+  padding: 6px 14px; border: 1px dashed var(--menu-accent); border-radius: 0; color: var(--menu-accent-hover); text-shadow: 0 0 6px rgba(47,212,207,0.4);
+  font: 800 22px ui-monospace, Consolas, monospace; letter-spacing: 0.14em; user-select: all; word-break: break-all;
+}
+.lobby-copy { min-width: 0; padding: 7px 14px; font-size: 14px; }
+
+/* seats */
+.lobby-seats { display: flex; flex-direction: column; gap: 8px; }
+.lobby-seat {
+  padding: 10px 12px; border: 1px solid var(--menu-border); border-left: 3px solid var(--menu-border-hover); border-radius: 0; background: var(--menu-brushed), var(--menu-faction-bg);
+  box-shadow: var(--menu-edge);
+}
+.lobby-seat.mine { border-color: var(--menu-accent); background: var(--menu-selected-bg); box-shadow: var(--menu-edge), var(--menu-neon-glow); }
+.lobby-seat-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; }
+.lobby-seat-no { color: var(--menu-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; }
+.lobby-tag {
+  padding: 1px 7px; border: 1px solid var(--menu-border); border-radius: 0; color: var(--menu-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+}
+.lobby-tag.me { border-color: var(--menu-accent); color: var(--menu-accent); }
+.lobby-info { margin-top: 6px; color: var(--menu-text); font-size: 13px; }
+.lobby-ok { color: var(--menu-accent); }
+
+.lobby-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 18px; margin-top: 8px; }
+.lobby-controls > .menu-btn { min-width: 0; padding: 8px 16px; font-size: 14px; }
+.lobby-field { display: flex; flex-direction: column; min-width: 0; }
+.lobby-field .row-label { margin: 0 0 4px; }
+.lobby-field select {
+  padding: 7px 8px; border: 1px solid var(--menu-border); border-radius: 0;
+  box-shadow: inset 1px 1px 3px rgba(0,0,0,0.6); background: var(--menu-faction-bg); color: var(--menu-text); font: 14px var(--menu-font); max-width: 100%;
+}
+.lobby-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.lobby-buttons .menu-btn { min-width: 0; padding: 8px 16px; font-size: 14px; text-align: center; }
+.lobby-ready.on { background: linear-gradient(180deg, #55e6e1, var(--menu-accent) 55%, #1fa5a1); border-color: var(--menu-accent-hover); color: var(--menu-accent-text); box-shadow: var(--menu-edge), var(--menu-neon-glow); }
+.lobby-ready.on:hover { background: var(--menu-accent-hover); }
+
+/* disabled controls (non-host rules, Start before everyone is ready) */
+.lobby-seat .menu-btn:disabled, .menu-actions .menu-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
+.lobby-seat .menu-btn:disabled:hover, .menu-actions .menu-btn:disabled:hover { border-color: var(--menu-border-soft); background: #1a1e23; box-shadow: none; }
+.menu-actions .menu-btn.primary:disabled:hover { background: #1a1e23; border-color: var(--menu-border-soft); }
+.lobby-seat .swatch:focus-visible, .lobby-code:focus-visible { outline: 2px solid var(--menu-accent); outline-offset: 2px; }
+.faction:disabled { opacity: 0.55; cursor: default; }
+.faction:disabled.on { opacity: 1; }
+.rule:has(input:disabled) { cursor: default; }
+
+/* narrow window */
+@media (max-width: 520px) {
+  .lobby-controls { flex-direction: column; align-items: stretch; }
+  .lobby-buttons { margin-left: 0; }
+  .lobby-buttons .menu-btn, .lobby-controls > .menu-btn { flex: 1 1 auto; }
+  .lobby-field select { width: 100%; }
+  .lobby-code { max-width: none; }
+  .lobby-code-value { font-size: 18px; }
+  .menu-card.lobby { padding: 14px 12px; }
+  .menu-actions .menu-btn { flex: 1 1 120px; min-width: 0; }
+}
+
+/* [UISMALL] avatar of human players (Avatar.js) and its upload row in Settings */
+.ai-avatar.human-avatar.picture { box-sizing: border-box; border: 2px solid var(--menu-outline, #000); border-radius: 50%; object-fit: cover; background: #000; }
+.settings-avatar { align-items: center; }
+.settings-avatar-box { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.settings-avatar-box .menu-btn { min-width: 0; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.lobby-seat-head .human-avatar { margin-right: -2px; }

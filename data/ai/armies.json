@@ -1,0 +1,25 @@
+{
+  "_doc": "Army composition. phases: the first whose `until` (match seconds, null = rest of the game) is not over yet applies. roles = weights of the next mech's role; maxMechOre / maxMechEnergy = cost limit of one mech's parts. roleClasses = weapon classes (stats.json weapon.class) that make an arm fit a role; a role without a fitting arm available falls back to `fallbackRole`. stance / behaviour = what the AI sets on a new mech of that role. score = weights of the loadout score (src/ai/managers/Production.js). counters (AI v2, used with difficulty.counter > 0): once at least minSeen enemy combat units were seen (Perception keeps them AI.compositionSeconds), each rule whose enemyRole has more than `above` share of the seen enemy strength multiplies role weights by boost^counter; armorWeight = how much an arm's damage after the seen enemy armour (Stats.applyArmor, per damage type) counts in its score (^ armorWeight × counter). `races` may override any key per race key.",
+  "default": {
+    "phases": [
+      { "until": 420, "roles": { "melee": 1, "ranged": 1 }, "maxMechOre": 300, "maxMechEnergy": 40 },
+      { "until": 1020, "roles": { "melee": 2, "ranged": 3, "artillery": 1 }, "maxMechOre": 480, "maxMechEnergy": 160 },
+      { "until": null, "roles": { "melee": 2, "ranged": 3, "artillery": 2 }, "maxMechOre": 680, "maxMechEnergy": 280 }
+    ],
+    "roleClasses": { "melee": ["melee"], "ranged": ["ranged", "area"], "artillery": ["artillery"] },
+    "fallbackRole": "ranged",
+    "stance": { "melee": "melee", "ranged": "ranged", "artillery": "ranged" },
+    "behaviour": { "melee": "aggressive", "ranged": "aggressive", "artillery": "defensive" },
+    "score": { "armor": 1.0, "rangeBonus": 0.004, "costExponent": 0.6, "energyWeight": 1.5, "overloadPenalty": 0.5 },
+    "counters": {
+      "minSeen": 3,
+      "rules": [
+        { "enemyRole": "melee", "above": 0.45, "boost": { "ranged": 1.6, "artillery": 1.3 } },
+        { "enemyRole": "ranged", "above": 0.5, "boost": { "melee": 1.5, "artillery": 1.2 } },
+        { "enemyRole": "artillery", "above": 0.25, "boost": { "melee": 1.7 } }
+      ],
+      "armorWeight": 1.0
+    }
+  },
+  "races": {}
+}

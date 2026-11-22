@@ -1,0 +1,31 @@
+{
+  "name": "gen_01AI",
+  "description": "Čtyři rohové základny, uprostřed super node se surovinami.",
+  "startAssignment": "fixed",
+  "size": 900,
+  "startPositions": [
+    { "x": -300, "z": 300 },
+    { "x": -300, "z": -300 },
+    { "x": 300, "z": -300 },
+    { "x": 300, "z": 300 }
+  ],
+  "superNode": { "x": 0, "z": 0, "radius": 40, "coreRadius": 12,
+                 "ore": { "amount": 40000, "rateFactor": 2, "maxHarvesters": 8 } },
+  "symmetry": "rotate4",
+  "oreDeposits": [
+    { "x": -235, "z": 235, "radius": 7, "amount": 6000, "rateFactor": 1, "maxHarvesters": 3 }
+  ],
+  "obstacles": [
+    { "type": "rock", "x": -160, "z": 130, "radius": 18, "height": 16 },
+    { "type": "rock", "x": -128, "z": 168, "radius": 13, "height": 12 },
+    { "type": "rock", "x": -95, "z": 95, "radius": 11, "height": 14 },
+    { "type": "ridge", "x": -340, "z": 0, "halfX": 55, "halfZ": 10, "height": 14 },
+    { "type": "ridge", "x": -190, "z": 0, "halfX": 35, "halfZ": 8, "height": 10 },
+    { "type": "rock", "x": -230, "z": 395, "radius": 16, "height": 13 },
+    { "type": "rock", "x": -395, "z": 230, "radius": 16, "height": 13 }
+  ],
+  "terrain": {
+    "flatRadius": 80,
+    "flatFalloff": 90
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "_doc": "Research plans of the AI (difficulty.research names one; src/ai/managers/Research.js, docs/notes/ai-v2.md). No research or faction names: research is picked by ROLE, derived from its stats.json effects by src/ai/AiData.js researchRolesOf: unlock (unlocks parts / vehicles / structures), weapons (weapon stats; skipped while no own unit uses the weapon class / id it targets), armor (hp / armour of parts), vehicles (vehicle stats), mobility (mobility.* stats), repair (repair.* rules), economy (harvest ability), crew (crew stats / crew.* rules), salvage (salvageResearch.* / salvageDrop.* rules). Research whose effects are all pending is never picked. Plan: facility = structure role built for research (count facilities from buildAt s once the build order is done and the team has more than minOre spare ore); phases = the first whose `until` (s, null = rest) is not over: roles in order of preference (the cheapest available research of the first role that has one); maxActive = research items running at once; minOre / minEnergy = spare resources kept before queueing; reserveAfter = s a chosen research may wait for that spare money, then its cost is reserved (bb.researchReserve: Production spends no normal-priority money below it) and it is queued once the cost alone fits (without it Production spent all ore on parts and research never started, docs/notes/ai-research-fix.md); facilities above the first are built only while every facility is busy; analysis = analyse captured parts (queueAnalysis) as soon as possible; salvage = HoverTrucks fetch legs / torso wrecks (max trucks at once, needs a research facility). budget (AI v3, src/ai/Budget.js, docs/notes/ai-v3.md) = budget buckets by phase: phases[].research = wanted research share of the spending (army + research) until `until` s; spending is counted over the last `window` s once at least minSpend was spent; while research waits for money below share − slack, normal-priority production does not spend the resources research lacks; while production is short of money and research is above share + slack, no new research starts; a wait counts for waitSeconds. AI v4 (docs/notes/ai-v4.md): beforeOpening = the first facility is wanted from buildAt as soon as the team has its minimum trucks (difficulty.econ), not only after the whole build order; firstPriority = priority of that first facility (low / normal / high / urgent; build order steps are high and win ties, so \"urgent\" puts the facility before the rest of the opening – economy builds of the trap guard are urgent too and come first).",
+  "none": { "enabled": false },
+  "normal": {
+    "enabled": true,
+    "facility": "@research",
+    "facilities": 1,
+    "buildAt": 330,
+    "beforeOpening": true,
+    "firstPriority": "urgent",
+    "minOre": 300,
+    "minEnergy": 120,
+    "reserveAfter": 15,
+    "maxActive": 1,
+    "analysis": true,
+    "salvage": { "trucks": 0 },
+    "budget": {
+      "window": 240, "minSpend": 600, "slack": 0.05, "waitSeconds": 10,
+      "phases": [ { "until": 900, "research": 0.15 }, { "until": 1500, "research": 0.2 }, { "until": null, "research": 0.28 } ]
+    },
+    "phases": [
+      { "until": 1080, "roles": ["armor", "weapons", "economy"] },
+      { "until": null, "roles": ["unlock", "weapons", "armor", "repair", "mobility", "crew"] }
+    ]
+  },
+  "hard": {
+    "enabled": true,
+    "facility": "@research",
+    "facilities": 2,
+    "buildAt": 210,
+    "beforeOpening": true,
+    "firstPriority": "urgent",
+    "minOre": 200,
+    "minEnergy": 90,
+    "reserveAfter": 10,
+    "maxActive": 2,
+    "analysis": true,
+    "salvage": { "trucks": 1 },
+    "budget": {
+      "window": 240, "minSpend": 600, "slack": 0.05, "waitSeconds": 10,
+      "phases": [ { "until": 660, "research": 0.2 }, { "until": 1200, "research": 0.25 }, { "until": null, "research": 0.32 } ]
+    },
+    "phases": [
+      { "until": 840, "roles": ["unlock", "weapons", "armor", "salvage"] },
+      { "until": null, "roles": ["unlock", "weapons", "armor", "repair", "mobility", "vehicles", "crew", "economy"] }
+    ]
+  }
+}

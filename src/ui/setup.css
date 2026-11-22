@@ -1,0 +1,62 @@
+/* Steel Mans – [B1] New game + multiplayer lobby layout (modern RTS style): player seats as a grid on the left,
+   game settings as comboboxes on the right, Back bottom left, Start bottom right. Uses the --menu-* variables. */
+.menu-card.setup, .menu-card.lobby.wide { max-width: 1120px; width: 100%; box-sizing: border-box; }
+
+.setup-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+.setup-main { min-width: 0; }
+.setup-side {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; min-width: 0;
+  border: 1px solid var(--menu-border); background: var(--menu-brushed), var(--menu-faction-bg); box-shadow: var(--menu-edge);
+}
+.setup-side h3 { margin: 0 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--menu-accent); }
+
+/* combobox rows */
+.opt-row { display: flex; flex-direction: column; gap: 3px; }
+.opt-label { color: var(--menu-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; }
+.opt-select, .seat-select {
+  box-sizing: border-box; width: 100%; padding: 7px 8px; border: 1px solid var(--menu-border); border-radius: 0;
+  box-shadow: inset 1px 1px 3px rgba(0,0,0,0.6); background: var(--menu-faction-bg); color: var(--menu-text); font: 14px var(--menu-font);
+}
+.opt-select:focus, .seat-select:focus { outline: none; border-color: var(--menu-accent); }
+.opt-select:disabled, .seat-select:disabled { opacity: 0.6; cursor: default; }
+.setup-side .rule.sub { margin-left: 22px; }
+.setup-ff { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--menu-border-soft); }
+
+/* seat grid */
+.setup-seats { display: flex; flex-direction: column; gap: 6px; }
+.setup-seat {
+  display: grid; align-items: center; gap: 8px 10px; padding: 7px 10px;
+  grid-template-columns: minmax(130px, 1.3fr) minmax(110px, 1fr) minmax(150px, 1.2fr) 64px minmax(90px, 0.8fr);
+  border: 1px solid var(--menu-border); border-left: 3px solid var(--menu-border-hover);
+  background: var(--menu-brushed), var(--menu-faction-bg); box-shadow: var(--menu-edge);
+}
+.setup-seat.with-actions { grid-template-columns: minmax(130px, 1.3fr) minmax(110px, 1fr) minmax(150px, 1.2fr) 64px minmax(90px, 0.8fr) auto; }
+.seat-cell.col { flex-direction: column; align-items: stretch; gap: 2px; }
+.setup-seat.head { border: 0; background: none; box-shadow: none; padding-top: 0; padding-bottom: 0; }
+.setup-seat.head > span { color: var(--menu-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; }
+.setup-seat.mine { border-color: var(--menu-accent); border-left-color: var(--menu-accent); background: var(--menu-selected-bg); }
+.setup-seat.closed { opacity: 0.6; border-left-color: var(--menu-border-soft); }
+.setup-seat[hidden] { display: none; }
+.seat-player { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; font-size: 14px; }
+.seat-player b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-seat .swatches { gap: 4px; }
+.setup-seat .swatch { width: 20px; height: 20px; border-width: 1px; }
+.setup-seat .swatch.custom { font-size: 14px; }
+.seat-cell { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; }
+.seat-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.seat-actions .menu-btn { min-width: 0; padding: 5px 10px; font-size: 12px; text-align: center; }
+.setup-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 10px 0; }
+.setup-tools .factions { display: flex; flex-wrap: wrap; gap: 6px; }
+.setup-tools .faction { min-width: 44px; padding: 6px 12px; text-align: center; }
+.setup-tools .row-label { margin: 0; }
+.setup-map { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--menu-border-soft); }
+.setup-map .map-select-body { margin-top: 0; }
+
+/* Back left, Start / continue right (rule of all screens) */
+.menu-actions.split { justify-content: space-between; }
+
+@media (max-width: 900px) {
+  .setup-layout { grid-template-columns: 1fr; }
+  .setup-seat { grid-template-columns: 1fr 1fr; }
+  .setup-seat.head { display: none; }
+}

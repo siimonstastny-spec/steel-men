@@ -1,0 +1,118 @@
+/* Steel Mans – HUD v2 bottom-centre selection panels (RobotPanel + CenterPanel, markup from src/ui/*Panel.js).
+   Layout numbers arrive as CSS variables written inline by the panels (config.js HUD_PANELS).
+   Scale: --hud-scale (unitless, set by the HUD layout), faction: --hud-frame-filter (artwork), --hud-neon, --hud-accent.
+   Artwork URLs are relative to this file (src/ui/ → ../../data/image/ui/hud2/). */
+
+/* The host element ([data-el="selection"], class sp-root added by SelectionPanel); empty = hidden.
+   The host itself lets clicks through (it may be as wide as the container); the panels (.rp / .cp) take them.
+   .warn / .ally colours come from hud.css (#hud-root .warn / .ally). */
+#hud-root [data-el="selection"].sp-root {
+  background: none; border: 0; box-shadow: none; clip-path: none; padding: 0; min-height: 0;
+  min-width: 0; width: 100%; max-width: 100%;
+  display: flex; justify-content: center; align-items: flex-end;
+  color: #dff4ff; font-family: system-ui, sans-serif;
+  pointer-events: none;
+}
+#hud-root .sp-root .rp, #hud-root .sp-root .cp { pointer-events: auto; }
+#hud-root .sp-root .rp-bg, #hud-root .sp-root .rp-mask,
+#hud-root .sp-root .cp-l, #hud-root .sp-root .cp-m, #hud-root .sp-root .cp-r { pointer-events: none; }
+.sp-root[hidden], .sp-root.sp-empty { display: none !important; }
+.sp-root .muted { opacity: .55; }
+.sp-root .bonus { color: var(--hud-accent, #9cc7ff); }
+.sp-root small { font-size: max(11px, .85em); }
+
+.sp-bar { display: inline-block; width: calc(var(--hud-scale, 1) * 48px); height: calc(var(--hud-scale, 1) * 5px); background: rgba(255, 255, 255, .14); vertical-align: middle; }
+.sp-bar i { display: block; height: 100%; }
+
+/* ---------- robot panel ---------- */
+.rp {
+  /* one pixel of the robot artwork: HUD scale, but the panel (left + mid + right) must fit into the bottom-centre
+     container (--hud-bc-w, set by the HUD layout): below --rp-min image px it shrinks, above it the mid part grows */
+  --rp-u: min(calc(var(--rp-base) * var(--hud-scale, 1) * 1px), calc(var(--hud-bc-w, 100vw) / var(--rp-min)));
+  position: relative; flex: 1 1 auto; width: 100%; container-type: inline-size;
+  height: calc(var(--rp-h) * var(--rp-u));
+  font-size: max(var(--rp-min-font), calc(19 * var(--rp-u)));
+  line-height: 1.15;
+}
+.rp-bg { position: absolute; top: 0; height: 100%; filter: var(--hud-frame-filter, none); pointer-events: none; user-select: none; }
+.rp-bg-l { left: 0; width: calc(var(--rp-left) * var(--rp-u)); }
+.rp-bg-r { right: 0; width: calc(var(--rp-right) * var(--rp-u)); }
+.rp-bg-m { left: calc(var(--rp-left) * var(--rp-u)); right: calc(var(--rp-right) * var(--rp-u));
+  background-repeat: repeat-x; background-position: left top; background-size: calc(var(--rp-mid) * var(--rp-u)) 100%; }
+.rp-icon, .rp-name, .rp-eject, .rp-mask, .rp-title, .rp-lhead, .rp-lbody {
+  position: absolute; box-sizing: border-box;
+  left: calc(var(--x) * var(--rp-u)); top: calc(var(--y) * var(--rp-u));
+  width: calc(var(--w) * var(--rp-u)); height: calc(var(--h) * var(--rp-u));
+}
+/* Labels stretch with the panel: left edge fixed, right edge an inset from the panel's right edge */
+.rp-lhead, .rp-lbody { width: auto; right: calc(var(--r) * var(--rp-u)); }
+.rp .b-short { display: none; }
+@container (max-width: 1000px) { .rp .b-full { display: none; } .rp .b-short { display: inline; } } /* narrow panel: abbreviated bonuses */
+.rp-mask {
+  background-color: var(--hud-neon, #4fd8ff);
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  filter: brightness(1.2); pointer-events: none;
+}
+.rp-title { display: flex; align-items: center; gap: .35em; line-height: 1.1; overflow: hidden; white-space: nowrap; }
+.rp-title b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rp-title span { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: max(11px, .85em); opacity: .75; }
+.rp-icon { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.rp-icon .ai-avatar { width: 100%; height: 100%; }
+.rp-glyph { font-size: calc(46 * var(--rp-u)); line-height: 1; }
+.rp-name { display: flex; align-items: center; gap: .4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rp-eject {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; cursor: pointer; font: inherit; font-size: max(11px, calc(17 * var(--rp-u))); font-weight: 700; line-height: 1;
+  letter-spacing: .08em; color: #fff; text-transform: uppercase; white-space: nowrap;
+  background: #b3201c;
+  border: 2px solid #e8c200; /* fallback when the stripe image is missing */
+  border-image: url('../../data/image/ui/hud2/hazard-stripe-bar.png') 9 / 3px stretch; /* thin stripe, NOT under the hue filter */
+}
+.rp-eject:hover:not(:disabled) { background: #d8302a; }
+.rp-eject:disabled { cursor: default; background: #3a2a2a; color: #8a7a7a; filter: saturate(.4); }
+.rp-lhead { display: flex; align-items: center; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: var(--hud-neon, #4fd8ff); white-space: nowrap; overflow: hidden; }
+.rp-lhead { gap: 1em; }
+.rp-hname { flex: 0 0 auto; }
+.rp-state { flex: 1 1 0; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; text-transform: none; letter-spacing: 0; font-weight: 400; color: #dff4ff; opacity: .85; }
+/* Two lines must fit even the lowest box (legs, 42 image px): tight line height, box may overflow by a pixel or two */
+.rp-lbody { display: flex; flex-direction: column; justify-content: center; overflow: visible; line-height: 1.05; }
+.rp-line { display: flex; align-items: center; gap: .35em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.1; }
+
+/* ---------- centre panel ---------- */
+.cp {
+  --cu: calc(var(--hud-scale, 1) * 1px);
+  position: relative; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; max-width: 100%;
+  height: calc(var(--cp-h) * var(--cu));
+  min-width: calc((var(--cp-left) + var(--cp-right)) * var(--cu));
+  padding: calc(var(--cp-mt) * var(--cu)) calc(var(--cp-mr) * var(--cu)) calc(var(--cp-mb) * var(--cu)) calc(var(--cp-ml) * var(--cu));
+  font-size: max(var(--cp-min-font), calc(13 * var(--cu)));
+  line-height: 1.25;
+}
+.cp-l, .cp-m, .cp-r { position: absolute; top: 0; bottom: 0; filter: var(--hud-frame-filter, none); pointer-events: none; background-repeat: no-repeat; }
+.cp-l { left: 0; width: calc(var(--cp-left) * var(--cu)); background-image: url('../../data/image/ui/hud2/center_panel_left.png'); background-size: 100% 100%; }
+.cp-r { right: 0; width: calc(var(--cp-right) * var(--cu)); background-image: url('../../data/image/ui/hud2/center_panel_right.png'); background-size: 100% 100%; }
+.cp-m { left: calc(var(--cp-left) * var(--cu)); right: calc(var(--cp-right) * var(--cu)); background-image: url('../../data/image/ui/hud2/center_panel_mid.png'); background-repeat: repeat-x; background-size: auto 100%; }
+.cp-inner { position: relative; flex: 1 1 auto; min-height: 0; min-width: calc(var(--cp-min-inner) * var(--cu)); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.cp-title { height: calc(var(--cp-head) * var(--cu)); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.cp-group {
+  display: grid; grid-auto-flow: column;
+  grid-template-rows: repeat(var(--cp-rows), calc(var(--cp-ch) * var(--cu)));
+  grid-auto-columns: calc(var(--cp-cw) * var(--cu));
+  gap: calc(var(--cp-gap) * var(--cu));
+}
+.cp-unit {
+  display: flex; align-items: center; justify-content: center; gap: .4em; padding: 0; cursor: pointer; font: inherit; color: inherit;
+  background: rgba(10, 24, 40, .65); border: 1px solid rgba(120, 190, 255, .35);
+}
+.cp-unit:hover { background: rgba(40, 80, 120, .75); }
+.cp-unit .ico { font-size: calc(22 * var(--cu)); line-height: 1; }
+.cp-unit .pct { font-weight: 700; }
+
+.cp-stats {
+  display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--cp-stat-rows), auto);
+  grid-auto-columns: minmax(max-content, 1fr); column-gap: calc(18 * var(--cu)); align-content: start;
+}
+.cp-row { display: flex; align-items: center; gap: .6em; white-space: nowrap; }
+.cp-k { opacity: .65; }
+.cp-v { display: inline-flex; align-items: center; gap: .35em; }

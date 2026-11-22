@@ -1,0 +1,7 @@
+/* [B3] Radar frame of the minimap (loaded by Minimap.js); --radar-color is set by Minimap.js from the player's race */
+#minimap {
+  box-shadow: inset 0 0 14px color-mix(in srgb, var(--radar-color, #7dffb0) calc(var(--radar-glow-alpha, 0.14) * 100%), transparent), 0 0 10px rgba(0, 0, 0, 0.6);
+}
+#minimap canvas {
+  display: block;
+}

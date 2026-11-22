@@ -1,0 +1,820 @@
+{
+  "version": 1,
+
+  "resources": ["ore", "energy"],
+  "damageTypes": ["physical", "energy"],
+
+  "rules": {
+    "armorScale": 100,
+    "mechAssembly": { "cost": { "ore": 40, "energy": 0 }, "buildTime": 8 },
+    "mechSupply": 0,
+    "overload": { "minSpeedFactor": 0.4 },
+    "crew": { "boardRange": 16, "boardTime": 1.5, "ejectDistance": 16, "ejectOnDestroy": true, "defaultBehaviour": "defensive" },
+    "repair": {
+      "fieldRate": 0.01, "buildingFactor": 10,
+      "bay": { "entryRange": 12, "partSwapTime": 8, "costPerHp": { "ore": 0.1 },
+               "autoRepairBaseRate": 0.03, "autoRepairFactor": 10 },
+      "extraRepairerFactor": 0.6
+    },
+    "economy": {
+      "startResources": { "ore": 1400 },
+      "startEnergyShare": 0.25,
+      "noHqIncomeFactor": 0.1,
+      "startUnits": { "structures": ["matterConverter"], "vehicles": ["hoverTruck", "drillTruck"] },
+      "populationMax": 100
+    },
+    "construction": {
+      "cancelRefund": 0.75,
+      "extraBuilderFactor": 0.6,
+      "unattendedRate": 1,
+      "builderRange": 10,
+      "startHpFraction": 0.1
+    },
+    "production": { "cancelRefund": 1 },
+    "diplomacy": { "tributeLoss": 0.25 },
+    "research": {
+      "tiers": {
+        "1": { "requiresStructures": ["researchFacility"] },
+        "2": { "requiresStructures": ["researchFacility"], "requiresCompleted": { "tier": 1, "count": 3 } },
+        "3": { "requiresStructures": ["researchFacility", "advancedResearchFacility"], "requiresCompleted": { "tier": 2, "count": 3 } }
+      }
+    },
+    "salvageResearch": {
+      "deliverTo": ["researchFacility"],
+      "stockOnlyTo": ["robotPartFactory"],
+      "deliveryRange": 40,
+      "researchTime": 30,
+      "referenceCost": 200,
+      "minResearchTime": 10,
+      "costFactor": 0.5,
+      "unlocks": "kind",
+      "consumesPart": false
+    },
+    "salvageDrop": { "legs": 0.3, "torso": 0.3, "remainingHp": { "min": 0.03, "max": 0.12 } },
+    "combat": {
+      "defaultStance": "ranged",
+      "defaultBehaviour": "aggressive",
+      "approachRangeFactor": 0.9,
+      "meleeReachFactor": 1.25,
+      "autoAcquire": true,
+      "splashDamageFactor": 0.5,
+      "splashEdgeFactor": 0.4,
+      "groundBurstHeight": 3,
+      "groundBurstRadiusFactor": 1.25,
+      "missScatter": 8,
+      "pelletRangeFactor": 1.2,
+      "pelletGroundStep": 2,
+      "sweep": { "arc": 120, "wideArc": 180, "damageFactor": 0.6, "radiusFactor": 1 },
+      "attackClips": {
+        "sweep": [
+          "RobotPartsBasic_RobotSkeleton_anim59", "RobotPartsBasic_RobotSkeleton_anim60",
+          "RobotPartsBasic_RobotSkeleton_anim61", "RobotPartsBasic_RobotSkeleton_anim62",
+          "RobotPartsAxe_RobotSkeleton_anim49", "RobotPartsAxe_RobotSkeleton_anim50",
+          "RobotPartsAxe_RobotSkeleton_anim51", "RobotPartsAxe_RobotSkeleton_anim52",
+          "RobotPartsKatanaSword_RobotSkeleton_anim99", "RobotPartsKatanaSword_RobotSkeleton_anim100",
+          "RobotPartsKatanaSword_RobotSkeleton_anim101", "RobotPartsKatanaSword_RobotSkeleton_anim102",
+          "RobotPartsLaserSword_RobotSkeleton_anim104", "RobotPartsLaserSword_RobotSkeleton_anim105",
+          "RobotPartsBladeArm_RobotSkeleton_anim63", "RobotPartsBladeArm_RobotSkeleton_anim65",
+          "RobotPartsRotaryBlade_RobotSkeleton_anim114", "RobotPartsRotaryBlade_RobotSkeleton_anim115"
+        ],
+        "sweepWide": [
+          "RobotPartsBladeArm_RobotSkeleton_anim64", "RobotPartsBladeArm_RobotSkeleton_anim66",
+          "RobotPartsRotaryBlade_RobotSkeleton_anim110", "RobotPartsRotaryBlade_RobotSkeleton_anim111"
+        ],
+        "slam": [
+          "RobotPartsHammerHand_RobotSkeleton_anim81", "RobotPartsHammerHand_RobotSkeleton_anim82"
+        ]
+      },
+      "minHitChance": 0.05,
+      "hitLocationWeights": { "torso": 0.4, "legs": 0.3, "leftArm": 0.15, "rightArm": 0.15 },
+      "brokenArmDetachChance": 0.1,
+      "damageSyncThreshold": 0.4
+    },
+    "friendlyFire": { "reducedFactor": 0.5 },
+    "wrecks": { "damageFactor": 1 },
+    "effects": {
+      "splashEffectFactor": 1,
+      "stunMaxDuration": 4,
+      "knockbackSpeedPerForce": 4,
+      "knockbackReferenceMass": 100,
+      "knockbackMaxSpeed": 40,
+      "knockbackFriction": 45,
+      "knockbackCrewMass": 25,
+      "burnTickInterval": 0.5
+    }
+  },
+
+  "experience": {
+    "xpPerDamage": 1,
+    "xpPerKill": 100,
+    "ranks": [
+      { "id": "recruit", "name": "Recruit", "xp": 0, "bonuses": {} },
+      { "id": "regular", "name": "Regular", "xp": 150,
+        "bonuses": { "damage": 0.03, "attackSpeed": 0.03, "moveSpeed": 0.02, "acceleration": 0.03, "turnSpeed": 0.05, "accuracy": 0.02, "evasion": 0.02, "abilityCooldown": 0.03,
+                     "boardSpeed": 0.10, "repairSpeed": 0.05, "morale": 0.10 } },
+      { "id": "veteran", "name": "Veteran", "xp": 400,
+        "bonuses": { "damage": 0.06, "attackSpeed": 0.06, "moveSpeed": 0.04, "acceleration": 0.06, "turnSpeed": 0.10, "accuracy": 0.04, "evasion": 0.04, "abilityCooldown": 0.06,
+                     "boardSpeed": 0.20, "repairSpeed": 0.10, "morale": 0.20 } },
+      { "id": "elite", "name": "Elite", "xp": 900,
+        "bonuses": { "damage": 0.10, "attackSpeed": 0.10, "moveSpeed": 0.06, "acceleration": 0.09, "turnSpeed": 0.15, "accuracy": 0.06, "evasion": 0.06, "abilityCooldown": 0.10,
+                     "boardSpeed": 0.35, "repairSpeed": 0.15, "morale": 0.35 } },
+      { "id": "ace", "name": "Ace", "xp": 2000,
+        "bonuses": { "damage": 0.15, "attackSpeed": 0.15, "moveSpeed": 0.08, "acceleration": 0.12, "turnSpeed": 0.20, "accuracy": 0.08, "evasion": 0.08, "abilityCooldown": 0.15,
+                     "boardSpeed": 0.50, "repairSpeed": 0.25, "morale": 0.50 } }
+    ]
+  },
+
+  "races": {
+    "X": {
+      "name": "Earth",
+      "description": "Všestranná frakce: rakety, štíty, opravy a detekce. Vyrábí rychleji.",
+      "descriptionKey": "race.X.description",
+      "uiColor": { "primary": "#3a7bd5", "accent": "#8cc4ff", "neon": "#3ea6ff" },
+      "modifiers": { "buildTime": 0.9, "researchTime": 0.9 },
+      "exclusive": {
+        "partSets": ["DrunkMissile", "PowerGun", "Sonar", "PowerShield", "ForceField", "SelfRepair",
+                     "KatanaSword", "BladeArm", "PowerFist", "HomingMissile", "LongMissile", "EnergyBlaster"],
+        "research": ["guidanceChips", "shieldCapacitors", "missileArtillery"],
+        "vehicles": ["missileCar", "nemesis"],
+        "structures": ["cryoFarm"]
+      },
+      "construction": { "continuesWithoutBuilder": false },
+      "population": { "fullFromStart": false }
+    },
+    "Y": {
+      "name": "Mars",
+      "description": "Těžký pancíř, boj zblízka a těžké dělostřelectvo. Odolná, ale pomalejší.",
+      "descriptionKey": "race.Y.description",
+      "uiColor": { "primary": "#c0392b", "accent": "#ff9a6b", "neon": "#ff3b30", "frameFilter": "hue-rotate(150deg) saturate(1.4)" },
+      "modifiers": { "hp": 1.1, "armor": 1.05, "moveSpeed": 0.95 },
+      "exclusive": {
+        "partSets": ["Armor", "HighStrength", "HTHupgrade", "Steady", "Howitzer", "Tracer",
+                     "Axe", "HammerHand", "MultiClaw", "RotaryBlade", "CarpetBomb"],
+        "research": ["hardenedSteel", "heavyShells", "siegeArtillery"],
+        "vehicles": ["gunTank", "mobileArtillery", "nemesis"],
+        "structures": ["cryoFarm"]
+      },
+      "construction": { "continuesWithoutBuilder": true },
+      "population": { "fullFromStart": false }
+    },
+    "Z": {
+      "name": "Venus",
+      "description": "Rychlost, energetické zbraně, maskování a omráčení. Rychlá, ale křehčí.",
+      "descriptionKey": "race.Z.description",
+      "uiColor": { "primary": "#8a4fd0", "accent": "#5fd39a", "neon": "#b84dff", "frameFilter": "hue-rotate(65deg) saturate(1.5)", "panelTop": "rgba(38, 84, 56, 0.93)", "panelBottom": "rgba(20, 52, 34, 0.93)" },
+      "modifiers": { "hp": 0.92, "moveSpeed": 1.1, "acceleration": 1.1 },
+      "exclusive": {
+        "partSets": ["HighSpeed", "JumpJet", "Laser", "PowerPulse", "BlastPulse", "Camo", "EMP", "JetPack",
+                     "LaserSword", "ElectroGrip", "PlasmaCannon", "ProtoBlast", "SniperLaser", "EnergyShield"],
+        "research": ["phaseFocusing", "tacticalSystems", "plasmaWeapons", "pulseTechnology"],
+        "vehicles": ["hoverBomber", "missileCar", "alienTank"],
+        "structures": ["crewTrainingFacility"]
+      },
+      "construction": { "continuesWithoutBuilder": false },
+      "population": { "fullFromStart": true }
+    }
+  },
+
+  "defaults": {
+    "part": {
+      "buildable": true,
+      "cost": { "ore": 0, "energy": 0 },
+      "buildTime": 5,
+      "hp": 100,
+      "armor": { "physical": 0, "energy": 0 },
+      "mass": 20,
+      "sightRange": 0,
+      "requires": [],
+      "weapons": [],
+      "abilities": []
+    },
+    "mobility": {
+      "movementType": "ground",
+      "moveSpeed": 18,
+      "turnSpeed": 240,
+      "acceleration": 30,
+      "deceleration": 45
+    },
+    "weapon": {
+      "class": "ranged",
+      "damage": { "physical": 0, "energy": 0 },
+      "burst": 1,
+      "range": 10,
+      "minRange": 0,
+      "attackTime": 1.5,
+      "hitAt": 0.5,
+      "cooldown": 1,
+      "projectileSpeed": 0,
+      "projectileSize": 0,
+      "projectileShape": "",
+      "splashRadius": 0,
+      "spread": 0,
+      "accuracy": 1,
+      "targets": ["ground"],
+      "effects": [],
+      "stopsToFire": false,
+      "fireArc": 60
+    }
+  },
+
+  "parts": {
+    "Basic": {
+      "legs":  { "cost": { "ore": 60, "energy": 0 }, "buildTime": 6, "hp": 150, "armor": { "physical": 15, "energy": 10 }, "mass": 50, "loadCapacity": 90,
+                 "mobility": { "speedModifier": 1.0, "turnSpeed": 240, "acceleration": 30, "deceleration": 45 } },
+      "torso": { "cost": { "ore": 80, "energy": 0 }, "buildTime": 8, "hp": 200, "armor": { "physical": 20, "energy": 10 }, "mass": 40, "sightRange": 90 },
+      "arm":   { "cost": { "ore": 40, "energy": 0 }, "buildTime": 5, "hp": 80, "armor": { "physical": 10, "energy": 5 }, "mass": 15,
+                 "weapons": [{ "id": "fist", "stopsToFire": true, "class": "melee", "damage": { "physical": 12, "energy": 0 }, "range": 10, "attackTime": 1.5, "cooldown": 0.5 }] }
+    },
+
+    "Armor": {
+      "legs":  { "cost": { "ore": 130, "energy": 10 }, "buildTime": 11, "hp": 240, "armor": { "physical": 50, "energy": 20 }, "mass": 80, "loadCapacity": 130,
+                 "mobility": { "speedModifier": 0.72, "turnSpeed": 160, "acceleration": 18, "deceleration": 30 } },
+      "torso": { "cost": { "ore": 160, "energy": 20 }, "buildTime": 14, "hp": 320, "armor": { "physical": 60, "energy": 25 }, "mass": 60, "sightRange": 85 },
+      "arm":   { "cost": { "ore": 90, "energy": 0 }, "buildTime": 9, "hp": 130, "armor": { "physical": 45, "energy": 15 }, "mass": 25,
+                 "weapons": [{ "id": "armorFist", "stopsToFire": true, "class": "melee", "damage": { "physical": 16, "energy": 0 }, "range": 10, "attackTime": 1.5, "cooldown": 0.6 }] }
+    },
+
+    "Frame": {
+      "legs":  { "buildable": false, "cost": { "ore": 25, "energy": 0 }, "buildTime": 3, "hp": 80, "mass": 30, "loadCapacity": 60,
+                 "mobility": { "speedModifier": 1.11, "turnSpeed": 260, "acceleration": 34, "deceleration": 50 } },
+      "torso": { "buildable": false, "cost": { "ore": 30, "energy": 0 }, "buildTime": 3, "hp": 110, "mass": 25, "sightRange": 80 },
+      "arm":   { "buildable": false, "cost": { "ore": 15, "energy": 0 }, "buildTime": 2, "hp": 50, "mass": 10,
+                 "weapons": [{ "id": "frameFist", "stopsToFire": true, "class": "melee", "damage": { "physical": 8, "energy": 0 }, "range": 10, "attackTime": 1.5, "cooldown": 0.6 }] }
+    },
+
+    "Alien": {
+      "legs":  { "buildable": false, "hp": 200, "armor": { "physical": 25, "energy": 25 }, "mass": 55, "loadCapacity": 110,
+                 "mobility": { "speedModifier": 1.11, "turnSpeed": 260, "acceleration": 32, "deceleration": 48 } },
+      "torso": { "buildable": false, "hp": 260, "armor": { "physical": 25, "energy": 25 }, "mass": 45, "sightRange": 110 },
+      "arm":   { "buildable": false, "hp": 100, "armor": { "physical": 20, "energy": 20 }, "mass": 18,
+                 "weapons": [{ "id": "alienClaw", "stopsToFire": true, "class": "melee", "damage": { "physical": 10, "energy": 20 }, "range": 12, "attackTime": 1.5, "cooldown": 0.6 }] }
+    },
+
+    "BlastPulse": {
+      "legs": { "cost": { "ore": 110, "energy": 70 }, "buildTime": 11, "hp": 160, "armor": { "physical": 15, "energy": 20 }, "mass": 60, "loadCapacity": 95,
+                "mobility": { "speedModifier": 0.89, "turnSpeed": 210, "acceleration": 26, "deceleration": 40 },
+                "weapons": [{ "id": "blastPulse", "stopsToFire": true, "class": "area", "damage": { "physical": 0, "energy": 25 }, "range": 18, "splashRadius": 20, "attackTime": 1.3, "cooldown": 6 }] }
+    },
+    "DrunkMissile": {
+      "legs":  { "cost": { "ore": 120, "energy": 40 }, "buildTime": 11, "hp": 160, "armor": { "physical": 20, "energy": 10 }, "mass": 60, "loadCapacity": 95,
+                 "mobility": { "speedModifier": 0.89, "turnSpeed": 210, "acceleration": 26, "deceleration": 40 },
+                 "weapons": [{ "id": "drunkMissileLegs", "stopsToFire": true, "damage": { "physical": 12, "energy": 0 }, "burst": 4, "range": 80, "minRange": 15, "attackTime": 1.0, "cooldown": 5, "projectileSpeed": 72, "projectileSize": 0.9, "projectileShape": "missile", "splashRadius": 6, "accuracy": 0.7 }] },
+      "torso": { "cost": { "ore": 150, "energy": 50 }, "buildTime": 13, "hp": 210, "armor": { "physical": 20, "energy": 10 }, "mass": 50, "sightRange": 90,
+                 "weapons": [{ "id": "drunkMissileTorso", "damage": { "physical": 14, "energy": 0 }, "burst": 6, "range": 90, "minRange": 20, "attackTime": 1.3, "cooldown": 7, "projectileSpeed": 72, "projectileSize": 1.0, "projectileShape": "missile", "splashRadius": 6, "accuracy": 0.7 }] }
+    },
+    "HighSpeed": {
+      "legs": { "cost": { "ore": 100, "energy": 20 }, "buildTime": 8, "hp": 120, "armor": { "physical": 10, "energy": 10 }, "mass": 40, "loadCapacity": 70,
+                "mobility": { "speedModifier": 1.5, "turnSpeed": 300, "acceleration": 45, "deceleration": 60 } }
+    },
+    "HighStrength": {
+      "legs": { "cost": { "ore": 120, "energy": 20 }, "buildTime": 10, "hp": 200, "armor": { "physical": 25, "energy": 15 }, "mass": 75, "loadCapacity": 170,
+                "mobility": { "speedModifier": 0.83, "turnSpeed": 180, "acceleration": 20, "deceleration": 35 } }
+    },
+    "HTHupgrade": {
+      "legs": { "cost": { "ore": 110, "energy": 30 }, "buildTime": 9, "hp": 170, "armor": { "physical": 20, "energy": 10 }, "mass": 55, "loadCapacity": 100,
+                "mobility": { "speedModifier": 1.06, "turnSpeed": 250, "acceleration": 32, "deceleration": 48 },
+                "abilities": [{ "type": "damageBonus", "weaponClass": "melee", "multiplier": 1.25 }] }
+    },
+    "JumpJet": {
+      "legs": { "cost": { "ore": 120, "energy": 60 }, "buildTime": 11, "hp": 140, "armor": { "physical": 15, "energy": 10 }, "mass": 50, "loadCapacity": 85,
+                "mobility": { "speedModifier": 1.35, "turnSpeed": 250, "acceleration": 38, "deceleration": 52 },
+                "anim": { "move": "run", "moveRefSpeed": 30 },
+                "abilities": [{ "type": "hopRun", "range": 42, "height": 5 }] }
+    },
+    "Laser": {
+      "legs": { "cost": { "ore": 110, "energy": 60 }, "buildTime": 10, "hp": 150, "armor": { "physical": 15, "energy": 20 }, "mass": 55, "loadCapacity": 90,
+                "mobility": { "speedModifier": 0.94, "turnSpeed": 230, "acceleration": 28, "deceleration": 42 },
+                "weapons": [{ "id": "legLaser", "stopsToFire": true, "damage": { "physical": 0, "energy": 18 }, "range": 55, "attackTime": 1.0, "cooldown": 1.5, "accuracy": 0.95,
+                              "pierce": { "count": 2, "damageFactor": 0.6, "length": 50 } }] }
+    },
+    "PowerGun": {
+      "legs": { "cost": { "ore": 120, "energy": 40 }, "buildTime": 10, "hp": 160, "armor": { "physical": 20, "energy": 15 }, "mass": 60, "loadCapacity": 95,
+                "mobility": { "speedModifier": 0.89, "turnSpeed": 210, "acceleration": 26, "deceleration": 40 },
+                "weapons": [{ "id": "powerGun", "stopsToFire": true, "damage": { "physical": 22, "energy": 8 }, "range": 60, "attackTime": 1.0, "cooldown": 2, "projectileSpeed": 100, "projectileSize": 0.8, "projectileShape": "shell", "accuracy": 0.9,
+                              "pierce": { "count": 1, "damageFactor": 0.5, "length": 40 } }] }
+    },
+    "PowerPulse": {
+      "legs": { "cost": { "ore": 120, "energy": 90 }, "buildTime": 12, "hp": 160, "armor": { "physical": 15, "energy": 25 }, "mass": 60, "loadCapacity": 95,
+                "mobility": { "speedModifier": 0.89, "turnSpeed": 210, "acceleration": 26, "deceleration": 40 },
+                "requires": ["researchFacility"], "requiresResearch": ["pulseTechnology"],
+                "weapons": [{ "id": "powerPulse", "stopsToFire": true, "class": "area", "damage": { "physical": 0, "energy": 35 }, "range": 20, "splashRadius": 25, "attackTime": 1.3, "cooldown": 8,
+                              "effects": [{ "type": "stun", "duration": 1 }] }] }
+    },
+    "PowerShield": {
+      "legs": { "cost": { "ore": 120, "energy": 80 }, "buildTime": 12, "hp": 170, "armor": { "physical": 20, "energy": 30 }, "mass": 60, "loadCapacity": 95,
+                "mobility": { "speedModifier": 0.89, "turnSpeed": 210, "acceleration": 26, "deceleration": 40 },
+                "abilities": [{ "type": "shield", "absorbs": ["physical", "energy"], "capacity": 150, "regenPerSecond": 4 }] }
+    },
+    "Recon": {
+      "legs":  { "cost": { "ore": 80, "energy": 20 }, "buildTime": 7, "hp": 120, "armor": { "physical": 10, "energy": 10 }, "mass": 40, "loadCapacity": 75, "sightRange": 140,
+                 "mobility": { "speedModifier": 1.33, "turnSpeed": 280, "acceleration": 40, "deceleration": 55 } },
+      "torso": { "cost": { "ore": 100, "energy": 40 }, "buildTime": 9, "hp": 170, "armor": { "physical": 15, "energy": 10 }, "mass": 35, "sightRange": 160,
+                 "abilities": [{ "type": "detection", "radius": 90 }] }
+    },
+    "Sonar": {
+      "legs": { "cost": { "ore": 100, "energy": 50 }, "buildTime": 9, "hp": 140, "armor": { "physical": 15, "energy": 10 }, "mass": 50, "loadCapacity": 85, "sightRange": 110,
+                "mobility": { "speedModifier": 0.94, "turnSpeed": 230, "acceleration": 28, "deceleration": 42 },
+                "abilities": [{ "type": "detection", "radius": 120 }] }
+    },
+    "Steady": {
+      "legs": { "cost": { "ore": 120, "energy": 20 }, "buildTime": 10, "hp": 180, "armor": { "physical": 25, "energy": 15 }, "mass": 65, "loadCapacity": 110,
+                "mobility": { "speedModifier": 0.83, "turnSpeed": 180, "acceleration": 22, "deceleration": 40 },
+                "abilities": [{ "type": "stability", "knockbackResist": 1, "accuracyBonus": 0.15 }] }
+    },
+
+    "Camo": {
+      "torso": { "cost": { "ore": 140, "energy": 80 }, "buildTime": 12, "hp": 190, "armor": { "physical": 15, "energy": 15 }, "mass": 40, "sightRange": 95,
+                 "requires": ["researchFacility"], "requiresResearch": ["tacticalSystems"],
+                 "abilities": [{ "type": "cloak", "duration": 15, "cooldown": 30, "breaksOnAttack": true }] }
+    },
+    "EMP": {
+      "torso": { "cost": { "ore": 160, "energy": 120 }, "buildTime": 14, "hp": 200, "armor": { "physical": 15, "energy": 30 }, "mass": 45, "sightRange": 90,
+                 "requires": ["researchFacility"], "requiresResearch": ["pulseTechnology"],
+                 "weapons": [{ "id": "emp", "stopsToFire": true, "class": "area", "damage": { "physical": 0, "energy": 20 }, "range": 25, "splashRadius": 30, "attackTime": 1.5, "cooldown": 15,
+                               "effects": [{ "type": "stun", "duration": 3 }] }] }
+    },
+    "Flak": {
+      "torso": { "cost": { "ore": 130, "energy": 30 }, "buildTime": 12, "hp": 210, "armor": { "physical": 20, "energy": 15 }, "mass": 50, "sightRange": 100,
+                 "weapons": [{ "id": "flak", "damage": { "physical": 8, "energy": 0 }, "burst": 4, "range": 80, "attackTime": 1.3, "cooldown": 1.5, "projectileSpeed": 120, "projectileSize": 0.5, "projectileShape": "shell", "splashRadius": 6, "accuracy": 0.8,
+                               "targets": ["air"] }] }
+    },
+    "ForceField": {
+      "torso": { "cost": { "ore": 150, "energy": 120 }, "buildTime": 14, "hp": 200, "armor": { "physical": 15, "energy": 20 }, "mass": 45, "sightRange": 90,
+                 "requires": ["researchFacility"], "requiresResearch": ["shieldCapacitors"],
+                 "abilities": [{ "type": "areaShield", "radius": 30, "absorbs": ["physical", "energy"], "capacity": 250, "regenPerSecond": 8 }] }
+    },
+    "Howitzer": {
+      "torso": { "cost": { "ore": 200, "energy": 60 }, "buildTime": 18, "hp": 220, "armor": { "physical": 25, "energy": 10 }, "mass": 65, "sightRange": 90,
+                 "requiresResearch": ["siegeArtillery"],
+                 "weapons": [{ "id": "howitzer", "stopsToFire": true, "class": "artillery", "damage": { "physical": 80, "energy": 0 }, "range": 200, "minRange": 50, "attackTime": 3.0, "hitAt": 0.3, "cooldown": 8,
+                               "projectileSpeed": 40, "projectileSize": 1.1, "projectileShape": "shell", "splashRadius": 18, "accuracy": 0.75 }] }
+    },
+    "JetPack": {
+      "torso": { "cost": { "ore": 140, "energy": 60 }, "buildTime": 12, "hp": 180, "armor": { "physical": 15, "energy": 10 }, "mass": 40, "sightRange": 95,
+                 "abilities": [{ "type": "flight", "range": 90, "cooldown": 20, "speed": 30, "height": 30,
+                                 "clips": { "takeOff": "RobotPartsJetPack_TorsoJetPackTakeOff", "fly": "RobotPartsJetPack_TorsoJetPackFly", "land": "RobotPartsJetPack_TorsoJetPackLand" } }] }
+    },
+    "SelfRepair": {
+      "torso": { "cost": { "ore": 150, "energy": 80 }, "buildTime": 13, "hp": 210, "armor": { "physical": 20, "energy": 15 }, "mass": 45, "sightRange": 90,
+                 "abilities": [{ "type": "regen", "hpPerSecond": 4, "outOfCombatDelay": 5 }] }
+    },
+    "Tracer": {
+      "torso": { "cost": { "ore": 130, "energy": 40 }, "buildTime": 11, "hp": 200, "armor": { "physical": 20, "energy": 15 }, "mass": 45, "sightRange": 95,
+                 "weapons": [{ "id": "tracer", "damage": { "physical": 4, "energy": 4 }, "burst": 8, "range": 65, "attackTime": 1.5, "cooldown": 1, "spread": 10,
+                               "effects": [{ "type": "burn", "damagePerSecond": { "physical": 0, "energy": 4 }, "duration": 3 }] }] }
+    },
+
+    "Axe": {
+      "arm": { "cost": { "ore": 70, "energy": 0 }, "buildTime": 7, "hp": 90, "armor": { "physical": 15, "energy": 5 }, "mass": 20,
+               "weapons": [{ "id": "axe", "stopsToFire": true, "class": "melee", "damage": { "physical": 30, "energy": 0 }, "range": 12, "attackTime": 2.3, "hitAt": 0.6, "cooldown": 0.8 }] }
+    },
+    "BladeArm": {
+      "arm": { "cost": { "ore": 65, "energy": 0 }, "buildTime": 7, "hp": 85, "armor": { "physical": 15, "energy": 5 }, "mass": 17,
+               "weapons": [{ "id": "bladeFist", "stopsToFire": true, "class": "melee", "damage": { "physical": 22, "energy": 0 }, "range": 11, "attackTime": 1.6, "cooldown": 0.4 }] }
+    },
+    "CarpetBomb": {
+      "arm": { "cost": { "ore": 110, "energy": 30 }, "buildTime": 11, "hp": 70, "armor": { "physical": 10, "energy": 10 }, "mass": 22,
+               "requiresResearch": ["siegeArtillery"],
+               "weapons": [{ "id": "carpetBomb", "class": "artillery", "damage": { "physical": 18, "energy": 0 }, "burst": 6, "range": 70, "minRange": 20, "attackTime": 1.3, "cooldown": 4,
+                             "projectileSpeed": 60, "projectileSize": 1.0, "projectileShape": "shell", "splashRadius": 15, "accuracy": 0.7 }] }
+    },
+    "ElectroGrip": {
+      "arm": { "cost": { "ore": 80, "energy": 40 }, "buildTime": 9, "hp": 90, "armor": { "physical": 10, "energy": 30 }, "mass": 20,
+               "weapons": [{ "id": "electroGrip", "stopsToFire": true, "class": "melee", "damage": { "physical": 10, "energy": 20 }, "range": 12, "attackTime": 1.8, "cooldown": 0.6,
+                             "effects": [{ "type": "stun", "duration": 0.5 }] }] }
+    },
+    "EnergyBlaster": {
+      "arm": { "cost": { "ore": 60, "energy": 50 }, "buildTime": 8, "hp": 70, "armor": { "physical": 5, "energy": 25 }, "mass": 16,
+               "weapons": [{ "id": "energyBlaster", "damage": { "physical": 0, "energy": 14 }, "range": 60, "attackTime": 0.8, "cooldown": 0.8, "projectileSpeed": 120, "projectileSize": 1.1, "projectileShape": "orb", "accuracy": 0.9 }] }
+    },
+    "EnergyShield": {
+      "arm": { "cost": { "ore": 70, "energy": 70 }, "buildTime": 10, "hp": 110, "armor": { "physical": 15, "energy": 70 }, "mass": 22,
+               "abilities": [{ "type": "shield", "absorbs": ["energy"], "capacity": 120, "regenPerSecond": 6 }] }
+    },
+    "GattlingGun": {
+      "arm": { "cost": { "ore": 100, "energy": 20 }, "buildTime": 10, "hp": 80, "armor": { "physical": 15, "energy": 10 }, "mass": 22,
+               "weapons": [{ "id": "gattling", "damage": { "physical": 2, "energy": 0 }, "burst": 16, "range": 55, "attackTime": 1.5, "cooldown": 0.3, "spread": 12,
+                             "targets": ["ground", "air"] }] }
+    },
+    "HammerHand": {
+      "arm": { "cost": { "ore": 100, "energy": 0 }, "buildTime": 10, "hp": 120, "armor": { "physical": 30, "energy": 10 }, "mass": 30,
+               "weapons": [{ "id": "hammer", "stopsToFire": true, "class": "melee", "damage": { "physical": 45, "energy": 0 }, "range": 12, "attackTime": 2.3, "hitAt": 0.65, "cooldown": 1.2, "splashRadius": 6,
+                             "effects": [{ "type": "knockback", "force": 8 }] }] }
+    },
+    "HomingMissile": {
+      "arm": { "cost": { "ore": 110, "energy": 40 }, "buildTime": 11, "hp": 75, "armor": { "physical": 10, "energy": 10 }, "mass": 22,
+               "weapons": [{ "id": "homingMissile", "damage": { "physical": 30, "energy": 0 }, "range": 90, "minRange": 15, "attackTime": 1.5, "cooldown": 3, "projectileSpeed": 90, "projectileSize": 1.2, "projectileShape": "missile",
+                             "splashRadius": 8, "accuracy": 1, "targets": ["ground", "air"] }] }
+    },
+    "KatanaSword": {
+      "arm": { "cost": { "ore": 85, "energy": 10 }, "buildTime": 8, "hp": 85, "armor": { "physical": 15, "energy": 5 }, "mass": 16,
+               "weapons": [{ "id": "katana", "stopsToFire": true, "class": "melee", "damage": { "physical": 26, "energy": 0 }, "range": 12, "attackTime": 1.5, "cooldown": 0.3 }] }
+    },
+    "LaserSword": {
+      "arm": { "cost": { "ore": 90, "energy": 60 }, "buildTime": 10, "hp": 85, "armor": { "physical": 10, "energy": 25 }, "mass": 17,
+               "requires": ["researchFacility"], "requiresResearch": ["plasmaWeapons"],
+               "weapons": [{ "id": "laserSword", "stopsToFire": true, "class": "melee", "damage": { "physical": 10, "energy": 28 }, "range": 12, "attackTime": 1.5, "cooldown": 0.4 }] }
+    },
+    "LongMissile": {
+      "arm": { "cost": { "ore": 140, "energy": 50 }, "buildTime": 14, "hp": 80, "armor": { "physical": 10, "energy": 10 }, "mass": 26,
+               "requires": ["researchFacility"], "requiresResearch": ["missileArtillery"],
+               "weapons": [{ "id": "longMissile", "stopsToFire": true, "class": "artillery", "damage": { "physical": 60, "energy": 0 }, "range": 150, "minRange": 40, "attackTime": 1.8, "cooldown": 6,
+                             "projectileSpeed": 81, "projectileSize": 1.3, "projectileShape": "missile", "splashRadius": 10, "accuracy": 0.85 }] }
+    },
+    "MultiClaw": {
+      "arm": { "cost": { "ore": 75, "energy": 0 }, "buildTime": 8, "hp": 95, "armor": { "physical": 20, "energy": 10 }, "mass": 20,
+               "weapons": [{ "id": "multiClaw", "stopsToFire": true, "class": "melee", "damage": { "physical": 16, "energy": 0 }, "burst": 2, "range": 11, "attackTime": 1.5, "cooldown": 0.4 }] }
+    },
+    "PlasmaCannon": {
+      "arm": { "cost": { "ore": 130, "energy": 90 }, "buildTime": 13, "hp": 85, "armor": { "physical": 10, "energy": 30 }, "mass": 28,
+               "requires": ["researchFacility"], "requiresResearch": ["plasmaWeapons"],
+               "weapons": [{ "id": "plasmaCannon", "damage": { "physical": 15, "energy": 40 }, "range": 75, "attackTime": 0.8, "cooldown": 2.5, "projectileSpeed": 70, "projectileSize": 1.5, "projectileShape": "orb",
+                             "splashRadius": 5, "accuracy": 0.9 }] }
+    },
+    "PowerFist": {
+      "arm": { "cost": { "ore": 95, "energy": 30 }, "buildTime": 10, "hp": 110, "armor": { "physical": 25, "energy": 15 }, "mass": 24,
+               "weapons": [{ "id": "powerFist", "stopsToFire": true, "class": "melee", "damage": { "physical": 32, "energy": 10 }, "range": 10, "attackTime": 1.5, "cooldown": 0.8,
+                             "effects": [{ "type": "knockback", "force": 5 }] }] }
+    },
+    "ProtoBlast": {
+      "arm": { "cost": { "ore": 100, "energy": 100 }, "buildTime": 12, "hp": 75, "armor": { "physical": 5, "energy": 35 }, "mass": 20,
+               "requires": ["researchFacility"], "requiresResearch": ["plasmaWeapons"],
+               "weapons": [{ "id": "protoBlast", "damage": { "physical": 0, "energy": 50 }, "range": 65, "attackTime": 1.5, "cooldown": 3.5, "projectileSpeed": 80, "projectileSize": 2.0, "projectileShape": "orb",
+                             "splashRadius": 12, "accuracy": 0.9 }] }
+    },
+    "RotaryBlade": {
+      "arm": { "cost": { "ore": 85, "energy": 10 }, "buildTime": 9, "hp": 90, "armor": { "physical": 15, "energy": 5 }, "mass": 21,
+               "weapons": [{ "id": "rotaryBlade", "stopsToFire": true, "class": "melee", "damage": { "physical": 9, "energy": 0 }, "burst": 4, "range": 11, "attackTime": 2.3, "cooldown": 0.5 }] }
+    },
+    "Shield": {
+      "arm": { "cost": { "ore": 80, "energy": 0 }, "buildTime": 9, "hp": 150, "armor": { "physical": 70, "energy": 20 }, "mass": 25 }
+    },
+    "SniperLaser": {
+      "arm": { "cost": { "ore": 120, "energy": 80 }, "buildTime": 12, "hp": 65, "armor": { "physical": 5, "energy": 20 }, "mass": 18,
+               "requires": ["researchFacility"], "requiresResearch": ["plasmaWeapons"],
+               "weapons": [{ "id": "sniperLaser", "stopsToFire": true, "damage": { "physical": 0, "energy": 55 }, "range": 160, "attackTime": 2.0, "hitAt": 0.7, "cooldown": 4, "accuracy": 0.95 }] }
+    }
+  },
+
+  "overrides": {},
+
+  "crew": {
+    "model": "vehicles/RobotCrew{race}_Anim.glb", "races": ["X", "Y"],
+    "animationSource": "vehicles/RobotCrewX_Anim.glb",
+    "clips": { "idle": "RobotCrewX_Anim_anim01", "run": "RobotCrewRun_Anim" },
+    "producedAt": ["cryoFarm", "crewTrainingFacility"],
+    "squadSize": 5,
+    "modelScale": 0.5,
+    "formationSpacing": 2.5,
+    "costPerMember": { "ore": 10, "energy": 5 },
+    "supplyPerMember": 1,
+    "hpPerMember": 30,
+    "buildTime": 12,
+    "armor": { "physical": 0, "energy": 0 }, "sightRange": 60,
+    "mobility": { "movementType": "ground", "moveSpeed": 14, "turnSpeed": 540, "acceleration": 40, "deceleration": 60 },
+    "runAnimRefSpeed": 7
+  },
+
+  "vehicles": {
+    "gunTank": {
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 3,
+      "cost": { "ore": 150, "energy": 20 }, "buildTime": 15,
+      "hp": 320, "mass": 250, "armor": { "physical": 40, "energy": 15 }, "sightRange": 90,
+      "mobility": { "movementType": "ground", "moveSpeed": 16, "turnSpeed": 120, "acceleration": 20, "deceleration": 30 },
+      "turret": { "socket": "socket_c6e5475c", "launchSocket": "socket_Launch_1", "turnSpeed": 90,
+                  "models": { "X": "3DVehicles/d4cd1352.glb", "Y": "3DVehicles/1f91c0f7.glb", "Z": "3DVehicles/9905b259.glb" } },
+      "weapons": [{ "id": "tankCannon", "mount": "turret", "fireArc": 20, "damage": { "physical": 35, "energy": 0 }, "range": 75, "attackTime": 1.2, "cooldown": 1.8,
+                    "projectileSpeed": 90, "splashRadius": 3, "accuracy": 0.9 }]
+    },
+    "missileCar": {
+      "model": "3DVehicles/MissileCar{race}_Anim.glb", "modelScale": 0.75,
+      "producedAt": "vehicleFactory", "supply": 2,
+      "cost": { "ore": 160, "energy": 40 }, "buildTime": 16,
+      "hp": 220, "mass": 180, "armor": { "physical": 15, "energy": 10 }, "sightRange": 100,
+      "mobility": { "movementType": "ground", "moveSpeed": 22, "turnSpeed": 150, "acceleration": 26, "deceleration": 36 },
+      "turret": { "socket": "socket_c6e5475c", "launchSocket": "socket_Launch_1", "turnSpeed": 120,
+                  "models": { "X": "3DVehicles/07ffdb79.glb", "Y": "3DVehicles/cca308dc.glb", "Z": "3DVehicles/4a377a72.glb" } },
+      "weapons": [{ "id": "carMissiles", "mount": "turret", "fireArc": 30, "damage": { "physical": 25, "energy": 0 }, "burst": 2, "range": 110, "minRange": 20, "attackTime": 1.5, "cooldown": 4,
+                    "projectileSpeed": 99, "projectileShape": "missile", "splashRadius": 4, "targets": ["ground", "air"] }]
+    },
+    "mobileArtillery": {
+      "model": "3DVehicles/MobileArtillery{race}_Anim.glb", "modelScale": 0.85,
+      "producedAt": "vehicleFactory", "supply": 3, "requires": ["researchFacility"],
+      "cost": { "ore": 220, "energy": 50 }, "buildTime": 22,
+      "hp": 240, "mass": 220, "armor": { "physical": 20, "energy": 10 }, "sightRange": 80,
+      "mobility": { "movementType": "ground", "moveSpeed": 12, "turnSpeed": 90, "acceleration": 12, "deceleration": 24 },
+      "turret": { "socket": "socket_c6e5475c", "launchSocket": "socket_Launch_1", "turnSpeed": 45,
+                  "models": { "X": "3DVehicles/2dc9874c.glb", "Y": "3DVehicles/e69554e9.glb", "Z": "3DVehicles/60012647.glb" } },
+      "weapons": [{ "id": "artilleryShell", "mount": "turret", "fireArc": 20, "stopsToFire": true, "class": "artillery", "damage": { "physical": 90, "energy": 0 }, "range": 220, "minRange": 60,
+                    "attackTime": 2.5, "hitAt": 0.3, "cooldown": 9, "projectileSpeed": 40, "splashRadius": 20, "accuracy": 0.75 }]
+    },
+    "hoverJet": {
+      "model": "3DVehicles/HoverJet{race}_Anim.glb", "modelScale": 0.75,
+      "producedAt": "aircraftHangar", "supply": 2,
+      "cost": { "ore": 180, "energy": 80 }, "buildTime": 18,
+      "hp": 220, "armor": { "physical": 15, "energy": 20 }, "sightRange": 120,
+      "mobility": { "movementType": "air", "moveSpeed": 40, "turnSpeed": 150, "acceleration": 30, "deceleration": 30 },
+      "weapons": [{ "id": "jetBlaster", "damage": { "physical": 0, "energy": 18 }, "burst": 2, "range": 60, "attackTime": 1.0, "cooldown": 1.5, "projectileSpeed": 150,
+                    "accuracy": 0.85, "targets": ["ground", "air"] }]
+    },
+    "hoverBomber": {
+      "model": "3DVehicles/HoverBomber{race}_Anim.glb", "modelScale": 0.85,
+      "producedAt": "aircraftHangar", "supply": 3, "requires": ["researchFacility"],
+      "cost": { "ore": 260, "energy": 100 }, "buildTime": 25,
+      "hp": 320, "mass": 160, "armor": { "physical": 20, "energy": 20 }, "sightRange": 100,
+      "mobility": { "movementType": "air", "moveSpeed": 30, "turnSpeed": 100, "acceleration": 20, "deceleration": 20 },
+      "weapons": [{ "id": "bombs", "class": "artillery", "damage": { "physical": 70, "energy": 0 }, "range": 10, "attackTime": 2.0, "cooldown": 10, "projectileSpeed": 30,
+                    "splashRadius": 15, "accuracy": 0.8 }]
+    },
+    "hoverTruck": {
+      "model": "3DVehicles/HoverTruck{race}_Anim.glb", "modelScale": 0.55,
+      "producedAt": "vehicleFactory", "supply": 1,
+      "cost": { "ore": 100, "energy": 30 }, "buildTime": 12,
+      "hp": 260, "mass": 150, "armor": { "physical": 15, "energy": 10 }, "sightRange": 80,
+      "mobility": { "movementType": "hover", "moveSpeed": 26, "turnSpeed": 160, "acceleration": 28, "deceleration": 36 },
+      "abilities": [{ "type": "transport", "capacity": 4 }, { "type": "construct" },
+                    { "type": "salvage", "capacity": 1, "pickupRange": 6, "unloadRange": 10 },
+                    { "type": "repair", "rate": 0.03, "range": 10, "costPerHp": { "ore": 0.1 } }]
+    },
+    "drillTruck": {
+      "model": "3DVehicles/DrillTruck{race}_Anim.glb", "modelScale": 0.6,
+      "producedAt": "vehicleFactory", "supply": 1,
+      "cost": { "ore": 120, "energy": 0 }, "buildTime": 12,
+      "hp": 300, "mass": 200, "armor": { "physical": 25, "energy": 10 }, "sightRange": 70,
+      "mobility": { "movementType": "ground", "moveSpeed": 14, "turnSpeed": 110, "acceleration": 14, "deceleration": 28 },
+      "abilities": [{ "type": "harvest", "resource": "ore", "ratePerSecond": 3, "range": 8 }]
+    },
+    "nemesis": {
+      "model": "3DVehicles/Nemesis{race}_Anim.glb", "races": ["X", "Y"], "modelScale": 1.1,
+      "producedAt": "vehicleFactory", "supply": 6, "requires": ["researchFacility"],
+      "cost": { "ore": 450, "energy": 200 }, "buildTime": 45,
+      "hp": 800, "mass": 600, "armor": { "physical": 60, "energy": 45 }, "sightRange": 110,
+      "mobility": { "movementType": "ground", "moveSpeed": 10, "turnSpeed": 60, "acceleration": 8, "deceleration": 16 },
+      "weapons": [
+        { "id": "nemesisCannon", "fireArc": 30, "damage": { "physical": 60, "energy": 20 }, "range": 120, "attackTime": 2.0, "cooldown": 4, "projectileSpeed": 80, "splashRadius": 8, "accuracy": 0.9 },
+        { "id": "nemesisLaser", "fireArc": 90, "damage": { "physical": 0, "energy": 6 }, "burst": 3, "range": 70, "attackTime": 1.0, "cooldown": 1, "accuracy": 0.9, "targets": ["ground", "air"] }
+      ]
+    },
+    "alienTank": {
+      "model": "3DVehicles/AlienTankX_Anim.glb", "races": [], "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 4, "requires": ["researchFacility"],
+      "cost": { "ore": 300, "energy": 120 }, "buildTime": 30,
+      "hp": 480, "mass": 400, "armor": { "physical": 30, "energy": 40 }, "sightRange": 100,
+      "mobility": { "movementType": "ground", "moveSpeed": 18, "turnSpeed": 140, "acceleration": 22, "deceleration": 30 },
+      "clips": { "move": "AlienTankX_Anim_anim01" },
+      "turret": { "socket": "socket_c6e5475c", "launchSocket": "socket_Launch_1", "turnSpeed": 120,
+                  "models": { "X": "3DVehicles/AlienTurretX_Anim.glb" } },
+      "weapons": [{ "id": "alienBeam", "mount": "turret", "fireArc": 20, "damage": { "physical": 10, "energy": 35 }, "range": 80, "attackTime": 1.2, "cooldown": 2, "accuracy": 0.95 }]
+    }
+  },
+
+  "structures": {
+    "outpost": {
+      "note": "Teleport for extra large maps, not used yet. The main building is matterConverter (hq: true).",
+      "model": "3DStructures{race}/Outpost{race}_Anim.glb", "buildable": false,
+      "cost": { "ore": 600, "energy": 200 }, "buildTime": 90,
+      "hp": 2500, "armor": { "physical": 60, "energy": 40 }, "sightRange": 120
+    },
+    "solarPanel": {
+      "model": "3DStructures{race}/SolarPanel{race}_Anim.glb", "sunTracking": true,
+      "cost": { "ore": 80, "energy": 0 }, "buildTime": 15,
+      "hp": 400, "armor": { "physical": 10, "energy": 10 }, "sightRange": 40,
+      "income": { "energy": 2 }
+    },
+    "energyBank": {
+      "model": "3DStructures{race}/EnergyBank{race}_Anim.glb",
+      "cost": { "ore": 120, "energy": 40 }, "buildTime": 20,
+      "hp": 600, "armor": { "physical": 20, "energy": 20 }, "sightRange": 40,
+      "storage": { "energy": 200 }
+    },
+    "matterConverter": {
+      "model": "3DStructures{race}/MatterConverter{race}_Anim.glb",
+      "hq": true,
+      "cost": { "ore": 600, "energy": 200 }, "buildTime": 90,
+      "hp": 2500, "armor": { "physical": 60, "energy": 40 }, "sightRange": 120,
+      "supplyProvided": 20,
+      "income": { "ore": 1, "energy": 0.5 },
+      "animSpeed": 0.4,
+      "conversion": { "input": { "energy": 4 }, "output": { "ore": 2 }, "interval": 1 }
+    },
+    "cryoFarm": {
+      "model": "3DStructures{race}/CryoFarm{race}_Anim.glb",
+      "cost": { "ore": 150, "energy": 30 }, "buildTime": 25,
+      "hp": 700, "armor": { "physical": 25, "energy": 25 }, "sightRange": 50,
+      "supplyProvided": 10,
+      "produces": ["crew"], "energyUse": 4.5
+    },
+    "robotPartFactory": {
+      "model": "3DStructures{race}/RobotPartFactory{race}_Anim.glb",
+      "cost": { "ore": 160, "energy": 50 }, "buildTime": 35,
+      "hp": 1200, "armor": { "physical": 40, "energy": 30 }, "sightRange": 60,
+      "produces": ["part"], "energyUse": 4.5
+    },
+    "robotAssemblyBay": {
+      "model": "3DStructures{race}/RobotAssemblyBay{race}_Anim.glb",
+      "cost": { "ore": 200, "energy": 70 }, "buildTime": 40,
+      "hp": 1400, "armor": { "physical": 40, "energy": 30 }, "sightRange": 60,
+      "requires": ["robotPartFactory"],
+      "produces": ["mech"], "energyUse": 4.5
+    },
+    "vehicleFactory": {
+      "model": "3DStructures{race}/VehicleFactory{race}_Anim.glb",
+      "cost": { "ore": 250, "energy": 60 }, "buildTime": 40,
+      "hp": 1400, "armor": { "physical": 40, "energy": 30 }, "sightRange": 60,
+      "produces": ["vehicle"], "energyUse": 4.5
+    },
+    "aircraftHangar": {
+      "model": "3DStructures{race}/AircraftHanger{race}_Anim.glb", "role": "aircraft",
+      "cost": { "ore": 320, "energy": 150 }, "buildTime": 50,
+      "hp": 1200, "armor": { "physical": 35, "energy": 35 }, "sightRange": 70,
+      "requires": ["vehicleFactory"], "requiresTier": 2,
+      "produces": ["vehicle"], "energyUse": 4.5
+    },
+    "crewTrainingFacility": {
+      "model": "3DStructuresX/CrewTrainingFacilityX_Anim.glb", "races": [],
+      "cost": { "ore": 180, "energy": 40 }, "buildTime": 30,
+      "hp": 1000, "armor": { "physical": 35, "energy": 30 }, "sightRange": 60,
+      "produces": ["crew"], "energyUse": 4.5
+    },
+    "researchFacility": {
+      "model": "3DStructures{race}/ResearchFacility{race}_Anim.glb",
+      "cost": { "ore": 300, "energy": 150 }, "buildTime": 60,
+      "hp": 1000, "armor": { "physical": 30, "energy": 40 }, "sightRange": 60,
+      "maxPerTeam": 2,
+      "produces": ["research"], "energyUse": 4.5
+    },
+    "advancedResearchFacility": {
+      "model": "3DStructures{race}/DataRelay{race}_Anim.glb",
+      "cost": { "ore": 400, "energy": 250 }, "buildTime": 70,
+      "hp": 1200, "armor": { "physical": 35, "energy": 45 }, "sightRange": 70,
+      "requiresTier": 2,
+      "maxPerTeam": 1
+    },
+    "pointDefenseSystem": {
+      "model": "3DStructures{race}/PointDefenseSystem{race}_Anim.glb",
+      "cost": { "ore": 200, "energy": 120 }, "buildTime": 30,
+      "hp": 900, "armor": { "physical": 40, "energy": 30 }, "sightRange": 110,
+      "launchSockets": ["socket_96c26dc9", "socket_0fcb3c73", "socket_78cc0ce5"], "energyUse": 2,
+      "weapons": [{ "id": "pdsFlak", "damage": { "physical": 10, "energy": 0 }, "burst": 3, "range": 85, "attackTime": 1.0, "cooldown": 1, "projectileSpeed": 150,
+                    "projectileShape": "shell", "accuracy": 0.85, "fireArc": 360, "targets": ["ground", "air", "projectile"] }]
+    },
+    "railGun": {
+      "model": "3DStructures{race}/RailGun{race}_Anim.glb", "buildable": false,
+      "cost": { "ore": 350, "energy": 250 }, "buildTime": 50,
+      "hp": 1100, "armor": { "physical": 50, "energy": 40 }, "sightRange": 120,
+      "requires": ["researchFacility"], "energyUse": 3,
+      "weapons": [{ "id": "railGun", "damage": { "physical": 120, "energy": 0 }, "range": 180, "attackTime": 1.0, "hitAt": 0.2, "cooldown": 6, "accuracy": 0.95 }]
+    },
+    "mobileWall": {
+      "model": "3DStructures{race}/MobileWall{race}_Anim.glb", "modelScale": 1.5,
+      "placement": "wall", "wallSegment": "mobileWallSegment", "turretSocket": "socket_c6e5475c",
+      "cost": { "ore": 40, "energy": 5 }, "buildTime": 6,
+      "hp": 900, "armor": { "physical": 60, "energy": 30 }, "sightRange": 30
+    },
+    "mobileWallSegment": {
+      "model": "3DStructures{race}/MobileWallWall{race}.glb", "modelScale": 1.5, "buildable": false,
+      "cost": { "ore": 30, "energy": 0 }, "buildTime": 5,
+      "hp": 1200, "armor": { "physical": 60, "energy": 30 }, "sightRange": 20
+    },
+    "mobileWallGunTurret": {
+      "model": "3DStructures{race}/MobileWallGunTurret{race}_Anim.glb", "modelScale": 1.5,
+      "placement": "post", "mountOn": "mobileWall", "turnSpeed": 150, "launchSockets": ["socket_Launch_1", "socket_2e603755"],
+      "cost": { "ore": 120, "energy": 20 }, "buildTime": 15,
+      "hp": 600, "armor": { "physical": 40, "energy": 20 }, "sightRange": 90,
+      "requires": ["mobileWall"], "energyUse": 1,
+      "weapons": [{ "id": "turretGun", "damage": { "physical": 14, "energy": 0 }, "burst": 3, "range": 70, "attackTime": 1.0, "cooldown": 1.2,
+                    "projectileSpeed": 140, "projectileShape": "shell", "accuracy": 0.85, "fireArc": 20 }]
+    },
+    "mobileWallLaserTurret": {
+      "model": "3DStructures{race}/MobileWallLaserTurret{race}_Anim.glb", "modelScale": 1.5,
+      "placement": "post", "mountOn": "mobileWall", "turnSpeed": 120, "launchSockets": ["socket_Launch_1"],
+      "cost": { "ore": 140, "energy": 60 }, "buildTime": 18,
+      "hp": 550, "armor": { "physical": 30, "energy": 40 }, "sightRange": 95,
+      "requires": ["mobileWall"], "energyUse": 1.5,
+      "weapons": [{ "id": "turretLaser", "damage": { "physical": 0, "energy": 30 }, "range": 75, "attackTime": 1.0, "cooldown": 1.8, "accuracy": 0.95, "fireArc": 20 }]
+    }
+  },
+
+  "research": {
+    "reinforcedJoints": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 150, "energy": 60 }, "researchTime": 45,
+      "effects": [
+        { "type": "modify", "target": { "category": "part", "kind": "arm" }, "stat": "hp", "op": "mul", "value": 1.10 },
+        { "type": "rule", "path": "combat.brokenArmDetachChance", "op": "mul", "value": 0.75 }
+      ]
+    },
+    "compositePlating": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 160, "energy": 60 }, "researchTime": 50,
+      "effects": [
+        { "type": "modify", "target": { "category": "part", "kind": ["torso", "legs"] }, "stat": "armor.physical", "op": "add", "value": 5 }
+      ]
+    },
+    "weaponCalibration": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 140, "energy": 80 }, "researchTime": 45,
+      "effects": [
+        { "type": "modify", "target": { "category": "weapon", "weaponClass": ["ranged", "artillery"] }, "stat": "accuracy", "op": "add", "value": 0.05, "max": 1 }
+      ]
+    },
+    "servoUpgrade": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 120, "energy": 60 }, "researchTime": 40,
+      "effects": [
+        { "type": "modify", "target": { "category": "part", "kind": "legs" }, "stat": "mobility.moveSpeed", "op": "mul", "value": 1.06 },
+        { "type": "modify", "target": { "category": "part", "kind": "legs" }, "stat": "mobility.acceleration", "op": "mul", "value": 1.10 }
+      ]
+    },
+    "fieldRepairKits": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 120, "energy": 50 }, "researchTime": 40,
+      "effects": [
+        { "type": "rule", "path": "repair.fieldRate", "op": "mul", "value": 1.5 }
+      ]
+    },
+    "crewDrill": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 100, "energy": 40 }, "researchTime": 40,
+      "effects": [
+        { "type": "modify", "target": { "category": "crew" }, "stat": "hp", "op": "mul", "value": 1.20 },
+        { "type": "modify", "target": { "category": "crew" }, "stat": "buildTime", "op": "mul", "value": 0.80 },
+        { "type": "rule", "path": "crew.boardTime", "op": "mul", "value": 0.75 }
+      ]
+    },
+    "efficientDrilling": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 150, "energy": 40 }, "researchTime": 50,
+      "effects": [
+        { "type": "modify", "target": { "category": "ability", "abilityType": "harvest" }, "stat": "ratePerSecond", "op": "mul", "value": 1.15 }
+      ]
+    },
+    "vehicleArmor": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 130, "energy": 50 }, "researchTime": 45,
+      "effects": [
+        { "type": "modify", "target": { "category": "vehicle" }, "stat": "hp", "op": "mul", "value": 1.15 },
+        { "type": "modify", "target": { "category": "vehicle" }, "stat": "armor.physical", "op": "add", "value": 5 }
+      ]
+    },
+    "salvageAnalysis": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 100, "energy": 80 }, "researchTime": 40,
+      "effects": [
+        { "type": "rule", "path": "salvageResearch.researchTime", "op": "mul", "value": 0.5 },
+        { "type": "rule", "path": "salvageResearch.minResearchTime", "op": "mul", "value": 0.5 },
+        { "type": "rule", "path": "salvageDrop.legs", "op": "mul", "value": 1.5 },
+        { "type": "rule", "path": "salvageDrop.torso", "op": "mul", "value": 1.5 }
+      ]
+    },
+    "guidanceChips": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 170, "energy": 90 }, "researchTime": 55,
+      "effects": [
+        { "type": "modify", "target": { "category": "weapon", "weaponId": ["homingMissile", "longMissile", "drunkMissileLegs", "drunkMissileTorso"] }, "stat": "accuracy", "op": "add", "value": 0.10, "max": 1 },
+        { "type": "modify", "target": { "category": "weapon", "weaponId": ["homingMissile", "longMissile", "drunkMissileLegs", "drunkMissileTorso"] }, "stat": "range", "op": "mul", "value": 1.10 }
+      ]
+    },
+    "shieldCapacitors": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 150, "energy": 100 }, "researchTime": 50,
+      "effects": [
+        { "type": "modify", "target": { "category": "ability", "abilityType": ["shield", "areaShield"] }, "stat": "capacity", "op": "mul", "value": 1.20, "pending": true },
+        { "type": "modify", "target": { "category": "ability", "abilityType": ["shield", "areaShield"] }, "stat": "regenPerSecond", "op": "mul", "value": 1.20, "pending": true },
+        { "type": "modify", "target": { "category": "ability", "abilityType": "regen" }, "stat": "hpPerSecond", "op": "mul", "value": 1.20, "pending": true }
+      ]
+    },
+    "missileArtillery": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 150, "energy": 70 }, "researchTime": 45,
+      "effects": []
+    },
+    "hardenedSteel": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 160, "energy": 40 }, "researchTime": 50,
+      "effects": [
+        { "type": "modify", "target": { "category": "weapon", "weaponClass": "melee" }, "stat": "damage.physical", "op": "mul", "value": 1.10 }
+      ]
+    },
+    "heavyShells": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 180, "energy": 60 }, "researchTime": 55,
+      "effects": [
+        { "type": "modify", "target": { "category": "weapon", "weaponId": ["howitzer", "carpetBomb"] }, "stat": "splashRadius", "op": "mul", "value": 1.15 },
+        { "type": "modify", "target": { "category": "weapon", "weaponId": "tracer", "effectType": "burn" }, "stat": "duration", "op": "add", "value": 1 }
+      ]
+    },
+    "siegeArtillery": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 160, "energy": 60 }, "researchTime": 45,
+      "effects": []
+    },
+    "phaseFocusing": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 150, "energy": 110 }, "researchTime": 50,
+      "effects": [
+        { "type": "modify", "target": { "category": "weapon" }, "stat": "damage.energy", "op": "mul", "value": 1.08 }
+      ]
+    },
+    "tacticalSystems": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 140, "energy": 100 }, "researchTime": 50,
+      "effects": [
+        { "type": "modify", "target": { "category": "weapon", "effectType": "stun" }, "stat": "duration", "op": "mul", "value": 1.20 },
+        { "type": "modify", "target": { "category": "ability", "abilityType": ["flight", "cloak"] }, "stat": "cooldown", "op": "mul", "value": 0.80 }
+      ]
+    },
+    "plasmaWeapons": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 150, "energy": 110 }, "researchTime": 50,
+      "effects": []
+    },
+    "pulseTechnology": {
+      "tier": 1, "researchedAt": "researchFacility", "cost": { "ore": 140, "energy": 110 }, "researchTime": 50,
+      "effects": []
+    }
+  }
+}

@@ -1,0 +1,77 @@
+/* In-game menu, end-of-match screen (src/ui/MatchUi.js). Colours follow the HUD / confirm dialog. */
+.match-overlay {
+  position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.6); font-family: var(--menu-font); color: var(--menu-text);
+}
+.match-overlay[hidden] { display: none; }
+/* [R2] Faction look: the same neon / panel variables Hud.js sets for the HUD (fallback = the menu look) */
+.match-overlay, #match-menu-btn {
+  --menu-accent: var(--hud-neon, #3ea6ff);
+  --menu-neon-glow: 0 0 8px color-mix(in srgb, var(--hud-neon, #3ea6ff) 55%, transparent), 0 0 2px var(--hud-neon, #3ea6ff);
+  --menu-neon-inset: inset 0 0 14px color-mix(in srgb, var(--hud-neon, #3ea6ff) 40%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--hud-neon, #3ea6ff) 85%, transparent);
+  --menu-border: var(--hud-border, #3d4650); /* card / button outlines tinted like the HUD panels */
+}
+.match-card {
+  display: flex; flex-direction: column; gap: 10px; min-width: 260px; max-height: 92vh; overflow: auto; padding: 20px 24px;
+  background: var(--menu-brushed), linear-gradient(180deg, var(--hud-panel-top, #232a31), var(--hud-panel-bottom, rgba(18, 22, 27, 0.98))); border: 1px solid var(--menu-border); border-top: 2px solid var(--menu-accent); border-radius: 0;
+  box-shadow: var(--menu-edge), 0 8px 28px rgba(0, 0, 0, 0.7), inset 0 0 18px color-mix(in srgb, var(--menu-accent) 9%, transparent);
+}
+.match-overlay { --match-frame-filter: var(--hud-frame-filter, none); }
+.match-overlay::after { /* same recoloured window frame as the HUD (data/image/ui/game-frame.png) */
+  content: ""; position: absolute; inset: 0; pointer-events: none; filter: var(--match-frame-filter);
+  border: var(--hud-frame-w, 21px) solid transparent; border-image: url("../../data/image/ui/game-frame.png") 46 / var(--hud-frame-w, 21px) stretch;
+}
+.match-card.wide { min-width: min(640px, 92vw); }
+.match-card h1, .match-card h2 { margin: 0; text-align: center; text-transform: uppercase; letter-spacing: 0.18em; }
+.match-card.won h1 { color: var(--menu-accent); text-shadow: var(--menu-neon-glow); }
+.match-card.lost h1 { color: color-mix(in srgb, var(--menu-accent) 60%, #e0645a); text-shadow: 0 0 10px color-mix(in srgb, var(--menu-accent) 40%, transparent); }
+.match-reason { margin: 0; text-align: center; color: var(--menu-muted); }
+.match-time { text-align: center; }
+.match-card button {
+  padding: 8px 16px; color: var(--menu-text); background: var(--menu-brushed), var(--menu-plate); border: 1px solid var(--menu-border);
+  border-radius: 0; cursor: pointer; font: 700 14px var(--menu-font); text-transform: uppercase; letter-spacing: 0.12em;
+  box-shadow: var(--menu-edge), var(--menu-drop);
+}
+.match-card button:hover { border-color: var(--menu-accent); color: var(--menu-text-bright); box-shadow: var(--menu-edge), var(--menu-drop), var(--menu-neon-glow); }
+.match-card button:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: 2px; }
+.match-card button:disabled { color: var(--menu-faint); background: #1a1e23; border-color: var(--menu-border-soft); box-shadow: none; cursor: not-allowed; }
+.match-card button.primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--menu-accent) 70%, #fff), var(--menu-accent) 55%, color-mix(in srgb, var(--menu-accent) 65%, #000));
+  color: var(--menu-accent-text); border-color: color-mix(in srgb, var(--menu-accent) 60%, #fff);
+}
+.match-card button.danger { background: linear-gradient(180deg, #8a3434, var(--menu-danger-bg)); border-color: var(--menu-danger); }
+/* [B1] back / return on the left, continue / quit / confirm on the right */
+.match-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; }
+.match-actions > button:last-child:not(:first-child) { margin-left: auto; }
+.match-stats { width: 100%; border-collapse: collapse; font-size: 13px; }
+.match-stats th, .match-stats td { padding: 1px 8px; text-align: right; }
+.match-stats td:first-child, .match-stats thead th:first-child { text-align: left; }
+.match-stats tr.section th { padding-top: 10px; text-align: left; color: var(--menu-accent); font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; border-bottom: 1px solid var(--menu-border); }
+.match-dot { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 0; }
+#match-menu-btn {
+  /* HUD v2: sits in the menu slot of the top centre frame piece (manifest frameContent.menuButtonSlotBase; --hud-u = 1 base px, set by hud.css / Hud.js) */
+  position: fixed; top: calc((17 - var(--hud-mt, 0)) * var(--hud-u, 1px)); left: calc(50% + (var(--hud-mr, 0) - var(--hud-ml, 0)) / 2 * var(--hud-u, 1px) - 60 * var(--hud-u, 1px)); z-index: 20; width: calc(37 * var(--hud-u, 1px)); height: calc(35 * var(--hud-u, 1px)); padding: 0;
+  color: var(--menu-text); background: transparent; border: 1px solid transparent; border-radius: 0; cursor: pointer; font-size: max(11px, calc(18 * var(--hud-u, 1px)));
+}
+#match-menu-btn:hover { border-color: var(--menu-accent); box-shadow: var(--menu-edge), var(--menu-neon-glow); }
+#match-menu-btn:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: 2px; }
+#match-menu-btn[hidden] { display: none; }
+/* [R5] multiplayer pause banner: below the ☰ button, the map stays usable (camera, selection) */
+#match-pause {
+  position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 25; pointer-events: none;
+  font-family: var(--menu-font); color: var(--menu-text);
+  --menu-accent: var(--hud-neon, #3ea6ff);
+  --menu-neon-glow: 0 0 8px color-mix(in srgb, var(--hud-neon, #3ea6ff) 55%, transparent), 0 0 2px var(--hud-neon, #3ea6ff);
+}
+#match-pause[hidden] { display: none; }
+#match-pause .match-card { pointer-events: auto; align-items: center; text-align: center; }
+/* [N5FIX] small observer label of an eliminated player whose allies play on (below the ☰ button) */
+#match-observer {
+  position: fixed; top: 40px; left: 50%; transform: translateX(-50%); z-index: 20; pointer-events: none;
+  padding: 2px 8px; font-family: var(--menu-font); font-size: 12px; color: var(--menu-text); opacity: 0.8;
+  background: rgba(0, 0, 0, 0.45); border: 1px solid var(--menu-border); white-space: nowrap;
+}
+#match-observer[hidden] { display: none; }
+
+/* [N6] avatar in the stats header */
+.match-stats th .ai-avatar { margin-right: 6px; }

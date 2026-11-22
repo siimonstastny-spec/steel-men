@@ -1,0 +1,804 @@
+{
+    "version":  1,
+    "generatedBy":  "tools/slice-hud2.ps1",
+    "baseSize":  {
+                     "w":  1920,
+                     "h":  1080
+                 },
+    "notes":  "Coordinates are pixels of the file they belong to; keys ending in Base are in the 1920x1080 frame base.",
+    "frame":  {
+                  "frame-top-left":  {
+                                         "file":  "frame-top-left.png",
+                                         "w":  388,
+                                         "h":  130,
+                                         "kind":  "fixed",
+                                         "anchor":  "top-left",
+                                         "baseX":  0,
+                                         "baseY":  0,
+                                         "role":  "resource bar corner (left top)"
+                                     },
+                  "frame-top-center":  {
+                                           "file":  "frame-top-center.png",
+                                           "w":  208,
+                                           "h":  64,
+                                           "kind":  "fixed",
+                                           "anchor":  "top-center",
+                                           "baseX":  856,
+                                           "baseY":  0,
+                                           "role":  "menu button + clock slots; centre of the piece = screen centre"
+                                       },
+                  "frame-top-right":  {
+                                          "file":  "frame-top-right.png",
+                                          "w":  230,
+                                          "h":  130,
+                                          "kind":  "fixed",
+                                          "anchor":  "top-right",
+                                          "baseX":  1690,
+                                          "baseY":  0,
+                                          "role":  "two square buttons corner (right top)"
+                                      },
+                  "frame-top-a":  {
+                                      "file":  "frame-top-a.png",
+                                      "w":  468,
+                                      "h":  64,
+                                      "kind":  "stretchX",
+                                      "anchor":  "top",
+                                      "baseX":  388,
+                                      "baseY":  0,
+                                      "role":  "top bar between resource corner and centre piece (stretch horizontally)"
+                                  },
+                  "frame-top-b":  {
+                                      "file":  "frame-top-b.png",
+                                      "w":  626,
+                                      "h":  64,
+                                      "kind":  "stretchX",
+                                      "anchor":  "top",
+                                      "baseX":  1064,
+                                      "baseY":  0,
+                                      "role":  "top bar between centre piece and right corner (stretch horizontally)"
+                                  },
+                  "frame-side-left":  {
+                                          "file":  "frame-side-left.png",
+                                          "w":  70,
+                                          "h":  468,
+                                          "kind":  "stretchY",
+                                          "anchor":  "left",
+                                          "baseX":  0,
+                                          "baseY":  130,
+                                          "role":  "left side bar (stretch vertically) from top-left piece down to the side decoration"
+                                      },
+                  "frame-side-right":  {
+                                           "file":  "frame-side-right.png",
+                                           "w":  70,
+                                           "h":  468,
+                                           "kind":  "stretchY",
+                                           "anchor":  "right",
+                                           "baseX":  1850,
+                                           "baseY":  130,
+                                           "role":  "right side bar (stretch vertically)"
+                                       },
+                  "frame-side-left-deco":  {
+                                               "file":  "frame-side-left-deco.png",
+                                               "w":  70,
+                                               "h":  147,
+                                               "kind":  "fixed",
+                                               "anchor":  "above-bottom-left",
+                                               "baseX":  0,
+                                               "baseY":  598,
+                                               "role":  "small bracket decoration on the left edge; sits directly above frame-bottom-left"
+                                           },
+                  "frame-side-right-deco":  {
+                                                "file":  "frame-side-right-deco.png",
+                                                "w":  70,
+                                                "h":  147,
+                                                "kind":  "fixed",
+                                                "anchor":  "above-bottom-right",
+                                                "baseX":  1850,
+                                                "baseY":  598,
+                                                "role":  "small bracket decoration on the right edge; sits directly above frame-bottom-right"
+                                            },
+                  "frame-bottom-left":  {
+                                            "file":  "frame-bottom-left.png",
+                                            "w":  445,
+                                            "h":  335,
+                                            "kind":  "fixed",
+                                            "anchor":  "bottom-left",
+                                            "baseX":  0,
+                                            "baseY":  745,
+                                            "role":  "command grid block (left bottom)"
+                                        },
+                  "frame-bottom-right":  {
+                                             "file":  "frame-bottom-right.png",
+                                             "w":  420,
+                                             "h":  335,
+                                             "kind":  "fixed",
+                                             "anchor":  "bottom-right",
+                                             "baseX":  1500,
+                                             "baseY":  745,
+                                             "role":  "minimap block (right bottom)"
+                                         },
+                  "frame-bottom":  {
+                                       "file":  "frame-bottom.png",
+                                       "w":  1055,
+                                       "h":  64,
+                                       "kind":  "stretchX",
+                                       "anchor":  "bottom",
+                                       "baseX":  445,
+                                       "baseY":  1016,
+                                       "role":  "bottom edge strip between the two bottom blocks (stretch horizontally)"
+                                   }
+              },
+    "frameLayout":  {
+                        "summary":  "Width W, height H. Fixed pieces keep 1:1 size. top-center is centred (x = W/2 - 104). frame-top-a spans from x=388 to the left edge of top-center, frame-top-b from the right edge of top-center to W-230 (stretch horizontally). frame-bottom-left/-right are anchored to the bottom corners; frame-bottom fills between them (stretch horizontally), anchored at y = H-64. frame-side-left/-right fill from y=130 down to the top of the side deco; the deco sits directly above the bottom block (y = H-335-147).",
+                        "topBarHeight":  64,
+                        "bottomBlockTop":  335,
+                        "sideDecoHeight":  147,
+                        "blockTopFromBottom":  335
+                    },
+    "frameContent":  {
+                         "resourceBarInnerBase":  {
+                                                      "x":  28,
+                                                      "y":  16,
+                                                      "w":  332,
+                                                      "h":  34
+                                                  },
+                         "resourceSlotsBase":  {
+                                                   "ore":  {
+                                                               "x":  30,
+                                                               "y":  16,
+                                                               "w":  100,
+                                                               "h":  34
+                                                           },
+                                                   "energy":  {
+                                                                  "x":  133,
+                                                                  "y":  16,
+                                                                  "w":  117,
+                                                                  "h":  34
+                                                              },
+                                                   "population":  {
+                                                                      "x":  253,
+                                                                      "y":  16,
+                                                                      "w":  105,
+                                                                      "h":  34
+                                                                  }
+                                               },
+                         "menuButtonSlotBase":  {
+                                                    "x":  900,
+                                                    "y":  17,
+                                                    "w":  37,
+                                                    "h":  35
+                                                },
+                         "clockSlotBase":  {
+                                               "x":  944,
+                                               "y":  17,
+                                               "w":  77,
+                                               "h":  35
+                                           },
+                         "topRightButtonsBase":  {
+                                                     "diplomacy":  {
+                                                                       "x":  1803,
+                                                                       "y":  24,
+                                                                       "w":  41,
+                                                                       "h":  38
+                                                                   },
+                                                     "help":  {
+                                                                  "x":  1853,
+                                                                  "y":  24,
+                                                                  "w":  39,
+                                                                  "h":  38
+                                                              }
+                                                 },
+                         "commandGridAreaBase":  {
+                                                     "x":  38,
+                                                     "y":  798,
+                                                     "w":  282,
+                                                     "h":  244
+                                                 },
+                         "commandGrid4x4Base":  {
+                                                    "x":  59,
+                                                    "y":  800,
+                                                    "w":  240,
+                                                    "h":  240
+                                                },
+                         "idleButtonSlotsBase":  {
+                                                     "first":  {
+                                                                   "x":  42,
+                                                                   "y":  721,
+                                                                   "w":  63,
+                                                                   "h":  60
+                                                               },
+                                                     "second":  {
+                                                                    "x":  113,
+                                                                    "y":  721,
+                                                                    "w":  65,
+                                                                    "h":  60
+                                                                }
+                                                 },
+                         "minimapInnerBase":  {
+                                                  "x":  1632,
+                                                  "y":  797,
+                                                  "w":  247,
+                                                  "h":  245
+                                              },
+                         "statsPanelHintBase":  {
+                                                    "right":  1895,
+                                                    "bottomY":  775,
+                                                    "note":  "stats panel (255 px wide) sits above the minimap block, its bottom edge overlaps the top of frame-bottom-right"
+                                                },
+                         "productionPanelHintBase":  {
+                                                         "x":  15,
+                                                         "y":  62,
+                                                         "note":  "top-left corner of the production panel under the resource bar"
+                                                     },
+                         "perPiece":  {
+                                          "frame-top-left":  {
+                                                                 "resourceBarInner":  {
+                                                                                          "x":  28,
+                                                                                          "y":  16,
+                                                                                          "w":  332,
+                                                                                          "h":  34
+                                                                                      },
+                                                                 "ore":  {
+                                                                             "x":  30,
+                                                                             "y":  16,
+                                                                             "w":  100,
+                                                                             "h":  34
+                                                                         },
+                                                                 "energy":  {
+                                                                                "x":  133,
+                                                                                "y":  16,
+                                                                                "w":  117,
+                                                                                "h":  34
+                                                                            },
+                                                                 "population":  {
+                                                                                    "x":  253,
+                                                                                    "y":  16,
+                                                                                    "w":  105,
+                                                                                    "h":  34
+                                                                                }
+                                                             },
+                                          "frame-top-center":  {
+                                                                   "menuButton":  {
+                                                                                      "x":  44,
+                                                                                      "y":  17,
+                                                                                      "w":  37,
+                                                                                      "h":  35
+                                                                                  },
+                                                                   "clock":  {
+                                                                                 "x":  88,
+                                                                                 "y":  17,
+                                                                                 "w":  77,
+                                                                                 "h":  35
+                                                                             }
+                                                               },
+                                          "frame-top-right":  {
+                                                                  "diplomacy":  {
+                                                                                    "x":  113,
+                                                                                    "y":  24,
+                                                                                    "w":  41,
+                                                                                    "h":  38
+                                                                                },
+                                                                  "help":  {
+                                                                               "x":  163,
+                                                                               "y":  24,
+                                                                               "w":  39,
+                                                                               "h":  38
+                                                                           }
+                                                              },
+                                          "frame-bottom-left":  {
+                                                                    "commandGridArea":  {
+                                                                                            "x":  38,
+                                                                                            "y":  53,
+                                                                                            "w":  282,
+                                                                                            "h":  244
+                                                                                        },
+                                                                    "commandGrid4x4":  {
+                                                                                           "x":  59,
+                                                                                           "y":  55,
+                                                                                           "w":  240,
+                                                                                           "h":  240
+                                                                                       },
+                                                                    "note":  "idle buttons sit above this piece (y \u003c 0 locally): see idleButtonSlotsBase"
+                                                                },
+                                          "frame-bottom-right":  {
+                                                                     "minimapInner":  {
+                                                                                          "x":  132,
+                                                                                          "y":  52,
+                                                                                          "w":  247,
+                                                                                          "h":  245
+                                                                                      }
+                                                                 }
+                                      }
+                     },
+    "seamCheck":  {
+                      "production top-\u003emid (interior 60..280)":  {
+                                                                          "seam":  8.51,
+                                                                          "adjacentRows":  7.55
+                                                                      },
+                      "production mid-\u003emid (interior 60..280)":  {
+                                                                          "seam":  2.54,
+                                                                          "adjacentRows":  3.02
+                                                                      },
+                      "production mid-\u003ebottom (interior)":  {
+                                                                     "seam":  2.94,
+                                                                     "adjacentRows":  9.8
+                                                                 },
+                      "center left-\u003emid (interior y50..160)":  {
+                                                                        "seam":  1.51,
+                                                                        "adjacentRows":  0.01
+                                                                    },
+                      "center mid-\u003emid (interior y50..160)":  {
+                                                                       "seam":  2.35,
+                                                                       "adjacentRows":  0.01
+                                                                   },
+                      "center mid-\u003eright (interior y50..160)":  {
+                                                                         "seam":  0,
+                                                                         "adjacentRows":  0.01
+                                                                     },
+                      "stats top-\u003erow (by design a 1 px separator line starts each row)":  {
+                                                                                                    "seam":  43.9,
+                                                                                                    "adjacentRows":  23.89
+                                                                                                }
+                  },
+    "panels":  {
+                   "production":  {
+                                      "summary":  "Stack: production_top (256) + M x production_mid (40) + production_bottom (133) = 389 + 40*M px high, 316 wide. Mid strips only add plain inner area, so children can be positioned independent of where the strips sit.",
+                                      "top":  {
+                                                  "file":  "production_top.png",
+                                                  "w":  316,
+                                                  "h":  256
+                                              },
+                                      "mid":  {
+                                                  "file":  "production_mid.png",
+                                                  "w":  316,
+                                                  "h":  40,
+                                                  "kind":  "repeatY"
+                                              },
+                                      "bottom":  {
+                                                     "file":  "production_bottom.png",
+                                                     "w":  316,
+                                                     "h":  133
+                                                 },
+                                      "titleSlot":  {
+                                                        "x":  62,
+                                                        "y":  43,
+                                                        "w":  212,
+                                                        "h":  22
+                                                    },
+                                      "innerX":  48,
+                                      "innerW":  244,
+                                      "optionGridArea":  {
+                                                             "x":  50,
+                                                             "y":  76,
+                                                             "w":  240,
+                                                             "h":  240
+                                                         },
+                                      "optionGridNote":  "4x4 cells of 60 px, panel coordinates from the top edge of production_top (fits in the panel for M=0: plain inner area reaches y=356 when M=0, +40 per mid strip)",
+                                      "queueFirstRowY":  318,
+                                      "queueRowH":  40,
+                                      "queueRowX":  50,
+                                      "queueRowW":  240,
+                                      "queueRowInMid":  {
+                                                            "x":  50,
+                                                            "y":  0,
+                                                            "w":  240,
+                                                            "h":  40
+                                                        },
+                                      "queueNote":  "Use M = number of queue rows (incl. a \"+N\" row). Queue row i occupies y = 318 + 40*i in panel coordinates. The mid strip alone has its text-safe area at queueRowInMid.",
+                                      "insets":  {
+                                                     "left":  48,
+                                                     "top":  76,
+                                                     "right":  24,
+                                                     "bottom":  33,
+                                                     "note":  "frame thickness; plain inner area extends from the inset edges"
+                                                 }
+                                  },
+                   "stats":  {
+                                 "summary":  "Stack: stats_top (44) + N x stats_row (19, one row per player, 2..8) + stats_bottom (9), 255 wide. Each row begins with a 1 px lighter separator line.",
+                                 "top":  {
+                                             "file":  "stats_top.png",
+                                             "w":  255,
+                                             "h":  44
+                                         },
+                                 "row":  {
+                                             "file":  "stats_row.png",
+                                             "w":  255,
+                                             "h":  19,
+                                             "kind":  "repeatY"
+                                         },
+                                 "bottom":  {
+                                                "file":  "stats_bottom.png",
+                                                "w":  255,
+                                                "h":  9
+                                            },
+                                 "headerTextArea":  {
+                                                        "x":  14,
+                                                        "y":  8,
+                                                        "w":  227,
+                                                        "h":  30
+                                                    },
+                                 "rowTextArea":  {
+                                                     "x":  14,
+                                                     "y":  2,
+                                                     "w":  227,
+                                                     "h":  16
+                                                 },
+                                 "insets":  {
+                                                "left":  12,
+                                                "top":  6,
+                                                "right":  10,
+                                                "bottom":  3
+                                            }
+                             },
+                   "centerPanel":  {
+                                       "summary":  "Row: center_panel_left (142) + K x center_panel_mid (49, tile horizontally) + center_panel_right (269); 183 high. Inner area = left margin 44 .. right margin 66.",
+                                       "left":  {
+                                                    "file":  "center_panel_left.png",
+                                                    "w":  142,
+                                                    "h":  183
+                                                },
+                                       "mid":  {
+                                                   "file":  "center_panel_mid.png",
+                                                   "w":  49,
+                                                   "h":  183,
+                                                   "kind":  "repeatX"
+                                               },
+                                       "right":  {
+                                                     "file":  "center_panel_right.png",
+                                                     "w":  269,
+                                                     "h":  183
+                                                 },
+                                       "innerMargins":  {
+                                                            "left":  44,
+                                                            "top":  41,
+                                                            "right":  66,
+                                                            "bottom":  14
+                                                        },
+                                       "note":  "inner area for total width Wc: x = 44, y = 41, w = Wc - 44 - 66, h = 183 - 41 - 14"
+                                   }
+               },
+    "robotPanel":  {
+                       "h":  480,
+                       "pieces":  {
+                                      "left":  {
+                                                   "file":  "robot-panel-left.png",
+                                                   "w":  940,
+                                                   "h":  480,
+                                                   "note":  "everything up to the left ends of the label boxes: left column, hologram, leader lines, label box left ends and header texts area start"
+                                               },
+                                      "mid":  {
+                                                  "file":  "robot-panel-mid.png",
+                                                  "w":  214,
+                                                  "h":  480,
+                                                  "kind":  "repeatX",
+                                                  "note":  "one exact period of the plain part (horizontal lines + fill), seamless; may be cropped to any width \u003e= 0 (background-repeat: repeat-x from its left edge)"
+                                              },
+                                      "right":  {
+                                                    "file":  "robot-panel-right.png",
+                                                    "w":  312,
+                                                    "h":  480,
+                                                    "note":  "right ends of the label boxes incl. //// and the right frame edge"
+                                                }
+                                  },
+                       "naturalWidth":  1466,
+                       "minWidth":  1352,
+                       "minMid":  100,
+                       "layout":  "total width Wt \u003e= minWidth: left at x=0, right at x=Wt-right.w, mid fills [left.w, Wt-right.w) repeating/cropping. All x/y below are in left-piece coordinates (= panel coordinates for x \u003c left.w). rightInset = distance of a right edge from the right edge of the whole panel, so width = Wt - x - rightInset.",
+                       "legacyFile":  {
+                                          "file":  "robot-panel.png",
+                                          "w":  1252,
+                                          "h":  480,
+                                          "note":  "left + right without mid (old 1252x480 single image), only kept for the old layout code"
+                                      },
+                       "sourceCrop":  {
+                                          "file":  "robot_hud_fixed5.png",
+                                          "x":  27,
+                                          "y":  108,
+                                          "w":  2140,
+                                          "h":  701,
+                                          "cutLeftMid":  1400,
+                                          "cutMidRight":  1712,
+                                          "scaleY":  0.684736,
+                                          "scaleXLeft":  0.684632
+                                      },
+                       "displayHint":  "show at height 320 css px at 1080p (= asset size * 2/3 * hud scale); panel width ~1250 css px = 1875 asset px",
+                       "titleSlot":  {
+                                         "x":  109,
+                                         "y":  41,
+                                         "w":  178,
+                                         "h":  27
+                                     },
+                       "leftColumn":  {
+                                          "leftArm":  {
+                                                          "iconBox":  {
+                                                                          "x":  77,
+                                                                          "y":  99,
+                                                                          "w":  89,
+                                                                          "h":  85
+                                                                      },
+                                                          "iconInner":  {
+                                                                            "x":  80,
+                                                                            "y":  101,
+                                                                            "w":  84,
+                                                                            "h":  79
+                                                                        },
+                                                          "nameSlot":  {
+                                                                           "x":  182,
+                                                                           "y":  104,
+                                                                           "w":  137,
+                                                                           "h":  22
+                                                                       },
+                                                          "ejectSlot":  {
+                                                                            "x":  176,
+                                                                            "y":  156,
+                                                                            "w":  136,
+                                                                            "h":  15
+                                                                        }
+                                                      },
+                                          "rightArm":  {
+                                                           "iconBox":  {
+                                                                           "x":  77,
+                                                                           "y":  199,
+                                                                           "w":  89,
+                                                                           "h":  85
+                                                                       },
+                                                           "iconInner":  {
+                                                                             "x":  80,
+                                                                             "y":  202,
+                                                                             "w":  84,
+                                                                             "h":  79
+                                                                         },
+                                                           "nameSlot":  {
+                                                                            "x":  182,
+                                                                            "y":  205,
+                                                                            "w":  137,
+                                                                            "h":  22
+                                                                        },
+                                                           "ejectSlot":  {
+                                                                             "x":  176,
+                                                                             "y":  257,
+                                                                             "w":  136,
+                                                                             "h":  15
+                                                                         }
+                                                       },
+                                          "crew":  {
+                                                       "iconBox":  {
+                                                                       "x":  77,
+                                                                       "y":  301,
+                                                                       "w":  89,
+                                                                       "h":  85
+                                                                   },
+                                                       "iconInner":  {
+                                                                         "x":  80,
+                                                                         "y":  303,
+                                                                         "w":  84,
+                                                                         "h":  79
+                                                                     },
+                                                       "nameSlot":  {
+                                                                        "x":  182,
+                                                                        "y":  306,
+                                                                        "w":  137,
+                                                                        "h":  22
+                                                                    },
+                                                       "ejectSlot":  {
+                                                                         "x":  176,
+                                                                         "y":  358,
+                                                                         "w":  136,
+                                                                         "h":  15
+                                                                     }
+                                                   }
+                                      },
+                       "leftColumnOrder":  [
+                                               "leftArm",
+                                               "rightArm",
+                                               "crew"
+                                           ],
+                       "masks":  {
+                                     "head":  {
+                                                  "file":  "robot-mask-head.png",
+                                                  "x":  513,
+                                                  "y":  29,
+                                                  "w":  50,
+                                                  "h":  69
+                                              },
+                                     "torso":  {
+                                                   "file":  "robot-mask-torso.png",
+                                                   "x":  491,
+                                                   "y":  72,
+                                                   "w":  97,
+                                                   "h":  146
+                                               },
+                                     "leftArm":  {
+                                                     "file":  "robot-mask-leftArm.png",
+                                                     "x":  586,
+                                                     "y":  72,
+                                                     "w":  65,
+                                                     "h":  192
+                                                 },
+                                     "rightArm":  {
+                                                      "file":  "robot-mask-rightArm.png",
+                                                      "x":  429,
+                                                      "y":  71,
+                                                      "w":  64,
+                                                      "h":  192
+                                                  },
+                                     "legs":  {
+                                                  "file":  "robot-mask-legs.png",
+                                                  "x":  442,
+                                                  "y":  216,
+                                                  "w":  201,
+                                                  "h":  221
+                                              }
+                                 },
+                       "maskNote":  "white, alpha = hologram brightness (peak ~0.95), tight crops positioned at x,y inside robot-panel.png; partition of the hologram without overlap. head = crew, leftArm = robot left = viewer right. Tint with CSS mask-image + background-color; base image already shows the hologram at 15 % brightness (= part missing).",
+                       "labels":  {
+                                      "crew":  {
+                                                   "outer":  {
+                                                                 "x":  785,
+                                                                 "y":  34,
+                                                                 "h":  74,
+                                                                 "rightInset":  39.1
+                                                             },
+                                                   "headerSlot":  {
+                                                                      "x":  800,
+                                                                      "y":  35,
+                                                                      "h":  18,
+                                                                      "rightInset":  93.9
+                                                                  },
+                                                   "bodySlot":  {
+                                                                    "x":  795,
+                                                                    "y":  56,
+                                                                    "h":  47,
+                                                                    "rightInset":  44.6
+                                                                },
+                                                   "dot":  {
+                                                               "x":  780.5,
+                                                               "y":  50.1
+                                                           }
+                                               },
+                                      "torso":  {
+                                                    "outer":  {
+                                                                  "x":  785,
+                                                                  "y":  118,
+                                                                  "h":  74,
+                                                                  "rightInset":  39.1
+                                                              },
+                                                    "headerSlot":  {
+                                                                       "x":  800,
+                                                                       "y":  119,
+                                                                       "h":  18,
+                                                                       "rightInset":  93.9
+                                                                   },
+                                                    "bodySlot":  {
+                                                                     "x":  795,
+                                                                     "y":  142,
+                                                                     "h":  46,
+                                                                     "rightInset":  44.6
+                                                                 },
+                                                    "dot":  {
+                                                                "x":  780.8,
+                                                                "y":  134.4
+                                                            }
+                                                },
+                                      "rightArm":  {
+                                                       "outer":  {
+                                                                     "x":  785,
+                                                                     "y":  202,
+                                                                     "h":  75,
+                                                                     "rightInset":  39.1
+                                                                 },
+                                                       "headerSlot":  {
+                                                                          "x":  800,
+                                                                          "y":  203,
+                                                                          "h":  18,
+                                                                          "rightInset":  93.9
+                                                                      },
+                                                       "bodySlot":  {
+                                                                        "x":  795,
+                                                                        "y":  226,
+                                                                        "h":  47,
+                                                                        "rightInset":  44.6
+                                                                    },
+                                                       "dot":  {
+                                                                   "x":  781.3,
+                                                                   "y":  222
+                                                               }
+                                                   },
+                                      "leftArm":  {
+                                                      "outer":  {
+                                                                    "x":  785,
+                                                                    "y":  288,
+                                                                    "h":  74,
+                                                                    "rightInset":  39.1
+                                                                },
+                                                      "headerSlot":  {
+                                                                         "x":  800,
+                                                                         "y":  290,
+                                                                         "h":  18,
+                                                                         "rightInset":  93.9
+                                                                     },
+                                                      "bodySlot":  {
+                                                                       "x":  795,
+                                                                       "y":  312,
+                                                                       "h":  47,
+                                                                       "rightInset":  44.6
+                                                                   },
+                                                      "dot":  {
+                                                                  "x":  781.2,
+                                                                  "y":  303.9
+                                                              }
+                                                  },
+                                      "legs":  {
+                                                   "outer":  {
+                                                                 "x":  785,
+                                                                 "y":  374,
+                                                                 "h":  70,
+                                                                 "rightInset":  39.1
+                                                             },
+                                                   "headerSlot":  {
+                                                                      "x":  800,
+                                                                      "y":  375,
+                                                                      "h":  18,
+                                                                      "rightInset":  93.9
+                                                                  },
+                                                   "bodySlot":  {
+                                                                    "x":  795,
+                                                                    "y":  398,
+                                                                    "h":  42,
+                                                                    "rightInset":  44.6
+                                                                },
+                                                   "dot":  {
+                                                               "x":  781.3,
+                                                               "y":  387.1
+                                                           }
+                                               }
+                                  },
+                       "labelOrder":  [
+                                          "crew",
+                                          "torso",
+                                          "rightArm",
+                                          "leftArm",
+                                          "legs"
+                                      ],
+                       "leaderDots":  {
+                                          "crew":  {
+                                                       "x":  554.4,
+                                                       "y":  62.6
+                                                   },
+                                          "torso":  {
+                                                        "x":  539.5,
+                                                        "y":  148.6
+                                                    },
+                                          "rightArm":  {
+                                                           "x":  455.3,
+                                                           "y":  216.4
+                                                       },
+                                          "leftArm":  {
+                                                          "x":  623,
+                                                          "y":  238.3
+                                                      },
+                                          "legs":  {
+                                                       "x":  625.4,
+                                                       "y":  363.1
+                                                   }
+                                      },
+                       "paintedOver":  "CONTROL, LEFT ARM, RIGHT ARM, CREW, the three decorative // bars, CREW/BODY/R. ARM/L. ARM/LEGS headers"
+                   },
+    "hazardStripe":  {
+                         "tile":  {
+                                      "file":  "hazard-stripe.png",
+                                      "w":  27,
+                                      "h":  17,
+                                      "kind":  "repeatX",
+                                      "sourceX":  1203,
+                                      "periodMismatch":  11.49,
+                                      "note":  "horizontally tileable yellow/black stripes (colours are NOT affected by the blue hue filter if used outside the filtered layer)"
+                                  },
+                         "bar":  {
+                                     "file":  "hazard-stripe-bar.png",
+                                     "w":  114,
+                                     "h":  28,
+                                     "note":  "the ready-made framed bar (dark outline, blue edge) incl. transparent corners"
+                                 }
+                     }
+}

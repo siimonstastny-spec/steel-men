@@ -1,0 +1,81 @@
+<!doctype html>
+<!-- Steel Mans – SIT -->
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Steel Mans</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1f24; font-family: system-ui, sans-serif; user-select: none; }
+    #app { position: fixed; inset: 0; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; min-width: 220px; max-width: 320px;
+      padding: 10px 12px; border-radius: 8px;
+      background: rgba(10, 14, 18, 0.75); color: #dfe6ee; font-size: 13px;
+    }
+    #hud h1 { margin: 0 0 8px; font-size: 15px; }
+    .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+    .row.hover { color: #ffd166; }
+    .name { width: 110px; }
+    .name small { margin-left: 6px; color: #8a96a3; }
+    #side { position: fixed; top: 12px; right: 12px; width: 220px; display: flex; flex-direction: column; gap: 10px; }
+    .panel {
+      padding: 10px 12px; border-radius: 8px;
+      background: rgba(10, 14, 18, 0.75); color: #dfe6ee; font-size: 13px;
+    }
+    .panel h2 { margin: 0 0 8px; font-size: 15px; }
+    .panel label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 5px 0; }
+    .panel select { width: 110px; background: #222a33; color: #dfe6ee; border: 1px solid #39424d; border-radius: 4px; }
+    .panel button {
+      width: 100%; margin-top: 8px; padding: 6px; border: 0; border-radius: 4px;
+      background: #4cc38a; color: #0d1a13; font-weight: 600; cursor: pointer;
+    }
+    .bar { flex: 1; height: 8px; background: #39424d; border-radius: 4px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; background: #4cc38a; }
+    .bar.xp > i { background: #6ea8fe; }
+    #commands { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px); box-sizing: border-box; }
+    #commands[hidden] { display: none; }
+    #commands button { width: auto; margin: 0; padding: 6px 10px; }
+    #commands button:disabled { background: #39424d; color: #8a96a3; cursor: default; }
+    #commands button.on { outline: 2px solid #dfe6ee; outline-offset: -2px; }
+    #commands button:not(.on)[data-cmd^="stance"]:not(:disabled) { background: #2f6b51; color: #dfe6ee; }
+    .panel input[type="color"] { width: 110px; height: 22px; padding: 0; border: 1px solid #39424d; border-radius: 4px; background: #222a33; cursor: pointer; }
+    .select-box { position: fixed; border: 1px solid #4cc38a; background: rgba(76, 195, 138, 0.15); pointer-events: none; z-index: 5; }
+    .select-box[hidden] { display: none; }
+    #commands kbd { margin-left: 4px; padding: 0 4px; border-radius: 3px; background: rgba(0, 0, 0, 0.2); font-size: 11px; }
+    .row.bonus { color: #9cc7ff; font-size: 12px; }
+    .row.dead .bar > i { background: #c0392b; }
+    #hint { margin-top: 8px; color: #8a96a3; font-size: 12px; }
+    .summary { margin-top: 8px; padding-top: 6px; border-top: 1px solid #39424d; font-size: 12px; color: #b9c4cf; }
+    .summary div { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; }
+    .summary b { color: #dfe6ee; font-weight: 600; }
+    .warn { color: #ffb454; }
+    /* Multiplayer: "waiting for players" / desync banner (main.js updateNetOverlay) */
+    .net-wait { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 50; max-width: calc(100vw - 32px);
+      padding: 8px 16px; border-radius: 6px; background: rgba(20, 24, 30, 0.9); border: 1px solid #ffb454; color: #ffd9a0;
+      font-size: 14px; text-align: center; pointer-events: none; }
+    .net-wait[hidden] { display: none; }
+  </style>
+  <link rel="stylesheet" href="./src/ui/menu.css" />
+  <link rel="stylesheet" href="./src/ui/hud.css" />
+  <link rel="stylesheet" href="./src/ui/selection-panel.css" />
+  <link rel="stylesheet" href="./src/ui/confirmDialog.css" />
+  <link rel="stylesheet" href="./src/ui/match.css" />
+  <!-- three.js 0.160.0 is local (vendor/three, offline play); tools\build-artifact.ps1 points the artifact copy at unpkg -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/build/three.module.js",
+        "three/addons/": "./vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <!-- In-game HUD is built by src/ui/Hud.js (styles: src/ui/hud.css); help text is behind its "?" button -->
+  <div id="menu" hidden></div>
+  <div id="net-wait" class="net-wait" hidden role="status" aria-live="polite"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

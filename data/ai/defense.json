@@ -1,0 +1,31 @@
+{
+  "_doc": "Base defence plans (difficulty.defense names one). Items are built one after another once startAfter (s) passed, every structure role in `requires` exists and the team has more than minOre spare ore. Directions: 'front' points from the HQ towards the approach (last known enemy base, else the map centre); angleOffset (rad) turns it. tower: `count` armed buildings (@tower) at `distance`, spread sideways by `spread` rad. wall: a straight line of `posts` posts (@wallPost) centred on the point at `distance`, across the direction; `turrets` = turrets (@turret) on its posts, middle posts first. funnel (killbox): two wall arms leave a `gap` wide passage at `distance`; each arm has `armPosts` posts and leans towards the enemy by `flare` (0 = straight across, 1 = 45°); `turretsPerArm` turrets on the posts next to the gap; towers of the plan stand behind the gap. edgeWall (AI v2, flank closing): starts at `distance` from the HQ in the direction turned by angleOffset and runs straight outwards to the map edge (its last segment is cut there, Walls.planWallLine); skipped when the edge is farther than maxLength; `turrets` on the posts nearest the base. Lines are checked with the game's own placeWall check (Walls.checkWallCommand) and shifted sideways up to AI.wallTries times.",
+  "none": { "items": [] },
+  "ring": {
+    "startAfter": 300,
+    "requires": ["@parts", "@assembly"],
+    "minOre": 250,
+    "items": [
+      { "type": "tower", "count": 1, "distance": 50, "spread": 0, "angleOffset": 0 },
+      { "type": "wall", "distance": 105, "posts": 3, "turrets": 1, "angleOffset": 0 },
+      { "type": "tower", "count": 1, "distance": 45, "spread": 0, "angleOffset": 1.2 },
+      { "type": "tower", "count": 1, "distance": 45, "spread": 0, "angleOffset": -1.2 },
+      { "type": "wall", "distance": 100, "posts": 2, "turrets": 1, "angleOffset": 0.8 },
+      { "type": "wall", "distance": 100, "posts": 2, "turrets": 1, "angleOffset": -0.8 }
+    ]
+  },
+  "killbox": {
+    "startAfter": 240,
+    "requires": ["@parts"],
+    "minOre": 200,
+    "items": [
+      { "type": "funnel", "distance": 115, "gap": 44, "armPosts": 4, "flare": 0.45, "turretsPerArm": 2, "angleOffset": 0 },
+      { "type": "tower", "count": 2, "distance": 85, "spread": 0.18, "angleOffset": 0 },
+      { "type": "tower", "count": 1, "distance": 60, "spread": 0, "angleOffset": 0 },
+      { "type": "wall", "distance": 80, "posts": 3, "turrets": 1, "angleOffset": 1.35 },
+      { "type": "wall", "distance": 80, "posts": 3, "turrets": 1, "angleOffset": -1.35 },
+      { "type": "edgeWall", "distance": 95, "angleOffset": 1.5708, "turrets": 1, "maxLength": 360 },
+      { "type": "edgeWall", "distance": 95, "angleOffset": -1.5708, "turrets": 1, "maxLength": 360 }
+    ]
+  }
+}

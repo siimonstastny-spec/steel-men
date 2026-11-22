@@ -1,0 +1,1894 @@
+{
+  "legs": [
+    {
+      "path": "RobotPartsAlien/AlienGenericLegs_Skel.glb",
+      "set": "Alien",
+      "race": null,
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsArmor/ArmorLegsX_Skel.glb",
+      "set": "Armor",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsArmor/ArmorLegsY_Skel.glb",
+      "set": "Armor",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsArmor/ArmorLegsZ_Skel.glb",
+      "set": "Armor",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/BasicLegsX_Skel.glb",
+      "set": "Basic",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/BasicLegsY_Skel.glb",
+      "set": "Basic",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/BasicLegsZ_Skel.glb",
+      "set": "Basic",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsBlastPulse/BlastPulseLegsX_Skel.glb",
+      "set": "BlastPulse",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsBlastPulse/BlastPulseLegsY_Skel.glb",
+      "set": "BlastPulse",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsBlastPulse/BlastPulseLegsZ_Skel.glb",
+      "set": "BlastPulse",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsDrunkMissile/DrunkMissileLegsX_Skel.glb",
+      "set": "DrunkMissile",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_SFX_1",
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsDrunkMissile/DrunkMissileLegsY_Skel.glb",
+      "set": "DrunkMissile",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_SFX_1",
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsDrunkMissile/DrunkMissileLegsZ_Skel.glb",
+      "set": "DrunkMissile",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_SFX_1",
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsFrame/FrameLegsSkel.glb",
+      "set": "Frame",
+      "race": null,
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHighSpeed/HighSpeedLegsX_Skel.glb",
+      "set": "HighSpeed",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHighSpeed/HighSpeedLegsY_Skel.glb",
+      "set": "HighSpeed",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHighSpeed/HighSpeedLegsZ_Skel.glb",
+      "set": "HighSpeed",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHighStrength/HighStrengthLegsX_Skel.glb",
+      "set": "HighStrength",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHighStrength/HighStrengthLegsY_Skel.glb",
+      "set": "HighStrength",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHighStrength/HighStrengthLegsZ_Skel.glb",
+      "set": "HighStrength",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHTHupgrade/HTHupgradeLegsX_Skel.glb",
+      "set": "HTHupgrade",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHTHupgrade/HTHupgradeLegsY_Skel.glb",
+      "set": "HTHupgrade",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsHTHupgrade/HTHupgradeLegsZ_Skel.glb",
+      "set": "HTHupgrade",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsJumpJet/JumpJetLegsX_Skel.glb",
+      "set": "JumpJet",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsJumpJet/JumpJetLegsY_Skel.glb",
+      "set": "JumpJet",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsJumpJet/JumpJetLegsZ_Skel.glb",
+      "set": "JumpJet",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsLaser/LaserLegsX_Skel.glb",
+      "set": "Laser",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLaser/LaserLegsY_Skel.glb",
+      "set": "Laser",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLaser/LaserLegsZ_Skel.glb",
+      "set": "Laser",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerGun/PowerGunLegsX_Skel.glb",
+      "set": "PowerGun",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_SFX_1",
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerGun/PowerGunLegsY_Skel.glb",
+      "set": "PowerGun",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_SFX_1",
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerGun/PowerGunLegsZ_Skel.glb",
+      "set": "PowerGun",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_SFX_1",
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerPulse/PowerPulseLegsX_Skel.glb",
+      "set": "PowerPulse",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerPulse/PowerPulseLegsY_Skel.glb",
+      "set": "PowerPulse",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerPulse/PowerPulseLegsZ_Skel.glb",
+      "set": "PowerPulse",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerShield/PowerShieldLegsX_Skel.glb",
+      "set": "PowerShield",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_Attach_Shield"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerShield/PowerShieldLegsY_Skel.glb",
+      "set": "PowerShield",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_Attach_Shield"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerShield/PowerShieldLegsZ_Skel.glb",
+      "set": "PowerShield",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount",
+        "socket_Attach_Shield"
+      ]
+    },
+    {
+      "path": "RobotPartsRecon/ReconLegsX_Skel.glb",
+      "set": "Recon",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsRecon/ReconLegsY_Skel.glb",
+      "set": "Recon",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsRecon/ReconLegsZ_Skel.glb",
+      "set": "Recon",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsSonar/SonarLegsX_Skel.glb",
+      "set": "Sonar",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsSonar/SonarLegsY_Skel.glb",
+      "set": "Sonar",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsSonar/SonarLegsZ_Skel.glb",
+      "set": "Sonar",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsSteady/SteadyLegsX_Skel.glb",
+      "set": "Steady",
+      "race": "X",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsSteady/SteadyLegsY_Skel.glb",
+      "set": "Steady",
+      "race": "Y",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    },
+    {
+      "path": "RobotPartsSteady/SteadyLegsZ_Skel.glb",
+      "set": "Steady",
+      "race": "Z",
+      "sockets": [
+        "socket_TorsoMount"
+      ]
+    }
+  ],
+  "torso": [
+    {
+      "path": "RobotPartsAlien/AlienTorso_Skel.glb",
+      "set": "Alien",
+      "race": null,
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsArmor/ArmorTorsoX_Skel.glb",
+      "set": "Armor",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsArmor/ArmorTorsoY_Skel.glb",
+      "set": "Armor",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsArmor/ArmorTorsoZ_Skel.glb",
+      "set": "Armor",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/BasicTorsoX_Skel.glb",
+      "set": "Basic",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/BasicTorsoY_Skel.glb",
+      "set": "Basic",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/BasicTorsoZ_Skel.glb",
+      "set": "Basic",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsCamo/GRPCammoTorsoX_Skel.glb",
+      "set": "Camo",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsCamo/GRPCammoTorsoY_Skel.glb",
+      "set": "Camo",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsCamo/GRPCammoTorsoZ_Skel.glb",
+      "set": "Camo",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsDrunkMissile/DrunkMissileTorsoX_Skel.glb",
+      "set": "DrunkMissile",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsDrunkMissile/DrunkMissileTorsoY_Skel.glb",
+      "set": "DrunkMissile",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsDrunkMissile/DrunkMissileTorsoZ_Skel.glb",
+      "set": "DrunkMissile",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsEMP/EMPTorsoX_Skel.glb",
+      "set": "EMP",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsEMP/EMPTorsoY_Skel.glb",
+      "set": "EMP",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsEMP/EMPTorsoZ_Skel.glb",
+      "set": "EMP",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsFlak/FlakTorsoX_Skel.glb",
+      "set": "Flak",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsFlak/FlakTorsoY_Skel.glb",
+      "set": "Flak",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsFlak/FlakTorsoZ_Skel.glb",
+      "set": "Flak",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsForceField/ForceFieldTorsoX_Skel.glb",
+      "set": "ForceField",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsForceField/ForceFieldTorsoY_Skel.glb",
+      "set": "ForceField",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsForceField/ForceFieldTorsoZ_Skel.glb",
+      "set": "ForceField",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsFrame/FrameTorsoSkel.glb",
+      "set": "Frame",
+      "race": null,
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft"
+      ]
+    },
+    {
+      "path": "RobotPartsHowitzer/HowitzerTorsoX_Skel.glb",
+      "set": "Howitzer",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsHowitzer/HowitzerTorsoY_Skel.glb",
+      "set": "Howitzer",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsHowitzer/HowitzerTorsoZ_Skel.glb",
+      "set": "Howitzer",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsJetPack/JetPackTorsoX_Skel.glb",
+      "set": "JetPack",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner",
+        "socket_Jet_Pack"
+      ]
+    },
+    {
+      "path": "RobotPartsJetPack/JetPackTorsoY_Skel.glb",
+      "set": "JetPack",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner",
+        "socket_Jet_Pack"
+      ]
+    },
+    {
+      "path": "RobotPartsJetPack/JetPackTorsoZ_Skel.glb",
+      "set": "JetPack",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Jet_Pack",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsRecon/ReconTorsoX_Skel.glb",
+      "set": "Recon",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsRecon/ReconTorsoY_Skel.glb",
+      "set": "Recon",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsRecon/ReconTorsoZ_Skel.glb",
+      "set": "Recon",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsSelfRepair/SelfRepairTorsoX_Skel.glb",
+      "set": "SelfRepair",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsSelfRepair/SelfRepairTorsoY_Skel.glb",
+      "set": "SelfRepair",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach",
+        "socket_Attach_2",
+        "socket_Attach_3",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsSelfRepair/SelfRepairTorsoZ_Skel.glb",
+      "set": "SelfRepair",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsTracer/TracerFireTorsoX_Skel.glb",
+      "set": "Tracer",
+      "race": "X",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsTracer/TracerFireTorsoY_Skel.glb",
+      "set": "Tracer",
+      "race": "Y",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    },
+    {
+      "path": "RobotPartsTracer/TracerFireTorsoZ_Skel.glb",
+      "set": "Tracer",
+      "race": "Z",
+      "sockets": [
+        "socket_ArmRight",
+        "socket_ArmLeft",
+        "socket_Attach_Banner"
+      ]
+    }
+  ],
+  "leftArm": [
+    {
+      "path": "RobotPartsAlien/LeftAlienArm_Skel.glb",
+      "set": "Alien",
+      "race": null,
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsArmor/LeftArmorFistX_Skel.glb",
+      "set": "Armor",
+      "race": "X",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsArmor/LeftArmorFistY_Skel.glb",
+      "set": "Armor",
+      "race": "Y",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsArmor/LeftArmorFistZ_Skel.glb",
+      "set": "Armor",
+      "race": "Z",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsAxe/LeftAxeArmX_Skel.glb",
+      "set": "Axe",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsAxe/LeftAxeArmY_Skel.glb",
+      "set": "Axe",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsAxe/LeftAxeArmZ_Skel.glb",
+      "set": "Axe",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/LeftBasicHandArmX_Skel.glb",
+      "set": "Basic",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/LeftBasicHandArmY_Skel.glb",
+      "set": "Basic",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/LeftBasicHandArmZ_Skel.glb",
+      "set": "Basic",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBladeArm/LeftBladeFistArmX_Skel.glb",
+      "set": "BladeArm",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBladeArm/LeftBladeFistArmY_Skel.glb",
+      "set": "BladeArm",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBladeArm/LeftBladeFistArmZ_Skel.glb",
+      "set": "BladeArm",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsCarpetBomb/LeftCarpetBombArmX_Skel.glb",
+      "set": "CarpetBomb",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsCarpetBomb/LeftCarpetBombArmY_Skel.glb",
+      "set": "CarpetBomb",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsCarpetBomb/LeftCarpetBombArmZ_Skel.glb",
+      "set": "CarpetBomb",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsElectroGrip/LeftElectroGripArmX_Skel.glb",
+      "set": "ElectroGrip",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsElectroGrip/LeftElectroGripArmY_Skel.glb",
+      "set": "ElectroGrip",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsElectroGrip/LeftElectroGripArmZ_Skel.glb",
+      "set": "ElectroGrip",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyBlaster/LeftEnergyBlasterArmX_Skel.glb",
+      "set": "EnergyBlaster",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyBlaster/LeftEnergyBlasterArmY_Skel.glb",
+      "set": "EnergyBlaster",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyBlaster/LeftEnergyBlasterArmZ_Skel.glb",
+      "set": "EnergyBlaster",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyShield/LeftEnergyShieldArmX_Skel.glb",
+      "set": "EnergyShield",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyShield/LeftEnergyShieldArmY_Skel.glb",
+      "set": "EnergyShield",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyShield/LeftEnergyShieldArmZ_Skel.glb",
+      "set": "EnergyShield",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsFrame/LeftFrameArmSkel.glb",
+      "set": "Frame",
+      "race": null,
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsGattlingGun/LeftGattlingGunArmX_Skel.glb",
+      "set": "GattlingGun",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsGattlingGun/LeftGattlingGunArmY_Skel.glb",
+      "set": "GattlingGun",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsGattlingGun/LeftGattlingGunArmZ_Skel.glb",
+      "set": "GattlingGun",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHammerHand/LeftHammerHandArmX_Skel.glb",
+      "set": "HammerHand",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHammerHand/LeftHammerHandArmY_Skel.glb",
+      "set": "HammerHand",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHammerHand/LeftHammerHandArmZ_Skel.glb",
+      "set": "HammerHand",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHomingMissile/LeftHomingMissileArmX_Skel.glb",
+      "set": "HomingMissile",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHomingMissile/LeftHomingMissileArmY_Skel.glb",
+      "set": "HomingMissile",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHomingMissile/LeftHomingMissileArmZ_Skel.glb",
+      "set": "HomingMissile",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsKatanaSword/LeftKatanaSwordArmX_Skel.glb",
+      "set": "KatanaSword",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsKatanaSword/LeftKatanaSwordArmY_Skel.glb",
+      "set": "KatanaSword",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsKatanaSword/LeftKatanaSwordArmZ_Skel.glb",
+      "set": "KatanaSword",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLaserSword/LeftLaserSwordArmX_Skel.glb",
+      "set": "LaserSword",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLaserSword/LeftLaserSwordArmY_Skel.glb",
+      "set": "LaserSword",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLaserSword/LeftLaserSwordArmZ_Skel.glb",
+      "set": "LaserSword",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLongMissile/LeftLongMissileArmX_Skel.glb",
+      "set": "LongMissile",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLongMissile/LeftLongMissileArmY_Skel.glb",
+      "set": "LongMissile",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLongMissile/LeftLongMissileArmZ_Skel.glb",
+      "set": "LongMissile",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsMultiClaw/LeftMultiClawArmX_Skel.glb",
+      "set": "MultiClaw",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsMultiClaw/LeftMultiClawArmY_Skel.glb",
+      "set": "MultiClaw",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsMultiClaw/LeftMultiClawArmZ_Skel.glb",
+      "set": "MultiClaw",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPlasmaCannon/LeftPlasmaCannonArmX_Skel.glb",
+      "set": "PlasmaCannon",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPlasmaCannon/LeftPlasmaCannonArmY_Skel.glb",
+      "set": "PlasmaCannon",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPlasmaCannon/LeftPlasmaCannonArmZ_Skel.glb",
+      "set": "PlasmaCannon",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerFist/LeftPowerFistArmX_Skel.glb",
+      "set": "PowerFist",
+      "race": "X",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsPowerFist/LeftPowerFistArmY_Skel.glb",
+      "set": "PowerFist",
+      "race": "Y",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsPowerFist/LeftPowerFistArmZ_Skel.glb",
+      "set": "PowerFist",
+      "race": "Z",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsProtoBlast/LeftProtoBlastArmX_Skel.glb",
+      "set": "ProtoBlast",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsProtoBlast/LeftProtoBlastArmY_Skel.glb",
+      "set": "ProtoBlast",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsProtoBlast/LeftProtoBlastArmZ_Skel.glb",
+      "set": "ProtoBlast",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsRotaryBlade/LeftRotaryBladeArmX_Skel.glb",
+      "set": "RotaryBlade",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsRotaryBlade/LeftRotaryBladeArmY_Skel.glb",
+      "set": "RotaryBlade",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsRotaryBlade/LeftRotaryBladeArmZ_Skel.glb",
+      "set": "RotaryBlade",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsShield/LeftShieldArmX_Skel.glb",
+      "set": "Shield",
+      "race": "X",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsShield/LeftShieldArmY_Skel.glb",
+      "set": "Shield",
+      "race": "Y",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsShield/LeftShieldArmZ_Skel.glb",
+      "set": "Shield",
+      "race": "Z",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsSniperLaser/LeftSniperLaserArmX_Skel.glb",
+      "set": "SniperLaser",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsSniperLaser/LeftSniperLaserArmY_Skel.glb",
+      "set": "SniperLaser",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsSniperLaser/LeftSniperLaserArmZ_Skel.glb",
+      "set": "SniperLaser",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    }
+  ],
+  "rightArm": [
+    {
+      "path": "RobotPartsAlien/RightAlienArm_Skel.glb",
+      "set": "Alien",
+      "race": null,
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsArmor/RightArmorFistX_Skel.glb",
+      "set": "Armor",
+      "race": "X",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsArmor/RightArmorFistY_Skel.glb",
+      "set": "Armor",
+      "race": "Y",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsArmor/RightArmorFistZ_Skel.glb",
+      "set": "Armor",
+      "race": "Z",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsAxe/RightAxeArmX_Skel.glb",
+      "set": "Axe",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsAxe/RightAxeArmY_Skel.glb",
+      "set": "Axe",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsAxe/RightAxeArmZ_Skel.glb",
+      "set": "Axe",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/RightBasicHandArmX_Skel.glb",
+      "set": "Basic",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/RightBasicHandArmY_Skel.glb",
+      "set": "Basic",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBasic/RightBasicHandArmZ_Skel.glb",
+      "set": "Basic",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBladeArm/RightBladeFistArmX_Skel.glb",
+      "set": "BladeArm",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBladeArm/RightBladeFistArmY_Skel.glb",
+      "set": "BladeArm",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsBladeArm/RightBladeFistArmZ_Skel.glb",
+      "set": "BladeArm",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsCarpetBomb/RightCarpetBombArmX_Skel.glb",
+      "set": "CarpetBomb",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsCarpetBomb/RightCarpetBombArmY_Skel.glb",
+      "set": "CarpetBomb",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsCarpetBomb/RightCarpetBombArmZ_Skel.glb",
+      "set": "CarpetBomb",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsElectroGrip/RightElectroGripArmX_Skel.glb",
+      "set": "ElectroGrip",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsElectroGrip/RightElectroGripArmY_Skel.glb",
+      "set": "ElectroGrip",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsElectroGrip/RightElectroGripArmZ_Skel.glb",
+      "set": "ElectroGrip",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyBlaster/RightEnergyBlasterArmX_Skel.glb",
+      "set": "EnergyBlaster",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyBlaster/RightEnergyBlasterArmY_Skel.glb",
+      "set": "EnergyBlaster",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyBlaster/RightEnergyBlasterArmZ_Skel.glb",
+      "set": "EnergyBlaster",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyShield/RightEnergyShieldArmX_Skel.glb",
+      "set": "EnergyShield",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyShield/RightEnergyShieldArmY_Skel.glb",
+      "set": "EnergyShield",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsEnergyShield/RightEnergyShieldArmZ_Skel.glb",
+      "set": "EnergyShield",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsFrame/RightFrameArmSkel.glb",
+      "set": "Frame",
+      "race": null,
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsGattlingGun/RightGattlingGunArmX_Skel.glb",
+      "set": "GattlingGun",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsGattlingGun/RightGattlingGunArmY_Skel.glb",
+      "set": "GattlingGun",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsGattlingGun/RightGattlingGunArmZ_Skel.glb",
+      "set": "GattlingGun",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHammerHand/RightHammerHandArmX_Skel.glb",
+      "set": "HammerHand",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHammerHand/RightHammerHandArmY_Skel.glb",
+      "set": "HammerHand",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHammerHand/RightHammerHandArmZ_Skel.glb",
+      "set": "HammerHand",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHomingMissile/RightHomingMissileArmX_Skel.glb",
+      "set": "HomingMissile",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHomingMissile/RightHomingMissileArmY_Skel.glb",
+      "set": "HomingMissile",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsHomingMissile/RightHomingMissileArmZ_Skel.glb",
+      "set": "HomingMissile",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsKatanaSword/RightKatanaSwordArmX_Skel.glb",
+      "set": "KatanaSword",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsKatanaSword/RightKatanaSwordArmY_Skel.glb",
+      "set": "KatanaSword",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsKatanaSword/RightKatanaSwordArmZ_Skel.glb",
+      "set": "KatanaSword",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLaserSword/RightLaserSwordArmX_Skel.glb",
+      "set": "LaserSword",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLaserSword/RightLaserSwordArmY_Skel.glb",
+      "set": "LaserSword",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLaserSword/RightLaserSwordArmZ_Skel.glb",
+      "set": "LaserSword",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLongMissile/RightLongMissileArmX_Skel.glb",
+      "set": "LongMissile",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLongMissile/RightLongMissileArmY_Skel.glb",
+      "set": "LongMissile",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsLongMissile/RightLongMissileArmZ_Skel.glb",
+      "set": "LongMissile",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsMultiClaw/RightMultiClawArmX_Skel.glb",
+      "set": "MultiClaw",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsMultiClaw/RightMultiClawArmY_Skel.glb",
+      "set": "MultiClaw",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsMultiClaw/RightMultiClawArmZ_Skel.glb",
+      "set": "MultiClaw",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPlasmaCannon/RightPlasmaCannonArmX_Skel.glb",
+      "set": "PlasmaCannon",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPlasmaCannon/RightPlasmaCannonArmY_Skel.glb",
+      "set": "PlasmaCannon",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPlasmaCannon/RightPlasmaCannonArmZ_Skel.glb",
+      "set": "PlasmaCannon",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsPowerFist/RightPowerFistArmX_Skel.glb",
+      "set": "PowerFist",
+      "race": "X",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsPowerFist/RightPowerFistArmY_Skel.glb",
+      "set": "PowerFist",
+      "race": "Y",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsPowerFist/RightPowerFistArmZ_Skel.glb",
+      "set": "PowerFist",
+      "race": "Z",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsProtoBlast/RightProtoBlastArmX_Skel.glb",
+      "set": "ProtoBlast",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsProtoBlast/RightProtoBlastArmY_Skel.glb",
+      "set": "ProtoBlast",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsProtoBlast/RightProtoBlastArmZ_Skel.glb",
+      "set": "ProtoBlast",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1"
+      ]
+    },
+    {
+      "path": "RobotPartsRotaryBlade/RightRotaryBladeArmX_Skel.glb",
+      "set": "RotaryBlade",
+      "race": "X",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsRotaryBlade/RightRotaryBladeArmY_Skel.glb",
+      "set": "RotaryBlade",
+      "race": "Y",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsRotaryBlade/RightRotaryBladeArmZ_Skel.glb",
+      "set": "RotaryBlade",
+      "race": "Z",
+      "sockets": [
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsShield/RightShieldArmX_Skel.glb",
+      "set": "Shield",
+      "race": "X",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsShield/RightShieldArmY_Skel.glb",
+      "set": "Shield",
+      "race": "Y",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsShield/RightShieldArmZ_Skel.glb",
+      "set": "Shield",
+      "race": "Z",
+      "sockets": []
+    },
+    {
+      "path": "RobotPartsSniperLaser/RightSniperLaserArmX_Skel.glb",
+      "set": "SniperLaser",
+      "race": "X",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsSniperLaser/RightSniperLaserArmY_Skel.glb",
+      "set": "SniperLaser",
+      "race": "Y",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    },
+    {
+      "path": "RobotPartsSniperLaser/RightSniperLaserArmZ_Skel.glb",
+      "set": "SniperLaser",
+      "race": "Z",
+      "sockets": [
+        "socket_Launch_1",
+        "socket_SFX_1"
+      ]
+    }
+  ],
+  "other": []
+}

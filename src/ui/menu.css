@@ -1,0 +1,218 @@
+/* Steel Mans – start menu. All colours are the variables below – change the look here. */
+/* Industrial steel look: dark brushed plates, bevelled edges, one neon accent (teal). Variables live on :root so HUD/match/confirm share them. */
+:root {
+  --menu-text: #d9e0e7;
+  --menu-text-bright: #f2f6f9;
+  --menu-muted: #8f9aa5;
+  --menu-faint: #5d6772;
+  --menu-border: #3d4650;
+  --menu-border-soft: #2b323a;
+  --menu-border-hover: #7a8693;
+  --menu-accent: #3ea6ff;
+  --menu-accent-hover: #8fd0ff;
+  --menu-accent-text: #e9f5ff;
+  --menu-accent-glow: rgba(62, 166, 255, 0.10);
+  --menu-neon-glow: 0 0 8px rgba(62, 166, 255, 0.55), 0 0 2px rgba(62, 166, 255, 0.9);
+  --menu-neon-inset: inset 0 0 14px rgba(62, 166, 255, 0.40), inset 0 0 0 1px rgba(62, 166, 255, 0.85);
+  --menu-selected-bg: rgba(24, 74, 128, 0.40);
+  --menu-hover-bg: rgba(24, 74, 128, 0.55);
+  /* button plate cut at the bottom right like the menu artwork (data/image/background_menu) */
+  --menu-btn-cut: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+  --menu-warn: #ffb454;
+  --menu-danger: #b24a4a;
+  --menu-danger-bg: #6e2626;
+  --menu-bg-strong: rgba(8, 11, 14, 0.97);
+  --menu-bg-weak: rgba(8, 11, 14, 0.82);
+  --menu-card-bg: rgba(18, 22, 27, 0.95);
+  --menu-btn-bg: rgba(40, 47, 55, 0.95);
+  --menu-faction-bg: #1b2128;
+  --menu-outline: rgba(255, 255, 255, 0.15);
+  --menu-shadow: rgba(0, 0, 0, 0.6);
+  --menu-font: "Bahnschrift", "Segoe UI", system-ui, sans-serif;
+  /* brushed steel: fine horizontal grain over a vertical metal gradient */
+  --menu-brushed: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, rgba(0,0,0,0.05) 1px 3px);
+  --menu-plate: linear-gradient(180deg, #2c333b 0%, #1d2329 55%, #171b20 100%);
+  --menu-plate-hi: linear-gradient(180deg, #3a434d 0%, #272e35 55%, #1e242a 100%);
+  --menu-edge: inset 1px 1px 0 rgba(255,255,255,0.10), inset -1px -1px 0 rgba(0,0,0,0.6);
+  --menu-drop: 0 3px 8px rgba(0,0,0,0.55);
+  --menu-bevel: 8px;
+}
+#menu {
+  position: fixed; inset: 0; z-index: 20; color: var(--menu-text); font-family: var(--menu-font); overflow-y: auto;
+}
+#menu[hidden], #menu [hidden] { display: none !important; }
+/* game HUD stays hidden while the menu is open */
+body:has(#menu:not([hidden])) :is(#hud, #side, #commands) { visibility: hidden; }
+.menu-bg {
+  position: fixed; inset: 0;
+  /* artwork (data/image/ui/menu-bg.jpg, made by tools/slice-ui.ps1); the left column is only lightly darkened so the menu stays readable */
+  background:
+    linear-gradient(90deg, rgba(5, 8, 12, 0.72) 0%, rgba(5, 8, 12, 0.55) 34%, rgba(5, 8, 12, 0.15) 52%, rgba(5, 8, 12, 0) 68%),
+    url("../../data/image/ui/menu-bg.jpg") center / cover no-repeat,
+    linear-gradient(115deg, var(--menu-bg-strong) 35%, var(--menu-bg-weak));
+}
+/* The artwork is much wider than 16:9, so `cover` crops its painted frame: draw the frame again as a 9-slice
+   around the whole screen (corners keep their shape, the straight parts stretch) */
+.menu-bg::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  border: var(--menu-frame-w, 30px) solid transparent;
+  border-image: url("../../data/image/ui/game-frame.png") 46 / var(--menu-frame-w, 30px) stretch;
+}
+.menu-content {
+  position: relative; min-height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; justify-content: center; gap: 28px;
+  padding: 48px max(16px, 8vw);
+}
+.menu-title h1 {
+  margin: 0; font-size: clamp(40px, 8vw, 88px); line-height: 0.95; letter-spacing: 0.08em;
+  text-transform: uppercase; font-weight: 800;
+  background: linear-gradient(180deg, var(--menu-text-bright), var(--menu-muted)); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.menu-title p { margin: 10px 0 0; color: var(--menu-muted); font-size: 15px; letter-spacing: 0.04em; }
+
+.menu-home { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.menu-btn {
+  min-width: 220px; padding: 11px 22px; border: 1px solid var(--menu-border); border-radius: 0;
+  background: var(--menu-brushed), var(--menu-plate); color: var(--menu-text); font: 700 15px var(--menu-font);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  box-shadow: var(--menu-edge), var(--menu-drop);
+  text-align: left; cursor: pointer; transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.menu-btn { clip-path: var(--menu-btn-cut); position: relative; padding-right: 40px; }
+.menu-btn:hover { border-color: var(--menu-accent); background: var(--menu-brushed), var(--menu-plate-hi); color: var(--menu-text-bright); box-shadow: var(--menu-edge), var(--menu-neon-inset); }
+.menu-btn:active { box-shadow: inset 1px 2px 4px rgba(0,0,0,0.7), var(--menu-neon-inset); transform: translateY(1px); }
+.menu-btn:focus-visible { outline: none; box-shadow: var(--menu-edge), var(--menu-neon-inset); }
+.menu-btn:disabled { color: var(--menu-faint); border-color: var(--menu-border-soft); background: #1a1e23; box-shadow: none; }
+/* primary / hovered: dark glass with a neon frame and a chevron, like the highlighted button of the artwork */
+.menu-btn.primary { background: linear-gradient(180deg, rgba(14, 32, 52, 0.92), rgba(8, 18, 30, 0.92)); border-color: var(--menu-accent); color: var(--menu-accent-text); box-shadow: var(--menu-neon-inset); text-shadow: 0 0 6px rgba(62, 166, 255, 0.6); }
+.menu-btn.primary:hover { background: linear-gradient(180deg, rgba(22, 50, 80, 0.95), rgba(10, 24, 40, 0.95)); }
+.menu-btn.primary::after, .menu-btn:not(:disabled):hover::after {
+  content: "›"; position: absolute; right: 16px; top: 50%; transform: translateY(-52%);
+  font-size: 1.6em; line-height: 1; color: var(--menu-accent); text-shadow: 0 0 6px rgba(62, 166, 255, 0.8);
+}
+.menu-version { margin-top: 6px; color: var(--menu-faint); font-size: 12px; }
+
+.menu-card {
+  position: relative; max-width: 760px; padding: 18px 20px; border: 1px solid var(--menu-border); border-radius: 0;
+  background: var(--menu-brushed), linear-gradient(180deg, rgba(30,36,43,0.97), var(--menu-card-bg));
+  box-shadow: var(--menu-edge), 0 6px 18px rgba(0,0,0,0.6);
+}
+/* In a running match (HUD visible) the game menu / settings opened over it wear the player's faction colours,
+   the same variables Hud.applyFaction sets for the HUD (neon, panel tint, frame recolour) */
+body:has(#hud-root:not([hidden])) #menu {
+  --menu-accent: var(--hud-neon, #3ea6ff);
+  --menu-neon-glow: 0 0 8px color-mix(in srgb, var(--hud-neon, #3ea6ff) 55%, transparent), 0 0 2px var(--hud-neon, #3ea6ff);
+  --menu-neon-inset: inset 0 0 14px color-mix(in srgb, var(--hud-neon, #3ea6ff) 40%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--hud-neon, #3ea6ff) 85%, transparent);
+  --menu-border: var(--hud-border, #3d4650);
+}
+body:has(#hud-root:not([hidden])) #menu .menu-bg::after { filter: var(--hud-frame-filter, none); }
+body:has(#hud-root:not([hidden])) #menu .menu-card {
+  background: var(--menu-brushed), linear-gradient(180deg, var(--hud-panel-top, rgba(30,36,43,0.97)), var(--hud-panel-bottom, var(--menu-card-bg)));
+}
+/* weld seam along the top edge + corner rivets */
+.menu-card::before {
+  content: ""; position: absolute; left: 12px; right: 12px; top: 5px; height: 2px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(47,212,207,0.35), transparent);
+}
+.menu-card::after {
+  content: ""; position: absolute; inset: 4px; pointer-events: none;
+  background:
+    radial-gradient(circle, #6b7681 0 1.5px, transparent 2px) left top / 6px 6px no-repeat,
+    radial-gradient(circle, #6b7681 0 1.5px, transparent 2px) right top / 6px 6px no-repeat,
+    radial-gradient(circle, #6b7681 0 1.5px, transparent 2px) left bottom / 6px 6px no-repeat,
+    radial-gradient(circle, #6b7681 0 1.5px, transparent 2px) right bottom / 6px 6px no-repeat;
+}
+.menu-card h2 { margin: 0 0 12px; font-size: 18px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--menu-accent); text-shadow: 0 0 6px rgba(47,212,207,0.35); }
+.menu-muted { color: var(--menu-muted); }
+.menu-warn { color: var(--menu-warn); font-size: 13px; }
+/* [B1] Back / cancel on the left, continue / start / confirm on the right (rule of every screen) */
+.menu-actions { display: flex; gap: 10px; justify-content: space-between; margin-top: 16px; flex-wrap: wrap; }
+.menu-actions > .menu-btn.primary { margin-left: auto; }
+.menu-actions .menu-btn { min-width: 140px; text-align: center; }
+
+.team-block { padding: 12px 0; border-top: 1px solid var(--menu-border-soft); }
+.team-block h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.12em; }
+.team-dot { width: 12px; height: 12px; border-radius: 0; box-shadow: 0 0 0 2px var(--menu-outline); }
+.row-label { margin: 10px 0 6px; color: var(--menu-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; }
+
+.factions { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.faction {
+  display: flex; flex-direction: column; gap: 3px; padding: 9px 11px; text-align: left; cursor: pointer;
+  border: 1px solid var(--menu-border); border-radius: 0; background: var(--menu-brushed), var(--menu-faction-bg); color: var(--menu-text); font: 14px var(--menu-font);
+  box-shadow: var(--menu-edge); text-transform: uppercase; letter-spacing: 0.08em;
+}
+.faction small { color: var(--menu-muted); font-size: 11px; text-transform: none; letter-spacing: 0.02em; }
+.faction:hover { border-color: var(--menu-border-hover); }
+.faction:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: 2px; }
+.faction.on { border-color: var(--menu-accent); background: var(--menu-selected-bg); box-shadow: var(--menu-edge), var(--menu-neon-glow); }
+
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch {
+  position: relative; width: 32px; height: 32px; padding: 0; border-radius: 0; cursor: pointer;
+  border: 2px solid transparent; background: var(--c); box-shadow: inset 0 0 0 1px var(--menu-outline);
+}
+.swatch.on { border-color: var(--menu-text-bright); box-shadow: inset 0 0 0 1px var(--menu-outline), var(--menu-neon-glow); }
+.swatch.custom {
+  box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  border: 2px dashed var(--menu-border-hover); color: var(--menu-text); font-size: 18px; font-weight: 700;
+}
+.swatch.custom.on { border-style: solid; border-color: var(--menu-text-bright); }
+.swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+.swatch.custom span { pointer-events: none; text-shadow: 0 1px 2px var(--menu-shadow); }
+
+/* Game rules (friendly fire): master switch + dependent options */
+.rule { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; cursor: pointer; }
+.rule input { width: 16px; height: 16px; margin: 0; accent-color: var(--menu-accent); cursor: inherit; }
+.rule.master { font-weight: 600; }
+.rule-options { margin-left: 24px; }
+.rule.disabled { color: var(--menu-faint); cursor: not-allowed; }
+
+/* Settings screen */
+.menu-card.settings { max-width: 760px; width: 100%; box-sizing: border-box; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 1px solid var(--menu-border-soft); }
+.tab { padding: 8px 16px; border: 1px solid transparent; border-bottom: 0; border-radius: 0; background: none; color: var(--menu-muted); font: 700 13px var(--menu-font); text-transform: uppercase; letter-spacing: 0.12em; cursor: pointer; }
+.tab:hover { color: var(--menu-text); }
+.tab:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: -2px; }
+.tab.on { background: var(--menu-selected-bg); color: var(--menu-accent); border-color: var(--menu-border); box-shadow: inset 0 2px 0 var(--menu-accent); }
+.tab-panel h3 { margin: 14px 0 6px; font-size: 13px; color: var(--menu-muted); text-transform: uppercase; letter-spacing: 0.14em; }
+.small { font-size: 12px; }
+.setting-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; font-size: 14px; }
+.setting-row > span { flex: 0 0 200px; }
+.setting-row input[type=range] { flex: 1; accent-color: var(--menu-accent); }
+.setting-row output { width: 52px; text-align: right; color: var(--menu-muted); }
+.setting-row.check { gap: 8px; cursor: pointer; }
+.setting-row.check > span { flex: 0 1 auto; }
+.setting-row.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--menu-accent); }
+.setting-row select, .setting-row input[type=text] { padding: 6px 8px; border: 1px solid var(--menu-border); border-radius: 0; background: var(--menu-faction-bg); box-shadow: inset 1px 1px 3px rgba(0,0,0,0.6); color: var(--menu-text); font: 14px var(--menu-font); }
+.key-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 14px; }
+.key-row > span { flex: 0 0 200px; }
+.key-slot { min-width: 96px; padding: 6px 10px; border: 1px solid var(--menu-border); border-radius: 0; background: var(--menu-brushed), var(--menu-plate); box-shadow: var(--menu-edge); color: var(--menu-text); font: 700 12px var(--menu-font); text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; }
+.key-slot:hover { border-color: var(--menu-border-hover); }
+.key-slot:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: 2px; }
+.key-slot.listening { border-color: var(--menu-accent); background: var(--menu-selected-bg); box-shadow: var(--menu-neon-glow); }
+.key-slot i { color: var(--menu-faint); font-weight: 400; }
+.menu-actions.left { justify-content: flex-start; }
+.swatch.blocked { opacity: 0.25; cursor: not-allowed; }
+
+/* [N5b] players, alliances (MainMenu, LobbyScreen, MatchUi) */
+.team-block[hidden] { display: none; }
+.alliance-picker .faction { min-width: 44px; flex: 0 0 auto; text-align: center; }
+.lobby-seat.closed { opacity: 0.6; border-left-color: var(--menu-border-soft); }
+.lobby-seat-toggle { min-width: 0; margin-left: auto; padding: 4px 12px; font-size: 13px; }
+.lobby-tag.ally-tag { color: var(--menu-accent); border-color: var(--menu-border-hover); }
+.lobby-alliances { margin-top: 10px; }
+
+/* [N6] generated avatars of computer players (Avatar.js) */
+.ai-avatar { flex: 0 0 auto; vertical-align: middle; font-family: var(--menu-font, inherit); }
+.ai-avatar .shape { stroke: var(--menu-outline, #000); stroke-linejoin: round; }
+.team-block h3 .ai-avatar, .lobby-seat-head .ai-avatar { margin-right: -2px; }
+
+/* [MAPS] map choice, preview and start picks (MainMenu, LobbyScreen; MapPreview.js) */
+.map-select-body { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; margin-top: 8px; }
+.map-preview-box { flex: 0 0 auto; line-height: 0; }
+.map-preview { border: 1px solid var(--menu-border); border-radius: 6px; background: #0a0e12; cursor: pointer; }
+.map-preview.readonly { cursor: default; }
+.map-side { flex: 1 1 180px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.map-side p { margin: 0; }
+.pick-seat { min-width: 44px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+.pick-seat .team-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }

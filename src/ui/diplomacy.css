@@ -1,0 +1,43 @@
+/* Steel Mans – diplomacy menu (src/ui/DiplomacyView.js, docs/notes/b4-diplomacy.md) */
+#diplomacy-view {
+  position: fixed; inset: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  font: 13px system-ui, sans-serif; color: var(--hud-text, #dfe6ee);
+}
+#diplomacy-view[hidden] { display: none; }
+#diplomacy-view .dip-panel {
+  min-width: 560px; max-width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto;
+  box-sizing: border-box; padding: 16px 20px;
+  background: var(--menu-brushed, none), linear-gradient(180deg, rgba(34, 41, 48, 0.97), rgba(14, 18, 22, 0.97));
+  border: 1px solid var(--hud-border, #3a4652);
+}
+#diplomacy-view h2 { margin: 0 0 8px; font-size: 18px; letter-spacing: 0.04em; text-transform: uppercase; }
+#diplomacy-view .dip-own { margin: 0 0 10px; opacity: 0.85; }
+#diplomacy-view .dip-table { width: 100%; border-collapse: collapse; }
+#diplomacy-view th { text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; opacity: 0.6; padding: 4px 6px; }
+#diplomacy-view td { padding: 5px 6px; vertical-align: middle; border-top: 1px solid rgba(223, 230, 238, 0.1); }
+#diplomacy-view tr.dip-trade td { border-top: 0; padding-top: 0; }
+#diplomacy-view .dip-avatar { white-space: nowrap; width: 1%; }
+#diplomacy-view .dip-avatar > * { vertical-align: middle; }
+#diplomacy-view .dip-swatch { display: inline-block; width: 6px; height: 28px; margin-right: 6px; }
+#diplomacy-view .dip-name small { display: block; opacity: 0.6; font-size: 11px; }
+#diplomacy-view tr.dip-me .dip-name { font-weight: 600; }
+#diplomacy-view tr.dip-out .dip-name,
+#diplomacy-view tr.dip-out .dip-state { text-decoration: line-through; opacity: 0.55; }
+#diplomacy-view .dip-send { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; background: rgba(0, 0, 0, 0.25); }
+#diplomacy-view .dip-res, #diplomacy-view .dip-amount { display: inline-flex; gap: 2px; align-items: center; }
+#diplomacy-view .dip-amount input { width: 72px; text-align: right; }
+#diplomacy-view button {
+  font: inherit; color: inherit; cursor: pointer; padding: 3px 8px;
+  background: rgba(58, 70, 82, 0.6); border: 1px solid var(--hud-border, #3a4652);
+}
+#diplomacy-view button:hover:not(:disabled) { border-color: var(--hud-neon, #6fb7ff); }
+#diplomacy-view button.on { border-color: var(--hud-neon, #6fb7ff); background: rgba(80, 130, 190, 0.45); }
+#diplomacy-view button:disabled { opacity: 0.4; cursor: default; }
+#diplomacy-view .dip-preview { flex: 1 1 160px; font-variant-numeric: tabular-nums; }
+#diplomacy-view .dip-preview.bad { color: #ff9a8a; }
+#diplomacy-view .dip-go { margin-left: auto; font-weight: 600; }
+#diplomacy-view .dip-hint { margin: 10px 0 0; font-size: 12px; opacity: 0.65; }
+/* back / close on the left (project rule: left returns, right continues) */
+#diplomacy-view .dip-actions { display: flex; justify-content: flex-start; margin-top: 12px; }

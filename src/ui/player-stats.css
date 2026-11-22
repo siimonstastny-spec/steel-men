@@ -1,0 +1,28 @@
+/* Steel Mans – short player statistics above the minimap (src/ui/PlayerStatsBar.js, docs/notes/b4-diplomacy.md) */
+#player-stats-bar {
+  --psb-gap: 22px;              /* space above the minimap (its bracket's top arm sits ~10 px above it) */
+  position: fixed;
+  right: var(--hud-margin, 12px);
+  bottom: calc(var(--hud-margin, 12px) + var(--hud-minimap-size, 210px) + var(--psb-gap));
+  width: var(--hud-minimap-size, 210px);
+  box-sizing: border-box;
+  padding: 4px 6px;
+  background: rgba(10, 14, 18, 0.72);
+  border: 1px solid var(--hud-border, #3a4652);
+  font: 11px/1.35 system-ui, sans-serif;
+  color: var(--hud-text, #dfe6ee);
+  pointer-events: none;         /* never blocks clicks on the scene */
+  z-index: 3;
+}
+#player-stats-bar[hidden] { display: none; }
+#player-stats-bar .psb-row { display: flex; align-items: center; gap: 6px; }
+#player-stats-bar .psb-head { opacity: 0.6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+#player-stats-bar .psb-group { border-top: 1px solid rgba(223, 230, 238, 0.18); margin-top: 2px; padding-top: 2px; }
+#player-stats-bar .psb-swatch { flex: 0 0 9px; height: 9px; border: 1px solid rgba(0, 0, 0, 0.6); }
+#player-stats-bar .psb-head .psb-swatch { border: 0; }
+#player-stats-bar .psb-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#player-stats-bar .psb-val { flex: 0 0 44px; text-align: right; font-variant-numeric: tabular-nums; }
+#player-stats-bar .psb-ally { opacity: 0.8; }
+#player-stats-bar .psb-out { opacity: 0.5; }
+#player-stats-bar .psb-out .psb-name,
+#player-stats-bar .psb-out .psb-val { text-decoration: line-through; }
