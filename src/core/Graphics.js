@@ -20,7 +20,22 @@ const quality = {
 const qualityListeners = new Set();
 
 const levelNow = () => (quality.detail === 'auto' ? quality.autoLevel : quality.detail);
-const notifyQuality = () => { for (const fn of qualityListeners) fn(getBuildingQuality()); };
+const notifyQuality = () => { refreshCurrent(); for (const fn of qualityListeners) fn(current); };
+
+// The effective quality object handed out by getBuildingQuality (one object, updated in place – no allocation per call)
+const current = { level: 'high', full: 0, mid: 0, textureSize: 0, shadows: true, auto: false };
+function refreshCurrent() {
+  const level = levelNow();
+  const q = BUILDING_LOD.quality[level];
+  current.level = level;
+  current.full = q.full * BUILDING_LOD.animations[quality.animations];
+  current.mid = q.mid;
+  current.textureSize = q.textureSize;
+  current.shadows = quality.shadows;
+  current.auto = quality.detail === 'auto';
+}
+
+let clockSeconds = 0;   // real time of the last rendered frame, see getRenderClock
 
 function readBuildingOptions(opts) {
   const detail = BUILDING_LOD.order.includes(opts.buildingDetail) || opts.buildingDetail === 'auto' ? opts.buildingDetail : 'high';
@@ -31,6 +46,7 @@ function readBuildingOptions(opts) {
   quality.detail = detail;
   quality.shadows = shadows;
   quality.animations = animations;
+  refreshCurrent();
   quality.ready = true;
   if (JSON.stringify([levelNow(), quality.shadows, quality.animations]) !== before) notifyQuality();
 }
@@ -41,13 +57,20 @@ function ensureQuality() {
   onSettingsChange((s) => readBuildingOptions(getGraphicsOptions(s.graphics)));   // live change, no reload
 }
 
-/** Effective building quality now: { level: 'high'|'medium'|'low', ...BUILDING_LOD.quality[level], shadows, auto } */
+/**
+ * Effective building quality now: { level: 'high'|'medium'|'low', full, mid, textureSize, shadows, auto } – `full` = LOD0
+ * range (already scaled by buildingAnimations), `mid` = LOD1 range. One live object, read-only for callers.
+ */
 export function getBuildingQuality() {
   ensureQuality();
-  const level = levelNow();
-  const q = BUILDING_LOD.quality[level];
-  return { level, ...q, full: q.full * BUILDING_LOD.animations[quality.animations], shadows: quality.shadows, auto: quality.detail === 'auto' };
+  return current;
 }
+
+/**
+ * Real time (s) of the last rendered frame, written by noteRenderFrame (render side). Visual animations that follow a
+ * shared clock (sun tracking) read it; the simulation never does. 0 until the first frame was rendered.
+ */
+export const getRenderClock = () => clockSeconds;
 
 /** Calls fn(buildingQuality) whenever the effective level or the building shadow flag changes; returns unsubscribe */
 export function onBuildingQualityChange(fn) {
@@ -63,13 +86,14 @@ export function onBuildingQualityChange(fn) {
  */
 export function noteRenderFrame() {
   ensureQuality();
+  const now = performance.now();
+  clockSeconds = now / MS_PER_SECOND;
   if (quality.detail !== 'auto') { quality.lastMs = 0; return; }
   const A = BUILDING_LOD.auto;
-  const now = performance.now();
   const last = quality.lastMs;
   quality.lastMs = now;
-  if (!last) return;
-  const ms = Math.min(now - last, A.maxFrameMs);
+  if (!last || now - last > A.maxFrameMs) return;   // first sample / hidden tab / loading stall: not a measurement
+  const ms = now - last;
   quality.ema = quality.ema ? quality.ema + (ms - quality.ema) * A.smoothing : ms;
   const dt = ms / MS_PER_SECOND;
   quality.slowTime = quality.ema > A.degradeMs ? quality.slowTime + dt : 0;

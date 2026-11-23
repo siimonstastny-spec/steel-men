@@ -44,7 +44,7 @@ const LAYOUT = {
   padHalf: 26.6, padH: 0.3,
   plinthHalf: 25, plinthH: 1.0, roundSegments: 40,
   padSegments: 64, padRing: { inset: 0.4, tube: 0.1, lift: 0.05, neonMin: 0.3 },   // circular pad (round style)
-  rampLen: 2.0, rampW: 10.5,
+  rampLen: 1.6, rampW: 10.5,
   gate: {
     halfW: 4.6, h: 5.6, jambW: 1.0, jambD: 1.0, jambSink: 0.1, headerH: 1.2, interiorGap: 0.1, interiorT: 0.1, interiorOut: 0.12,
     markH: 0.5, markOut: 0.02, neonH: 0.12, neonT: 0.06, neonDrop: 0.15, apronH: 0.7, apronLift: 0.02,

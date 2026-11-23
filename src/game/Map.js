@@ -173,13 +173,15 @@ export class GameMap {
   build(scene, heightAt) {
     this.dispose();
     applyPlanetLook(scene, this.planet); // [MAPS] light / fog / background (null = default look)
-    const groundGeo = scene.getObjectByName('ground')?.geometry;
-    if (this.ascii) this.paintGround(groundGeo); // before walls: rifts change heights
-    applyMapEdgeFade(groundGeo, this.half);      // [W9] after all painting; colours only, heights untouched
+    const ground = scene.getObjectByName('ground');
+    if (this.ascii) this.paintGround(ground?.geometry); // before walls: rifts change heights
+    applyMapEdgeFade(ground?.material, this.half);      // [W9] per-pixel shader fade at the border (before the fog patch)
     const group = new THREE.Group();
     group.name = 'map';
     const rockMat = this.#material(new THREE.MeshStandardMaterial({ color: MAP.rock.color, roughness: MAP.rock.roughness, flatShading: true }));
     const ridgeMat = this.#material(new THREE.MeshStandardMaterial({ color: this.planet?.ridge ?? MAP.ridge.color, roughness: MAP.ridge.roughness, flatShading: true }));
+    applyMapEdgeFade(rockMat, this.half); // [W9] rocks / ridges in the border band fade too (per-material uniforms, freed with the material)
+    applyMapEdgeFade(ridgeMat, this.half);
 
     this.obstacles.forEach((o, i) => {
       const mesh = o.type === 'ridge' || o.radius === undefined

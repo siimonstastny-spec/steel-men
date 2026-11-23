@@ -68,7 +68,7 @@ class BatchGroup {
       geometry.attributes.aInst.array.set(old.geometry.attributes.aInst.array.subarray(0, this.items.length * INST_FLOATS));
       this.batcher.scene.remove(old);
       old.dispose();
-      old.geometry.dispose();
+      this.#freeGeometry(old.geometry);
     }
     this.batcher.scene.add(mesh);
     this.mesh = mesh;
@@ -123,10 +123,17 @@ class BatchGroup {
 
   setShadows(on) { this.mesh.castShadow = this.baseCast && on; }
 
+  // Detach the attributes shared with the source geometry first, so dispose() frees only this group's own aInst buffer
+  #freeGeometry(geometry) {
+    for (const name of Object.keys(this.source.attributes)) geometry.deleteAttribute(name);
+    geometry.setIndex(null);
+    geometry.dispose();
+  }
+
   dispose() {
     this.batcher.scene.remove(this.mesh);
     this.mesh.dispose();
-    this.mesh.geometry.dispose();
+    this.#freeGeometry(this.mesh.geometry);
     this.release(this.material);
     this.mesh = null;
     this.items.length = 0;
@@ -144,8 +151,12 @@ class Batcher {
     this.forceAll = true;             // re-apply every LOD (quality changed)
     this.shadows = getBuildingQuality().shadows;
     this.prevHook = scene.onBeforeRender;
+    this.disposed = false;
+    this.candidates = [];             // scratch list of the LOD0 candidates
+    this.lastSweep = 0;
     this.hook = (renderer, sc, camera, target) => {
       this.prevHook.call(sc, renderer, sc, camera, target);
+      if (this.disposed) return;
       this.#frame(camera);
     };
     scene.onBeforeRender = this.hook;
@@ -186,8 +197,8 @@ class Batcher {
     for (const item of model.batch.items ?? []) item.group?.remove(item);
   }
 
-  #group(item, geometry) {
-    const key = `${item.key}|${geometry.uuid}`;
+  #group(item, geometry, lod) {
+    const key = (item.keys[lod] ??= `${item.key}|${geometry.uuid}`);   // built once per item and LOD
     let group = this.groups.get(key);
     if (!group) {
       group = new BatchGroup(this, key, geometry, item);
@@ -203,7 +214,7 @@ class Batcher {
       const geometry = item.geos[Math.min(b.lod, item.geos.length - 1)];
       let matrix = b.world;
       if (item.mesh) { item.mesh.updateWorldMatrix(true, false); matrix = item.mesh.matrixWorld; }   // far part: its current pose
-      this.#group(item, geometry).add(item, matrix, model);
+      this.#group(item, geometry, b.lod).add(item, matrix, model);
     }
   }
 
@@ -240,13 +251,22 @@ class Batcher {
       const b = models[i].batch;
       b.dist2 = b.pos.distanceToSquared(_camPos);
     }
-    for (let i = 0; i < n; i++) {   // rank by distance among the visible buildings (the nearest ones get LOD0)
+    // rank by distance among the visible buildings that can be LOD0 at all (the nearest maxFull get it): O(c²) in the
+    // few candidates near the camera, the others cannot be LOD0 and get a rank beyond the limit
+    const cand = this.candidates;
+    cand.length = 0;
+    const limit2 = q.full * hyst * (q.full * hyst);
+    for (let i = 0; i < n; i++) {
       const b = models[i].batch;
-      if (!b.visible) continue;
+      b.rank = n;
+      if (q.full > 0 && b.visible && b.dist2 <= limit2) { b.rank = 0; cand.push(b); }
+    }
+    for (let i = 0; i < cand.length && cand.length > BUILDING_LOD.maxFull; i++) {   // few candidates: all of them get LOD0, rank stays 0
+      const b = cand[i];
       let rank = 0;
-      for (let j = 0; j < n; j++) {
-        const o = models[j].batch;
-        if (o.visible && (o.dist2 < b.dist2 || (o.dist2 === b.dist2 && j < i))) rank++;
+      for (let j = 0; j < cand.length; j++) {
+        const o = cand[j];
+        if (o.dist2 < b.dist2 || (o.dist2 === b.dist2 && j < i)) rank++;
       }
       b.rank = rank;
     }
@@ -262,7 +282,13 @@ class Batcher {
       else lod = d < q.mid * (cur === 0 || cur === 1 ? hyst : 1) ? 1 : 2;
       if (force || lod !== cur) this.#setLod(model, lod);
     }
-    for (const [key, g] of this.groups) {   // release long-empty groups (GPU buffers)
+    if (this.frame - this.lastSweep >= BUILDING_LOD.idleFrames) this.#sweep();
+  }
+
+  // Release long-empty groups (GPU buffers), now and then
+  #sweep() {
+    this.lastSweep = this.frame;
+    for (const [key, g] of this.groups) {
       if (g.items.length === 0 && this.frame - g.emptyFrame > BUILDING_LOD.idleFrames) {
         g.dispose();
         this.groups.delete(key);
@@ -281,6 +307,7 @@ class Batcher {
   }
 
   dispose() {
+    this.disposed = true;
     if (this.scene.onBeforeRender === this.hook) this.scene.onBeforeRender = this.prevHook;
     this.unsubscribe();
     for (const g of this.groups.values()) g.dispose();

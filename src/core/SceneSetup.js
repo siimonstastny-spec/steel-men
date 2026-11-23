@@ -1,7 +1,7 @@
 // Steel Mans – scéna, kamera, světla, terén – SIT
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { MAP, R2 } from '../config.js';
+import { MAP, R2, MAP_EDGE_FADE } from '../config.js';
 
 export function createScene(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -78,8 +78,8 @@ export function applyPlanetLook(scene, planet) {
     hemiSky: hemi?.color.getHex(), hemiGround: hemi?.groundColor.getHex(), hemiIntensity: hemi?.intensity,
   });
   const sky = planet?.sky;
-  const bg = sky?.color ?? base.background;
-  scene.background = new THREE.Color(bg);
+  // [W9] outside the map is always black (the terrain fades into it, MapEdgeFade.js); the fog below keeps the sky colour
+  scene.background = new THREE.Color(MAP_EDGE_FADE.outsideColor);
   if (sky && sky.fogNear === null) scene.fog = null;
   else scene.fog = new THREE.Fog(sky ? sky.color : base.fogColor, sky?.fogNear ?? base.fogNear, sky?.fogFar ?? base.fogFar);
   if (sun) { sun.color.setHex(planet?.sun.color ?? base.sunColor); sun.intensity = planet?.sun.intensity ?? base.sunIntensity; }

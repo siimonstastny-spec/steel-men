@@ -16,11 +16,11 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   PartBuilder, GlowBuilder, surface, acquirePaintMaterial, releasePaintMaterial, triangleCount, TrackMover, plateau, makeRng,
+  acquireInstancedPaintMaterial, releaseInstancedPaintMaterial,
 } from './ProcKit.js';
 import { getBuildingStyle, resolveStyleKey } from './BuildingStyle.js';
 import { BUILDING_LOD, PROC_BUILDINGS } from '../config.js';
 import { batcherFor } from './BuildingBatcher.js';
-import { acquireInstancedPaintMaterial, releaseInstancedPaintMaterial } from './ProcKit.js';
 
 /** Module tuning (visual only, model units unless noted) */
 export const PROC_MODULES = {
@@ -443,16 +443,17 @@ export class ProcModel extends THREE.Group {
     const acquire = () => acquireInstancedPaintMaterial(this.kit.style.texture);
     const paintItem = (geos, minLod, maxLod, mesh) => ({
       geos, minLod, maxLod, mesh, key: `paint:${this.kit.style.texture}`, acquire, release: releaseInstancedPaintMaterial,
-      colorScale: 1, castShadow: true, receiveShadow: true, group: null, slot: -1,
+      colorScale: 1, castShadow: true, receiveShadow: true, group: null, slot: -1, keys: [],
     });
     const last = BUILDING_LOD.levels - 1;
     const items = [paintItem(this.staticLods, 0, last, null)];
     const neon = this.kit.style.emblem.render === 'neon';
     for (const src of this.emblemSources) {
+      if (src.parent !== this) continue;   // an emblem on an animated parent stays its own mesh (a frozen instance would not follow)
       items.push({
-        geos: [src.geometry], minLod: 0, maxLod: BUILDING_LOD.emblemMaxLod, mesh: src.parent === this ? null : src.parent,
+        geos: [src.geometry], minLod: 0, maxLod: BUILDING_LOD.emblemMaxLod, mesh: null,
         key: `emblem:${this.kit.key}`, acquire: () => acquireInstancedEmblemMaterial(this.kit), release: releaseInstancedEmblemMaterial,
-        colorScale: neon ? M.emblem.neonBoost : 1, castShadow: false, receiveShadow: !neon, group: null, slot: -1,
+        colorScale: neon ? M.emblem.neonBoost : 1, castShadow: false, receiveShadow: !neon, group: null, slot: -1, keys: [],
       });
     }
     for (const mesh of this.farMeshes) items.push(paintItem([mesh.geometry], 1, last, mesh));
@@ -477,7 +478,7 @@ export class ProcModel extends THREE.Group {
       mesh.visible = near && mesh !== this.staticRef;
       mesh.castShadow = shadows;
     }
-    for (const mesh of this.emblemMeshes) mesh.visible = false;
+    for (let i = 0; i < this.emblemMeshes.length; i++) this.emblemMeshes[i].visible = near && this.emblemSources[i].parent !== this;   // batched ones are instances; others (animated parent) at LOD0
     for (const layer of this.glowLayers) layer.setEnabled(near);
   }
 

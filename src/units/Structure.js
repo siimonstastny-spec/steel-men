@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { loadModel, loadGltf } from '../core/AssetLoader.js';
 import { loadStats, getStats, unitStats, applyArmor } from '../data/Stats.js';
+import { getRenderClock } from '../core/Graphics.js';
 import { TEAMS, RINGS, STRUCTURE, VFX, PATHFINDING, SPAWN_SPOT } from '../config.js';
 
 // Scratch objects for sun-tracking buildings (Structure.#trackSun)
@@ -427,7 +428,7 @@ export class Structure extends THREE.Group {
     // bookkeeping (fog of war, LOD) + update(); a far or hidden building is not animated.
     // (sunClock: the shared real-time sun clock – visual only, same as #trackSun – for a procedural solar panel)
     this.procModel?.tick(dt, this.complete && this.powered && (this.world?.production?.itemsOf(this.eid).length ?? 0) > 0,
-      this.stats?.sunTracking ? (performance.now() / 1000) * STRUCTURE.sunTrackingSpeed : 0);
+      this.stats?.sunTracking && getRenderClock() > 0 ? getRenderClock() * STRUCTURE.sunTrackingSpeed : undefined);
     // Swap the two builder sets instead of allocating a new one every tick
     const last = this.builders;
     this.builders = this._working;

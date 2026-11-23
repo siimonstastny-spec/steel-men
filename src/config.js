@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v24';
+export const GAME_VERSION = 'v25';
 export const BASE64_MODEL_SUFFIX = '.txt';
 // Model folders (path prefixes) whose textures were exported upside down (V flipped – round floor pads came out
 // inside out): the loader mirrors the texture transform once per model (src/core/AssetLoader.js), team colour copies
@@ -230,11 +230,11 @@ export const RADAR = {
 
 // ===== Phase 0 sections: each parallel agent adds its constants ONLY inside its own section (Edit tool) =====
 // --- [W9] map edge fade (src/game/MapEdgeFade.js) ---
-/** The terrain darkens into a colour along the map border (vertex colours, visual only) */
+/** The terrain fades per pixel (shader, smoothstep) into a colour along the map border; visual only */
 export const MAP_EDGE_FADE = {
-  width: 24,                // units from the border over which the fade runs (≈ 5 terrain cells)
-  color: [0, 0, 0],         // r, g, b (0..1) the terrain fades into – black
-  exponent: 1.6,            // >1 = stays bright longer and drops steeper at the very edge, 1 = linear
+  width: 100,               // units from the border over which the fade runs (tune 90–120)
+  color: 0x000000,          // fully this colour at the border (applied after the fog); keep equal to outsideColor
+  outsideColor: 0x000000,   // scene.background = what is seen beyond the map border (SceneSetup.applyPlanetLook)
 };
 
 // --- [DET] simulation / determinism ---
@@ -1813,13 +1813,15 @@ SETTINGS_DEFAULTS.ui.preferCombatOnDrag = SELECTION.preferCombatDefault; // Prof
 export const MAPS = {
   list: [
     { id: 'gen_01AI', file: 'basic' },
-    { id: 'Map02', file: 'map02' },
-    { id: 'Map03', file: 'map03' },
-    { id: 'Map04', file: 'map04' },   // 6 players, destroyed city (Venus)
-    { id: 'Map05', file: 'map05' },   // 8 players, city (Earth)
-    { id: 'Map06', file: 'map06' },   // 6 players, ruined wasteland (Mars)
+    // Naming: Map<players>_<creation order among maps with that player count>; list sorted by players, then order
+    { id: 'Map2_01', file: 'map2_01' },
+    { id: 'Map4_01', file: 'map4_01' },
+    { id: 'Map6_01', file: 'map6_01' },   // destroyed city (Venus)
+    { id: 'Map6_02', file: 'map6_02' },   // ruined wasteland (Mars)
+    { id: 'Map8_01', file: 'map8_01' },   // city (Earth)
   ],
-  aliases: { basic: 'gen_01AI' },
+  // Old ids (saved profiles, lobby settings) keep working
+  aliases: { basic: 'gen_01AI', Map02: 'Map2_01', Map03: 'Map4_01', Map04: 'Map6_01', Map05: 'Map8_01', Map06: 'Map6_02' },
   defaultMap: 'gen_01AI',
   // Per-map ore richness (map file key "oreMultiplier"): scales the starting amount of every deposit of the map
   // (incl. the super node); multiplies with the lobby ORE_MULTIPLIER. 1 = unchanged, <1 poorer, >1 richer map
