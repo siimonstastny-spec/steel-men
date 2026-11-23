@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { loadModel } from '../core/AssetLoader.js';
 import { VFX, R2 } from '../config.js';
 import { play } from '../audio/Sound.js';
+import { loadExplosionData, explosionData, explosionPlan, ParticleField } from './ExplosionStyles.js';
 
 const TRACER_LIFE = VFX.tracerLife;
 
@@ -15,6 +16,7 @@ export class Effects {
     this.projectileGeo = new THREE.SphereGeometry(1, ...VFX.projectile.segments);
     this.templates = {};    // VFX model key -> loaded scene (cloned per effect)
     this.time = 0;
+    this.field = null;      // batched explosion particles (ExplosionStyles.ParticleField), created on first use
   }
 
   /** Loads the explosion models once; effects requested before that are skipped */
@@ -22,7 +24,69 @@ export class Effects {
     await Promise.all(Object.entries(VFX.models).map(async ([key, path]) => {
       try { this.templates[key] = await loadModel(path); } catch (err) { console.warn(`[Effects] ${path}:`, err); }
     }));
+    try { await loadExplosionData(); } catch (err) { console.warn('[Effects] explosions.json:', err); } // without it units use VFX.mechExplosion
     return this;
+  }
+
+  /**
+   * Unit death (mech): fire and smoke first, the explosion after the data's `delay` (mech has fallen); kinds without a
+   * delay explode at once. Style by unit kind x race from data/explosions.json. Visual only.
+   * @param {object} unit  mech / vehicle (uses race, unitId, position, aimHeight)
+   * @param {object} [opts]  { fallbackSize } VFX.mechExplosion scale when the data is not loaded
+   */
+  unitDeath(unit, { fallbackSize = 1 } = {}) {
+    const plan = explosionData() ? explosionPlan(unit) : null;
+    if (!plan || plan.delay <= 0) { this.explodeUnit(unit, { fallbackSize }); return; }
+    this.burn(unit, unit, plan.delay, () => this.explodeUnit(unit, { fallbackSize }));
+  }
+
+  /**
+   * Immediate explosion in the style of the unit.
+   * @param {object} [opts]  { position (default unit.position), size = 1 (multiplier), fallbackSize }
+   */
+  explodeUnit(unit, { position = unit.position, size = 1, fallbackSize = 1 } = {}) {
+    const plan = explosionData() ? explosionPlan(unit) : null;
+    const aim = unit.aimHeight ?? 1;
+    if (!plan) { this.burst(VFX.mechExplosion, position.clone(), { size: fallbackSize, heightUnit: aim }); return; }
+    this.burst(plan.layers, position.clone(), { size: plan.size * size, heightUnit: plan.heightByAim ? aim : 1 });
+    const field = this.#field();
+    const gy = position.y;
+    const y = position.y + (plan.heightByAim ? aim * 0.8 : 1);
+    for (const name of ['glow', 'smoke', 'debris']) field.spray(name, plan.pools[name], position.x, y, position.z, gy);
+  }
+
+  /**
+   * Flames and smoke on a dying unit for `duration` s (Infinity-safe; stop() ends it early), at `follow.position`
+   * (the unit itself, or the falling ghost of an aircraft). `onEnd` runs when it ends (not on Effects.dispose).
+   * @returns {{ stop(): void }}
+   */
+  burn(unit, follow = unit, duration = 1, onEnd = null) {
+    const plan = explosionData() ? explosionPlan(unit) : null;
+    const b = plan?.burn ?? null;
+    const field = b ? this.#field() : null;
+    const aim = unit.aimHeight ?? 1;
+    const spread = (unit.radius ?? 1) * (b?.spread ?? 0);
+    let flames = 0;
+    let puffs = 0;
+    const item = {
+      life: duration,
+      update: (dt) => {
+        if (!b) return;
+        flames += b.flameRate * dt;
+        puffs += b.smokeRate * dt;
+        const p = follow.position;
+        const y = p.y + aim * b.height;
+        while (flames >= 1) { flames -= 1; field.puff(false, b, p.x + (field.rand() - 0.5) * 2 * spread, y, p.z + (field.rand() - 0.5) * 2 * spread); }
+        while (puffs >= 1) { puffs -= 1; field.puff(true, b, p.x + (field.rand() - 0.5) * 2 * spread, y, p.z + (field.rand() - 0.5) * 2 * spread); }
+      },
+      dispose: () => { if (onEnd && !this.#disposed) onEnd(); },
+    };
+    this.items.push(item);
+    return { stop: () => { item.life = 0; } };
+  }
+
+  #field() {
+    return (this.field ??= new ParticleField(this.scene));
   }
 
   /**
@@ -209,6 +273,7 @@ export class Effects {
     }
     items.length = n;
     this.#drainExpired();
+    this.field?.update(dt);
   }
 
   // Each item leaves the list before its dispose() runs, so a throwing dispose is never repeated and the rest still run
@@ -224,13 +289,15 @@ export class Effects {
 
   /** Ends every live item (projectiles, bursts, indicators, a falling aircraft's ghost) and frees the shared geometry */
   dispose() {
+    this.#disposed = true;
     const items = this.items;
     this.items = [];
     for (const item of items) this.#expired.push(item);
-    try { this.#drainExpired(); } finally { this.projectileGeo.dispose(); }
+    try { this.#drainExpired(); } finally { this.projectileGeo.dispose(); this.field?.dispose(); this.field = null; }
   }
 
   #expired = []; // recycled list of items finished this frame
+  #disposed = false;
 
   // Fresh copy of a VFX model with its own glowing, transparent material
   // textured = false drops the (fire) texture, leaving a plain glow in `color` (electric effects)

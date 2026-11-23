@@ -24,6 +24,8 @@ export function distanceToBox(p, box) {
 }
 
 const cargoBox = new THREE.Box3(); // [N2] scratch box for placing a carried part
+const cargoQuat = new THREE.Quaternion();       // [W8] ground orientation of the part being loaded
+const cargoParentQuat = new THREE.Quaternion(); // [W8] inverse world orientation of the vehicle
 // Building ids that take salvage, cached per rules.salvageResearch object (Vehicle.#dropOffIds)
 const NO_RULE = Symbol('noRule'); // [B6 QA] never equal to a rules object (or its absence), so the first call fills the cache
 const dropOffCache = { rule: NO_RULE, analysis: [], stock: [] };
@@ -142,7 +144,7 @@ export class Vehicle extends THREE.Group {
     this.order = null;
     this.#dropCargo();
     this.setSelected(false);
-    this.world?.effects.burst(VFX.mechExplosion, this.position.clone(), { size: VEHICLE.explosionSize });
+    this.world?.effects.explodeUnit(this, { fallbackSize: VEHICLE.explosionSize }); // [R9] style by kind x race
     this.removed = true; // World removes the unit
   }
 
@@ -253,6 +255,16 @@ export class Vehicle extends THREE.Group {
   #load(wreck) {
     const part = wreck.part;
     let info;
+    // [W8] the pose the part had on the ground (a one-off snapshot at pick-up, not per frame): the world
+    // orientation of its object plus, for an arm, the bone pose of its fall animation (the wreck's dispose()
+    // stops the mixer, which resets the bones to the upright bind pose)
+    part.object.getWorldQuaternion(cargoQuat);
+    const bonePose = [];
+    if (part.isArm) {
+      part.object.traverse((n) => {
+        if (n.isBone) bonePose.push({ n, p: n.position.clone(), q: n.quaternion.clone(), s: n.scale.clone() });
+      });
+    }
     if (part.isArm) { // [R3] torn-off arm (ArmWreck): same cargo, the arm stock key is normalised by PartStock
       if (!wreck.available) return false;
       this.world.takeWreck(wreck);
@@ -265,7 +277,10 @@ export class Vehicle extends THREE.Group {
     const scale = obj.scale.clone();
     obj.removeFromParent();
     obj.position.set(0, 0, 0);
-    obj.quaternion.identity();
+    for (const b of bonePose) { b.n.position.copy(b.p); b.n.quaternion.copy(b.q); b.n.scale.copy(b.s); }
+    // Keep the lying pose: the ground orientation expressed relative to the vehicle (stays flat on the roof)
+    this.getWorldQuaternion(cargoParentQuat).invert();
+    obj.quaternion.copy(cargoParentQuat).multiply(cargoQuat);
     obj.scale.copy(scale).multiplyScalar(MISC.cargoScale);
     this.add(obj);
     // [N2] the part's own lowest point rests on top of the vehicle (its origin may be mid-part), whatever the model

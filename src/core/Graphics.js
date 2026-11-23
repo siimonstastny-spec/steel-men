@@ -2,11 +2,11 @@
 // and cheaper, smaller shadows. Presets are in config.js (GRAPHICS).
 import * as THREE from 'three';
 import { GRAPHICS } from '../config.js';
-import { getSettings, onSettingsChange } from './Profile.js';
+import { getSettings, onSettingsChange, getGraphicsOptions } from './Profile.js';
 
-/** Applies a quality preset to the renderer and the scene's shadow-casting lights */
-export function applyGraphics(renderer, scene, quality = getSettings().graphics.quality) {
-  const p = GRAPHICS.presets[quality] ?? GRAPHICS.presets.full;
+/** Applies the graphics options (Advanced values: Full / Reduced / Custom) to the renderer and the scene's shadow-casting lights */
+export function applyGraphics(renderer, scene, opts = getGraphicsOptions()) {
+  const p = opts;
   const ratio = Math.min(window.devicePixelRatio, p.pixelRatioCap) * p.pixelRatioScale;
   renderer.setPixelRatio(Math.max(GRAPHICS.minPixelRatio, ratio));
   const el = renderer.domElement.parentElement;
@@ -28,11 +28,12 @@ export function applyGraphics(renderer, scene, quality = getSettings().graphics.
 
 /** Applies the saved quality now and re-applies it whenever the graphics setting changes */
 export function initGraphics(renderer, scene) {
-  let last = getSettings().graphics.quality;
-  applyGraphics(renderer, scene, last);
+  let last = JSON.stringify(getGraphicsOptions());
+  applyGraphics(renderer, scene);
   onSettingsChange((s) => {
-    if (s.graphics.quality === last) return;
-    last = s.graphics.quality;
-    applyGraphics(renderer, scene, last);
+    const now = JSON.stringify(getGraphicsOptions(s.graphics));
+    if (now === last) return;
+    last = now;
+    applyGraphics(renderer, scene, getGraphicsOptions(s.graphics));
   });
 }

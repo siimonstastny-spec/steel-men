@@ -108,7 +108,7 @@ export class ProductionManager {
     if (eco.isLowEnergy?.(this.team)) return true;
     if (!this.ai.economy?.powerShort) return false;
     const share = this.ai.diff.power?.stockShare ?? 0;
-    return eco.amount(this.team, 'energy') < eco.energyCapOf(this.team) * share;
+    return eco.amount(this.team, 'energy') < eco.energyShareBase(this.team) * share; // [W5b] finite with an ∞ cap
   }
 
   /** Removes the completion listener (AiPlayer.stop) */

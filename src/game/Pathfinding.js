@@ -20,7 +20,7 @@
 // When the landing is the goal itself, findPath returns `goalFly` / `goalHop`. Smoothing never skips a crossing: the
 // obstacle between takeoff and landing blocks the line of sight.
 import * as THREE from 'three';
-import { PATHFINDING } from '../config.js';
+import { PATHFINDING, MECH_COLLISION } from '../config.js';
 
 const SQRT2 = Math.SQRT2;
 const EPSILON = 1e-9; // numeric guard against division by zero (not a tuning value)
@@ -98,15 +98,16 @@ export class NavGrid {
    * @param {number} [opts.flyPenalty] [R2] extra cost of one flight (units)
    * @param {number} [opts.hopRange]   [R2] max hop length over rifts only (units, 0 = cannot hop)
    * @param {number} [opts.hopPenalty] [R2] extra cost of one hop (units)
+   * @param {object} [opts.body]  [W7] the moving unit itself: its collision circles replace `radius` (see #inflated)
    * @returns {{ waypoints: THREE.Vector3[], goal: THREE.Vector3, direct: boolean, goalFly: boolean, goalHop: boolean }}
    *   waypoints = intermediate points (without the goal); goal = where the unit can actually get –
    *   the target itself, or the nearest free spot when the target lies inside an obstacle.
    *   A waypoint with `fly` / `hop` = true (goalFly / goalHop) = the leg to that point is a flight / hop.
    */
   findPath(from, to, {
-    radius = 0, ignore = [], crossRift = false, flyRange = 0, flyPenalty = 0, hopRange = 0, hopPenalty = 0,
+    radius = 0, ignore = [], crossRift = false, flyRange = 0, flyPenalty = 0, hopRange = 0, hopPenalty = 0, body = null,
   } = {}) {
-    const shapes = this.#inflated(radius, ignore, crossRift);
+    const shapes = this.#inflated(radius, ignore, crossRift, body);
     const goal = new THREE.Vector3(to.x, 0, to.z);
     const none = (g) => ({ waypoints: [], goal: g, direct: true, goalFly: false, goalHop: false });
     if (!shapes.length || this.segmentClear(from, goal, shapes)) return none(goal);
@@ -165,18 +166,34 @@ export class NavGrid {
     return true;
   }
 
-  /** Inflated shapes for a unit of the given radius (also used to test line of sight while walking) */
-  shapesFor(radius, ignore = [], crossRift = false) { return this.#inflated(radius, ignore, crossRift); }
+  /**
+   * Inflated shapes for a unit of the given radius (also used to test line of sight while walking).
+   * [W7] With `body` (the moving unit) each obstacle is inflated by the circle of the unit that touches it
+   * (collisionReach); without it every obstacle is inflated by `radius` as before.
+   */
+  shapesFor(radius, ignore = [], crossRift = false, body = null) { return this.#inflated(radius, ignore, crossRift, body); }
 
   // ---------- internal ----------
 
-  #inflated(radius, ignore, crossRift = false) {
-    const pad = radius + PATHFINDING.clearance;
+  #inflated(radius, ignore, crossRift = false, body = null) {
+    const clearance = PATHFINDING.clearance;
     return this.obstacles()
       .filter((s) => !ignore.includes(s.owner) && !(crossRift && s.rift))
-      .map((s) => (s.radius !== undefined
-        ? { x: s.x, z: s.z, radius: s.radius + pad, rift: s.rift === true }
-        : { x: s.x, z: s.z, halfX: s.halfX + pad, halfZ: s.halfZ + pad, rift: s.rift === true }));
+      .map((s) => {
+        let own = s.radius;
+        let pad = radius;
+        if (body) {
+          const owner = s.owner;
+          if (owner?.isMech) { // a crewless mech: shoulders against mechs / tall units, legs against the rest
+            own = collisionReach(owner, Boolean(body.isMech), body.bodyHeight ?? 0);
+            pad = collisionReach(body, true, 0);
+          } else pad = collisionReach(body, false, obstacleHeight(s));
+        }
+        pad += clearance;
+        return s.radius !== undefined
+          ? { x: s.x, z: s.z, radius: own + pad, rift: s.rift === true }
+          : { x: s.x, z: s.z, halfX: s.halfX + pad, halfZ: s.halfZ + pad, rift: s.rift === true };
+      });
   }
 
   // Cell values: 0 free, BLOCK_SOLID (any obstacle but a rift), BLOCK_RIFT (only rifts) – [R2] hops cross BLOCK_RIFT only
@@ -341,6 +358,27 @@ export class NavGrid {
     const c = this.cellSize;
     return out.set(((i % this.cols) + 0.5) * c - this.half, 0, (Math.floor(i / this.cols) + 0.5) * c - this.half);
   }
+}
+
+// ---------- [W7] collision bodies ----------
+
+/**
+ * Radius of `unit` that touches another body (docs/notes/w7-crew-collision.md). A mech has two circles: its shoulder
+ * circle (`radius`: body + arms) touches other mechs and anything at least as tall as its shoulders
+ * (`shoulderHeight`), its foot circle (`footRadius`) touches everything lower. Other units have one circle (`radius`).
+ * @param {object} unit
+ * @param {boolean} otherIsMech  the other body is a mech
+ * @param {number} otherHeight   height of the other body (units; Infinity = tall)
+ */
+export function collisionReach(unit, otherIsMech, otherHeight) {
+  if (!unit.isMech || unit.footRadius === undefined) return unit.radius;
+  return otherIsMech || otherHeight >= unit.shoulderHeight ? unit.radius : unit.footRadius;
+}
+
+/** Height of a pathfinding obstacle: own `height`, the building's height, 0 for a rift, else MECH_COLLISION default */
+function obstacleHeight(s) {
+  if (s.rift) return 0;
+  return s.height ?? (s.owner?.isStructure ? s.owner.bodyHeight : undefined) ?? MECH_COLLISION.unknownObstacleHeight;
 }
 
 // ---------- geometry helpers ----------

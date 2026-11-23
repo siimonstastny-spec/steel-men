@@ -10,7 +10,10 @@
 }
 .setup-side h3 { margin: 0 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--menu-accent); }
 
-/* combobox rows */
+/* combobox rows (gap between a select and the label of the next setting) */
+.setup-options { display: flex; flex-direction: column; gap: 10px; }
+.map-pick { margin-bottom: 10px; }
+.map-pick:empty { display: none; }
 .opt-row { display: flex; flex-direction: column; gap: 3px; }
 .opt-label { color: var(--menu-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; }
 .opt-select, .seat-select {

@@ -6,9 +6,11 @@ import { HUD_PANELS, TEAMS } from '../config.js';
 import { isLocal } from '../core/LocalPlayer.js';
 import { t } from '../i18n/i18n.js';
 import { avatarHtml } from './Avatar.js';
+import { pilotSlot } from '../units/ModularMech.js';
 import { esc, partLabel, mechState, teamTag, bonusText, weaponState, slimBar, pct, plainText } from './hudUtil.js';
 
 const R = HUD_PANELS.robot;
+// Panel side (pilot's view) -> input command (CommandInput maps dropLeft -> the pilot's left hand = slot rightArm)
 const DROP_COMMAND = { leftArm: 'dropLeft', rightArm: 'dropRight' };
 const SEP = ' · ';
 const NO_RANK = Object.freeze({ name: '', bonuses: {}, next: null });
@@ -17,7 +19,9 @@ const HASH_MUL = 31;
 const rect = (r) => `--x:${r.x};--y:${r.y};--w:${r.w};--h:${r.h}`;
 /** Box stretching with the panel: left edge x, right edge `right` image px from the panel's right edge */
 const rectLR = (r) => `--x:${r.x};--y:${r.y};--r:${r.right};--h:${r.h}`;
-const present = (mech, slot) => (slot === 'crew' ? !!mech.crew : !!mech.parts[slot]?.alive);
+// Panel entries are named by the PILOT's side (left = the robot's left hand, as drawn in the schematic);
+// pilotSlot() gives the mech slot that physically sits there (slot names follow the model files, see ModularMech.js)
+const present = (mech, slot) => (slot === 'crew' ? !!mech.crew : !!mech.parts[pilotSlot(slot)]?.alive);
 const hashCache = new Map(); // crew name -> avatar hash (names repeat, the panel re-renders every refresh)
 function nameHash(s) {
   let h = hashCache.get(s);
@@ -80,11 +84,11 @@ export class RobotPanel {
       const index = nameHash(mech.crew.name) % HUD_PANELS.crewAvatarVariants;
       icon = avatarHtml({ name: mech.crew.name, avatar: index, color: TEAMS[mech.team]?.color, size: R.crewAvatarSize });
     } else {
-      const w = mech.parts[c.slot].weapons[0];
+      const w = mech.parts[pilotSlot(c.slot)].weapons[0];
       icon = `<span class="rp-glyph">${w?.def.class === 'melee' ? R.glyphs.melee : R.glyphs.ranged}</span>`;
     }
-    const name = isCrew ? t('rp.crew') : partLabel(c.slot);
-    const weapon = !isCrew && ok ? mech.parts[c.slot].weapons.map((w) => w.def.id).join(SEP) : '';
+    const name = isCrew ? t('rp.crew') : partLabel(pilotSlot(c.slot)); // labels are by mech slot (i18n swapped), c.slot is the pilot side
+    const weapon = !isCrew && ok ? mech.parts[pilotSlot(c.slot)].weapons.map((w) => w.def.id).join(SEP) : '';
     const eject = own
       ? `<button class="rp-eject" data-eject="${isCrew ? 'eject' : DROP_COMMAND[c.slot]}" style="${rect({ ...c.ejectSlot, y: c.ejectSlot.y - R.ejectGrow, h: c.ejectSlot.h + R.ejectGrow })}"`
         + `${ok && cmds[isCrew ? 'eject' : DROP_COMMAND[c.slot]] ? '' : ' disabled'}>${esc(t('rp.eject'))}</button>`
@@ -97,7 +101,7 @@ export class RobotPanel {
   // ---------- right labels ----------
 
   #label(mech, l, state) {
-    const header = l.slot === 'crew' ? t('rp.crew') : partLabel(l.slot);
+    const header = l.slot === 'crew' ? t('rp.crew') : partLabel(pilotSlot(l.slot));
     const [line1, line2, tip] = l.slot === 'crew' ? this.#crewLines(mech) : this.#partLines(mech, l.slot);
     // Tooltip: armor (parts) and the full text of both lines – long lines are cut with an ellipsis
     const full = [tip, plainText(line1), plainText(line2)].filter(Boolean).join('\n');
@@ -124,7 +128,7 @@ export class RobotPanel {
   }
 
   #partLines(mech, slot) {
-    const p = mech.parts[slot];
+    const p = mech.parts[pilotSlot(slot)];
     if (!p) return [`<span class="muted">${esc(t('part.missing'))}</span>`, '', ''];
     const armor = p.stats.armor ?? {};
     const tip = t('part.armor', { physical: armor.physical ?? 0, energy: armor.energy ?? 0 });

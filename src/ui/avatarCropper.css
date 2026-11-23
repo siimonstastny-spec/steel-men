@@ -1,0 +1,24 @@
+/* Avatar crop dialog (AvatarCropper.js); uses the menu.css variables */
+.avatar-cropper {
+  --crop-size: 256px;
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 6, 8, 0.75);
+}
+.avatar-cropper-box {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 18px 22px;
+  background: var(--menu-bg-strong, rgba(8, 11, 14, 0.97));
+  border: 1px solid var(--menu-border, #3d4650);
+  color: var(--menu-text, #d9e0e7);
+}
+.avatar-cropper-box h2 { margin: 0; font-size: 16px; color: var(--menu-text-bright, #f2f6f9); }
+.avatar-cropper-hint { margin: 0; font-size: 12px; color: var(--menu-muted, #8f9aa5); max-width: var(--crop-size); text-align: center; }
+.avatar-cropper canvas {
+  width: var(--crop-size); height: var(--crop-size);
+  background: #1a1f24; cursor: grab; touch-action: none;
+  border: 1px solid var(--menu-border-soft, #2b323a);
+}
+.avatar-cropper canvas:active { cursor: grabbing; }
+.avatar-cropper input[type="range"] { width: var(--crop-size); accent-color: var(--menu-accent, #3ea6ff); }
+.avatar-cropper-actions { display: flex; gap: 10px; }

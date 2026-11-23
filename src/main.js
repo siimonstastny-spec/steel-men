@@ -25,7 +25,7 @@ import { commandBus } from './game/commands/CommandBus.js';
 import { localTeam, setLocalTeam, isLocal } from './core/LocalPlayer.js';
 import { randomSeed } from './core/Rng.js';
 import { preloadModels } from './core/AssetLoader.js';
-import { Economy } from './game/Economy.js';
+import { Economy, validPopulationCap } from './game/Economy.js';
 import { loadVehicle } from './units/Aircraft.js'; // aircraft → Aircraft, other vehicles → CombatVehicle loader
 import { Structure } from './units/Structure.js';
 import { BuildMenu, unitName } from './ui/BuildMenu.js';
@@ -60,6 +60,7 @@ import { startMultiplierFromSettings } from './game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings, applyStartResearch } from './game/StartResearch.js';
 import { EconomyAlerts } from './ui/EconomyAlerts.js'; // [D2]
 import { spawnProceduralPreview } from './procedural/ProcPreview.js'; // [N3] prototype, console only
+import { loadBuildingStyles } from './procedural/BuildingStyle.js'; // [18A] faction building styles (data/buildingStyles.json)
 
 const { renderer, scene, camera, controls, ground } = createScene(document.getElementById('app'));
 
@@ -93,13 +94,23 @@ const game = {
 };
 const raceOf = (team) => game.races[team] ?? game.races[0];
 
+const RESTART_KEY = 'steelMans.restart'; // sessionStorage: settings of a solo restart (survives the reload only)
+let lastSoloSettings = null;             // settings of the running solo match (for Restart)
+
 // Game menu (Esc / ☰) and the end-of-match screen; quit = reload (the start menu remembers the last choice)
 const matchUi = new MatchUi({
   teamName: (i) => (playerLabel(i) || (isLocal(i) ? (getSettings().nickname || t('common.player'))
     : t(areAllies(i, localTeam()) ? 'common.ally' : 'common.enemy'))) + ` (${raceName(raceOf(i))})`,
   openSettings: (returnTo) => game.menu?.openSettingsFrom(returnTo),
   quit: () => window.location.reload(),
-  net: () => net,                                               // multiplayer pause goes through the lockstep
+  // [W5c] solo restart = reload + the last settings with a new seed (startGame does not tear down the previous match)
+  restart: () => {
+    if (!lastSoloSettings || net) return;
+    try { sessionStorage.setItem(RESTART_KEY, JSON.stringify({ ...lastSoloSettings, seed: randomSeed() })); } catch { return; }
+    window.location.reload();
+  },
+  canRestart: () => !!lastSoloSettings,                        // [W5c] only a match started from the menu can restart
+  net: () => net,                                              // multiplayer pause goes through the lockstep
   nickname: () => getSettings().nickname || t('common.player'), // "{name} paused the game"
 });
 input.onGameMenu = () => matchUi.toggleMenu();
@@ -157,7 +168,7 @@ const spawners = {
     const race = raceOf(team);
     const n = ++spawnCount;
     return world.spawnDeferred(
-      () => new ModularMech(loadout, { name: `Robot ${n} (${raceName(race)})`, team, race }).load(),
+      () => new ModularMech(loadout, { name: t('unit.mechName', { n, race: raceName(race) }), team, race }).load(),
       (mech) => { const p = structure.nextSpawnPoint(); return world.addMech(mech, p.x, p.z, p.yaw); },
     );
   },
@@ -167,7 +178,7 @@ const spawners = {
     const race = raceOf(team);
     const n = ++crewCount;
     return world.spawnDeferred(
-      () => new Crew(race, { name: `Posádka ${n} (${raceName(race)})`, team }).load(),
+      () => new Crew(race, { name: t('unit.crewName', { n, race: raceName(race) }), team }).load(),
       (crew) => { const { x, z, yaw = Math.PI } = structure.nextSpawnPoint(); return world.addCrew(crew, x, z, yaw); },
     );
   },
@@ -194,14 +205,14 @@ const productionSpawners = {
   crew: (team, race, at) => {
     const n = ++crewCount;
     return world.spawnDeferred(
-      () => new Crew(race, { name: `Posádka ${n} (${raceName(race)})`, team }).load(),
+      () => new Crew(race, { name: t('unit.crewName', { n, race: raceName(race) }), team }).load(),
       (crew) => world.addCrew(crew, at.x, at.z, at.yaw ?? Math.PI),
     );
   },
   mech: (team, race, loadout, at) => {
     const n = ++spawnCount;
     return world.spawnDeferred(
-      () => new ModularMech(loadout, { name: `Robot ${n} (${raceName(race)})`, team, race }).load(),
+      () => new ModularMech(loadout, { name: t('unit.mechName', { n, race: raceName(race) }), team, race }).load(),
       (mech) => world.addMech(mech, at.x, at.z, at.yaw),
     );
   },
@@ -359,10 +370,11 @@ async function startGame(settings) {
   // Economy: accounts with the starting resources, energy cap and deposits from the new-game menu
   world.settings.economy = {
     energyCap: settings.energyCap ?? ECONOMY.defaultEnergyCap,
+    populationCap: validPopulationCap(settings.populationCap), // [W5b] 100..500 | Infinity
     oreMultiplier: oreMultiplierFromSettings(settings), // [B1] 0.5 | 1 | 2 | 4 | 'infinite'
     startMultiplier: startMultiplierFromSettings(settings), // [D4] starting resources 0.5 | 1 | 2 | 4 | 'infinite'
   };
-  await loadStats();
+  await Promise.all([loadStats(), loadBuildingStyles()]); // [18A] styles before any procedural building is created
   world.economy = new Economy(world, { races: game.races, ...world.settings.economy });
   map.placeDeposits?.(seed); // ASCII maps: deposits on random field cells from the match seed
   world.economy.setupDeposits(map);
@@ -422,7 +434,7 @@ async function init(RACE, enemyRace) {
       loadThenAdd(myLoadouts.map((l) => ({
         load: () => new ModularMech(l, { race: RACE, team: PLAYER_TEAM }).load(),
         add: (mech) => {
-          mech.name = `Robot ${spawnCount + 1} (${raceName(RACE)})`;
+          mech.name = t('unit.mechName', { n: spawnCount + 1, race: raceName(RACE) });
           const { x, z } = nextSpawn();
           return world.addMech(mech, x, z, spawnBase.yaw); // facing the enemy (−Z)
         },
@@ -431,7 +443,7 @@ async function init(RACE, enemyRace) {
 
     // Crews: robots 1 and 2 are manned, the third crew waits at the training area
     const crews = await loadThenAdd([0, 1, 2].map((i) => ({
-      load: () => new Crew(RACE, { name: `Posádka ${i + 1} (${raceName(RACE)})`, team: PLAYER_TEAM }).load(),
+      load: () => new Crew(RACE, { name: t('unit.crewName', { n: i + 1, race: raceName(RACE) }), team: PLAYER_TEAM }).load(),
       add: (crew) => { const { x, z, yaw = Math.PI } = nextCrewSpawn(); return world.addCrew(crew, x, z, yaw); },
     })));
     mechs[0].boardCrew(crews[0]);
@@ -479,14 +491,26 @@ async function showMenu() {
     const races = raceList();
     if (races.length === 0) throw new Error('stats.json has no races');
     game.menu = new MainMenu(document.getElementById('menu'), {
-      races, teams: TEAMS, onStart: startGame,
+      races, teams: TEAMS, onStart: (s) => { lastSoloSettings = s; return startGame(s); },
       multiplayer: { createTransport: mp.createTransport, Lobby: mp.Lobby },
       onMultiplayerStart: (info) => startMultiplayer(info).catch((err) => { console.error(err); hud.message(t('menu.errorLoading')); }),
     });
   } catch (err) {
     console.error(err);
     hud.message(t('menu.errorLoading'));
+    return;
   }
+  // [W5c] solo restart: the page was reloaded with the last settings (new seed) → start straight away
+  try {
+    const raw = sessionStorage.getItem(RESTART_KEY);
+    if (raw) {
+      sessionStorage.removeItem(RESTART_KEY);
+      const s = JSON.parse(raw);
+      lastSoloSettings = s;
+      game.menu.show(false);
+      await startGame(s);
+    }
+  } catch (err) { console.error(err); }
 }
 
 // ---------- multiplayer: lockstep over src/net (docs/MULTIPLAYER.md) ----------
@@ -535,7 +559,7 @@ async function startMultiplayer(info) {
     colors: byTeam.map((seat, team) => seat.color ?? TEAMS[team].color),
     seats: byTeam.map((seat) => (seat.playerId === info.selfId ? 'human' : seat.controller === 'human' ? 'remote' : seat.controller ?? 'ai')),
     friendlyFire: s.friendlyFire, fogOfWar: s.fogOfWar, victory: s.victory,
-    energyCap: s.energyCap, oreMultiplier: s.oreMultiplier, startMultiplier: s.startMultiplier, startResearch: s.startResearch, speed: s.speed, prebuild: s.prebuild,
+    energyCap: s.energyCap, populationCap: s.populationCap, oreMultiplier: s.oreMultiplier, startMultiplier: s.startMultiplier, startResearch: s.startResearch, speed: s.speed, prebuild: s.prebuild,
     aiDifficulty: byTeam.map((seat) => (seat.controller === 'ai' ? seat.difficulty ?? null : null)),
     aiNames: byTeam.map((seat) => seat.aiName ?? null), avatars: byTeam.map((seat) => seat.avatar ?? null), // [N6] from the host
     avatarImgs: byTeam.map((_, team) => info.avatarImgs?.[team] ?? ''), // [UISMALL] thumbnails of the humans (lobby presence)

@@ -104,6 +104,7 @@ class P2PChannel {
     this.selfUpdatedAt = Date.now();
     this.remote = new Map();     // peerId -> { presence, updatedAt }
     this.closed = false;
+    this.outbox = [];            // {topic, data, at}: sends made while no peer was connected
 
     this.presenceAction = room.makeAction(PRESENCE_ACTION);
     this.presenceAction.onMessage = (payload, meta) => this.#receivePresence(meta?.peerId, payload);
@@ -124,8 +125,28 @@ class P2PChannel {
     let bytes;
     try { bytes = utf8Length(JSON.stringify(data)); } catch (e) { console.error('[net] p2p message not serialisable', topic, e); return; }
     if (bytes > NET.maxMessageBytes) { console.error('[net] p2p message too big', topic, bytes); return; }
-    if (this.remote.size === 0) return;
+    // nobody connected yet: hold a lobby message (the joiner's `hello`) until a peer joins; other topics are pointless without peers
+    if (this.remote.size === 0) { if (topic === 'lobby') this.#queue(topic, data); return; }
     swallow(this.#action(topic).send(data), `send ${topic}`);
+  }
+
+  /** Keeps a message sent before the first data channel opened (e.g. a joiner's first `hello`); flushed in #peerJoined */
+  #queue(topic, data) {
+    const now = Date.now();
+    const q = this.outbox;
+    while (q.length && now - q[0].at > NET.p2p.outboxTtlMs) q.shift();
+    if (q.length >= NET.p2p.outboxMax) q.shift();
+    q.push({ topic, data, at: now });
+  }
+
+  #flushOutbox(target) {
+    if (!this.outbox.length) return;
+    const now = Date.now();
+    const q = this.outbox.splice(0);
+    for (const m of q) {
+      if (now - m.at > NET.p2p.outboxTtlMs) continue;
+      swallow(this.#action(m.topic).send(m.data, { target }), `flush ${m.topic}`);
+    }
   }
 
   on(topic, fn) {
@@ -189,6 +210,7 @@ class P2PChannel {
       this.presenceAction.onMessage = null;
       for (const action of this.actions.values()) action.onMessage = null;
     } catch { /* room already torn down */ }
+    this.outbox.length = 0;
     this.handlers.clear();
     this.actions.clear();
     this.peerHandlers.clear();
@@ -226,6 +248,7 @@ class P2PChannel {
   #peerJoined(id) {
     if (this.closed || typeof id !== 'string' || id === this.selfId) return;
     this.#sendPresence(id, true); // a newcomer gets our presence at once (the room hands presence to newcomers)
+    this.#flushOutbox(id);
     if (this.remote.has(id)) return;
     const p = { presence: {}, updatedAt: Date.now() };
     this.remote.set(id, p);

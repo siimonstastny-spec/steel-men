@@ -18,6 +18,7 @@ import { snapYaw } from '../units/Structure.js';
 import { commandBus } from '../game/commands/CommandBus.js';
 import '../game/commands/productionCommands.js'; // registers the production commands
 import { REASON, canGather } from '../game/Production.js';
+import { formatAmount } from './formatAmount.js';
 
 const ICONS = { structure: '🏗', vehicle: '🚚', crew: '👥', cancel: '✖' };
 const PERCENT = 100;
@@ -87,7 +88,7 @@ export class BuildMenu {
   }
 
   #populationText() {
-    return t('econ.noPopulation', { used: this.economy.populationUsed(localTeam()), cap: this.economy.populationCap(localTeam()) });
+    return t('econ.noPopulation', { used: this.economy.populationUsed(localTeam()), cap: formatAmount(this.economy.populationCap(localTeam())) });
   }
 
   // ---------- commands ----------
@@ -304,7 +305,7 @@ export class BuildMenu {
     const stats = unitStats('structures', id, this.race);
     const limit = this.limitText(id, stats);
     if (limit) { this.notify(limit); return; }
-    if (!this.economy.canAfford(localTeam(), stats.cost)) { this.notify(this.#missingText(stats.cost)); return; }
+    if (!this.economy.canAffordUpfront(localTeam(), stats.cost)) { this.notify(this.#missingText(stats.cost)); return; }
     // Rotation turns smoothly: the next building keeps the last angle, the first one faces the map centre in a quarter turn
     const yaw = this.placedYaw ?? snapYaw(this.placementYaw?.() ?? 0);
     const ghost = createPlacement(stats, {

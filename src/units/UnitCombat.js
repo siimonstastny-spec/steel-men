@@ -381,7 +381,7 @@ function pickApproachSlot(unit, o) {
   const r = o.target.radius + unit.radius + ORDERS.approachGap;
   // [N7-5] aircraft never take a ground spot (and the other way round)
   const others = unit.world.units.filter((u) => u !== unit && u !== o.target && Boolean(u.airborne) === Boolean(unit.airborne));
-  const shapes = unit.world.nav.shapesFor(unit.radius, [unit, o.target]);
+  const shapes = unit.world.nav.shapesFor(unit.radius, [unit, o.target], false, unit); // [W7] leg circle
   let chosen = current + step;
   for (let k = 1; k < ORDERS.approachSlots; k++) {
     const a = current + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * step;

@@ -53,11 +53,39 @@ export function buildRate(race, builders, started = true) {
  */
 export function markConstructionStarted(structure) {
   if (!structure.constructionStarted && structure.builders.size > 0) structure.constructionStarted = true;
+  // [W5b] the real start: the deferred part of the cost (energy, structure.constructionDue) is paid now; until the
+  // team has it the building does not grow (structureBuildRate 0)
+  const due = structure.constructionDue;
+  if (due && structure.constructionStarted && !structure.complete) {
+    const eco = structure.world?.economy;
+    if (!eco || !eco.hasDue(due) || eco.payDue(structure.team, due, structure.constructionPaid)) structure.constructionDue = null;
+  }
 }
 
 /** [N1] Current construction speed of a building (Structure.buildRate): its builders and whether it was started */
 export function structureBuildRate(structure) {
+  if (structure.constructionDue) return 0; // [W5b] waits for the deferred part of its cost
   return buildRate(structure.race, structure.builders.size, structure.constructionStarted === true);
+}
+
+/**
+ * [W5b] A just placed unfinished building: the deferred part of its cost (Economy.dueOf, energy) is due when the first
+ * builder starts it (markConstructionStarted). Call after economy.payUpfront(team, cost) in the placing command.
+ */
+export function setConstructionDue(economy, structure, cost = {}) {
+  structure.constructionDue = economy?.dueOf(cost) ?? null;
+  structure.constructionPaid = structure.constructionDue ? {} : null;
+}
+
+/**
+ * [W5b] Refund of a cancelled unfinished building: factor × (its cost without the deferred part + what of the
+ * deferred part was paid). Buildings placed without setConstructionDue refund their whole cost as before.
+ */
+export function refundConstruction(economy, structure, factor) {
+  if (!economy) return;
+  const cost = structure.stats?.cost ?? {};
+  if (structure.constructionPaid === undefined) economy.refund(structure.team, cost, factor);
+  else economy.refundPaid(structure.team, cost, structure.constructionPaid, factor);
 }
 
 /** Box (x, z, halfX, halfZ) against a NavGrid shape (circle or box) */

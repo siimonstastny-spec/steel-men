@@ -174,12 +174,27 @@ body:has(#hud-root:not([hidden])) #menu .menu-card {
 .tab:hover { color: var(--menu-text); }
 .tab:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: -2px; }
 .tab.on { background: var(--menu-selected-bg); color: var(--menu-accent); border-color: var(--menu-border); box-shadow: inset 0 2px 0 var(--menu-accent); }
+/* Settings → Controls: vertical tabs by area */
+.vtabs-layout { display: flex; gap: 16px; align-items: flex-start; }
+.vtabs { display: flex; flex-direction: column; flex: 0 0 150px; border-right: 1px solid var(--menu-border-soft); }
+.vtab { padding: 8px 12px; border: 1px solid transparent; border-right: 0; border-radius: 0; background: none; color: var(--menu-muted); font: 700 13px var(--menu-font); text-align: left; text-transform: uppercase; letter-spacing: 0.12em; cursor: pointer; }
+.vtab:hover { color: var(--menu-text); }
+.vtab:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: -2px; }
+.vtab.on { background: var(--menu-selected-bg); color: var(--menu-accent); border-color: var(--menu-border); box-shadow: inset 2px 0 0 var(--menu-accent); }
+.vtab-body { flex: 1 1 auto; min-width: 0; }
+@media (max-width: 600px) {
+  .vtabs-layout { flex-direction: column; }
+  .vtabs { flex-direction: row; flex-wrap: wrap; flex: none; border-right: 0; border-bottom: 1px solid var(--menu-border-soft); }
+}
 .tab-panel h3 { margin: 14px 0 6px; font-size: 13px; color: var(--menu-muted); text-transform: uppercase; letter-spacing: 0.14em; }
 .small { font-size: 12px; }
 .setting-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; font-size: 14px; }
 .setting-row > span { flex: 0 0 200px; }
 .setting-row input[type=range] { flex: 1; accent-color: var(--menu-accent); }
 .setting-row output { width: 52px; text-align: right; color: var(--menu-muted); }
+.gfx-advanced-title { margin-top: 18px; }
+.gfx-advanced { padding-left: 12px; border-left: 2px solid var(--menu-border); }
+.gfx-custom { margin: 8px 0 0; color: var(--menu-accent); }
 .setting-row.check { gap: 8px; cursor: pointer; }
 .setting-row.check > span { flex: 0 1 auto; }
 .setting-row.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--menu-accent); }

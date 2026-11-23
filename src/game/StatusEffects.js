@@ -133,7 +133,7 @@ export class UnitStatus {
     const speed = Math.hypot(this.vx, this.vz);
     const step = speed * dt;
     const to = { x: unit.position.x + this.vx * dt, z: unit.position.z + this.vz * dt };
-    const shapes = world.nav.shapesFor(unit.radius, [unit]);
+    const shapes = world.nav.shapesFor(unit.radius, [unit], false, unit); // [W7] leg circle for low obstacles
     const limit = world.nav.half - unit.radius;
     const inside = Math.abs(to.x) <= limit && Math.abs(to.z) <= limit;
     // [NQ3] aircraft fly over obstacles (only the map edge stops them) and keep their altitude

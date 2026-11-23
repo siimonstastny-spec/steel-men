@@ -6,14 +6,14 @@ import { MechAnimator } from '../anim/MechAnimator.js';
 import { MechPart } from './MechPart.js';
 import {
   SOCKETS, MECH, MOVEMENT, TEAMS, PLAYER_TEAM, VFX, ORDERS, RINGS, ARRIVE_DISTANCE, BEHAVIOUR, basicLoadout, PING,
-  JUMP_JET,
+  JUMP_JET, MECH_COLLISION,
 } from '../config.js';
 import { loadStats, getStats, partStats, composeMech, teamRule } from '../data/Stats.js';
 import {
   isTargetable, areEnemies, edgeDistance, angleTo, canFireAt, engagementRange, releaseAttack, clipHitType, pickTarget,
 } from '../game/Combat.js';
 import { fogReaction, retargetAuto, lostTargetOrder, orderExpired } from './UnitCombat.js';
-import { blockedOnTheWay, followPath } from '../game/Movement.js';
+import { blockedOnTheWay, followPath, contactDistance } from '../game/Movement.js';
 import { applyTeamColor } from '../core/TeamColor.js';
 import { play } from '../audio/Sound.js';
 import { approachBay, updateService, activeRepairers, isServiceBay } from '../game/Repair.js';
@@ -23,6 +23,13 @@ import { isLocal } from '../core/LocalPlayer.js';
 const DEG = Math.PI / 180;
 
 export const ARM_SLOTS = ['leftArm', 'rightArm'];
+/**
+ * Slot names follow the model files: socket_ArmLeft sits at -x, and a mech faces +z, so the 'leftArm' slot is
+ * physically on the PILOT's right (and 'rightArm' on the pilot's left). Presentation maps a pilot-side arm
+ * ('leftArm' = the pilot's left hand) to the mech slot that sits there. Simulation keeps the slot names.
+ */
+export const PILOT_ARM_SLOT = Object.freeze({ leftArm: 'rightArm', rightArm: 'leftArm' });
+export const pilotSlot = (side) => PILOT_ARM_SLOT[side] ?? side;
 const WEAPON_SLOTS = [...ARM_SLOTS, 'torso', 'legs']; // order of ModularMech.weapons (arms first)
 const NO_WEAPONS = Object.freeze([]);
 
@@ -61,7 +68,9 @@ export class ModularMech extends THREE.Group {
     this.destroyed = false;
     this.removed = false; // trosky zapadly, World robota odebere
     this.sinkTimer = 0;
-    this.radius = 6;      // footprint for ranges and selection
+    this.radius = 6;      // footprint for ranges and selection; [W7] = shoulder circle (vs mechs and tall things)
+    this.footRadius = undefined; // [W7] foot circle (vs crews, vehicles, low buildings) – set in #createRings
+    this.shoulderHeight = Infinity; // [W7] units above the feet; lower obstacles / units touch only the foot circle
     this.aimHeight = 14;  // where shots aim at
     this.selectionRing = null;
     this.teamRing = null;
@@ -263,7 +272,7 @@ export class ModularMech extends THREE.Group {
     play('mechDestroyed', { position: this.position });
     this.order = null;
     this.setSelected(false);
-    this.world?.effects.burst(VFX.mechExplosion, this.position.clone(), { heightUnit: this.aimHeight });
+    this.world?.effects.unitDeath(this); // [R9] burns first, explodes after the fall (data/explosions.json)
     if (this.teamRing) this.teamRing.visible = false;
     if (getStats().rules.crew.ejectOnDestroy) {
       // Survivors jump out and run from the enemies their team knows about (and the killer), then walk to their HQ
@@ -965,12 +974,12 @@ export class ModularMech extends THREE.Group {
     const r = o.target.radius + this.radius + ORDERS.approachGap;
     // [N7-5] aircraft never take a ground spot (and the other way round)
     const others = this.world.units.filter((u) => u !== this && u !== o.target && Boolean(u.airborne) === Boolean(this.airborne));
-    const shapes = this.world.nav.shapesFor(this.radius, [this, o.target]);
+    const shapes = this.world.nav.shapesFor(this.radius, [this, o.target], false, this); // [W7] per-obstacle circle
     let chosen = current + step;
     for (let k = 1; k < ORDERS.approachSlots; k++) {
       const a = current + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * step; // +1, −1, +2, −2… steps from ours
       const p = { x: t.x + Math.sin(a) * r, z: t.z + Math.cos(a) * r };
-      if (others.some((u) => distXZ(p, u.position) < this.radius + u.radius)) continue;
+      if (others.some((u) => distXZ(p, u.position) < contactDistance(this, u))) continue;
       if (shapes.some((s) => (s.radius !== undefined
         ? distXZ(p, s) < s.radius
         : Math.abs(p.x - s.x) < s.halfX && Math.abs(p.z - s.z) < s.halfZ))) continue;
@@ -1125,6 +1134,7 @@ export class ModularMech extends THREE.Group {
     const r = Math.max(this.radius * MOVEMENT.ringRadiusFactor, this.radius + MOVEMENT.ringMinMargin);
     this.bodyHeight = box.max.y - box.min.y; // body = cylinder of radius × bodyHeight for 3D splash / pellets
     this.aimHeight = this.bodyHeight * MECH.aimHeightFactor;
+    this.#measureCollision(box.min.y); // [W7] foot circle + shoulder height
     const ring = (inner, outer, color, opacity) => {
       const m = new THREE.Mesh(
         new THREE.RingGeometry(inner, outer, RINGS.mechSegments),
@@ -1139,6 +1149,30 @@ export class ModularMech extends THREE.Group {
     this.selectionRing.visible = false;
     const t = RINGS.mechTeamRing;
     if (!isLocal(this.team)) this.teamRing = ring(r - t.inset - t.width, r - t.inset, TEAMS[this.team].color, t.opacity);
+  }
+
+  /**
+   * [W7] Second collision circle (docs/notes/w7-crew-collision.md): `footRadius` = the legs alone (larger side of
+   * their bounding box × MECH_COLLISION.footRadiusFactor), touching everything lower than the shoulders (crews,
+   * vehicles, low buildings / walls, rifts); `shoulderHeight` = arm-socket height above the feet. `radius` (shoulders)
+   * stays for mechs and tall things. Data overrides: legs `collision.footRadius`, torso `collision.shoulderHeight`.
+   * Measured from the bind pose like `radius`, so it is the same on every client.
+   * @param {number} feetY  lowest point of the legs + torso box relative to the mech's position
+   */
+  #measureCollision(feetY) {
+    const box = new THREE.Box3();
+    const meshBox = new THREE.Box3();
+    for (const mesh of this.parts.legs.meshes) {
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      box.union(meshBox.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld));
+    }
+    const measured = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) * MECH_COLLISION.footRadiusFactor;
+    const foot = this.parts.legs.stats.collision?.footRadius ?? Math.max(measured, MECH_COLLISION.minFootRadius);
+    this.footRadius = Math.min(foot, this.radius); // the legs never reach further than the shoulders
+    const socket = this.sockets.leftArm ?? this.sockets.rightArm;
+    const socketY = socket ? socket.getWorldPosition(new THREE.Vector3()).y - this.position.y - feetY : this.bodyHeight;
+    this.shoulderHeight = this.parts.torso.stats.collision?.shoulderHeight
+      ?? socketY * MECH_COLLISION.shoulderHeightFactor;
   }
 
   /**

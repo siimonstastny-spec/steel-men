@@ -23,7 +23,10 @@ import { play } from '../audio/Sound.js';
 import { setUnitHighlight } from '../core/Highlight.js';
 import { confirmDialog, isConfirmDialogOpen } from '../ui/ConfirmDialog.js';
 import { isServiceBay, bayAssembling, canRepairTarget, repairInterruptible } from '../game/Repair.js';
-import { ALLY_REPAIR, N2_UI } from '../config.js'; // [N5FIX] repair cursor
+import { ALLY_REPAIR } from '../config.js'; // [N5FIX] repair cursor
+// [W4] cursors are defined in ui/cursors.css (custom properties with a standard-cursor fallback)
+const CURSOR_MINE = 'var(--cursor-mine, copy)';
+const CURSOR_ATTACK = 'var(--cursor-attack, crosshair)';
 import { commandBus } from '../game/commands/CommandBus.js';
 import { canGather } from '../game/Production.js';
 import '../game/commands/productionCommands.js'; // setRally registers even before BuildMenu loads
@@ -41,7 +44,7 @@ const INSTANT_KEY_ORDERS = ['eject', 'dropLeft', 'dropRight', 'stop', 'deleteUni
 // Behaviour buttons -> unit.setBehaviour mode (BEHAVIOUR.mechModes / crewModes in config.js)
 const BEHAVIOUR_COMMANDS = { behaviourAggressive: 'aggressive', behaviourDefensive: 'defensive', behaviourPassive: 'passive' };
 const STANCE_COMMANDS = { stanceRanged: 'ranged', stanceMelee: 'melee' };
-const DROP_ARM_COMMANDS = { dropLeft: 'leftArm', dropRight: 'rightArm' };
+const DROP_ARM_COMMANDS = { dropLeft: 'rightArm', dropRight: 'leftArm' }; // pilot's side -> slot (slot names follow the models, see PILOT_ARM_SLOT)
 const COORD_DECIMALS = 100; // points are sent rounded to 0.01
 
 /** Plain-JSON point of a Vector3 */
@@ -214,8 +217,8 @@ export class CommandInput {
       eject: mechs.some((m) => m.crew),
       stanceRanged: active.some((m) => m.hasMixedWeapons),
       stanceMelee: active.some((m) => m.hasMixedWeapons),
-      dropLeft: !!single?.active && !!single.parts.leftArm,
-      dropRight: !!single?.active && !!single.parts.rightArm,
+      dropLeft: !!single?.active && !!single.parts.rightArm,   // pilot's left hand = slot rightArm (see PILOT_ARM_SLOT)
+      dropRight: !!single?.active && !!single.parts.leftArm,
       attackMove: fighters,
       guard: fighters,
       patrol: fighters,
@@ -497,10 +500,12 @@ export class CommandInput {
     // [N2] selected harvesters over an ore deposit they can mine: mining cursor
     const mineable = !this.pending && this.selectedVehicles.some((v) => v.harvester)
       && Boolean(this.#depositUnderCursor());
+    // [W4] enemy unit / building under the cursor with armed units selected (mechs or armed vehicles): crosshair
+    const canShoot = enemy && (this.selectedMechs.length > 0 || this.selectedVehicles.some((v) => v.canAttack));
     this.dom.style.cursor = this.pending ? ORDER_BUTTONS.pendingCursor
-      : mineable ? N2_UI.mineCursor
+      : mineable ? CURSOR_MINE
       : part?.wreck && part.isArm ? 'grab'
-      : enemy && this.selectedMechs.length ? 'crosshair'
+      : canShoot ? CURSOR_ATTACK
       : repairable ? ALLY_REPAIR.cursor
       : unit ? 'pointer' : '';
   }

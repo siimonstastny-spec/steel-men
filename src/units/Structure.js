@@ -15,7 +15,7 @@ const _sunQ = new THREE.Quaternion();
 import { isLocal } from '../core/LocalPlayer.js';
 import { applyTeamColor } from '../core/TeamColor.js';
 import { structureBuildRate, markConstructionStarted } from '../game/Construction.js';
-import { hasProceduralModel, createProceduralStructure } from '../procedural/VehicleFactoryProc.js';
+import { useProceduralModel, createProceduralStructure, loadBuildingStyles } from '../procedural/registry.js';
 
 const QUARTER_TURNS = 4;
 
@@ -114,7 +114,7 @@ export class Structure extends THREE.Group {
     this.removed = false;
     this.speed = 0;
     this.model = null;
-    this.procModel = null;      // procedural model (window.steelMans.procedural === true before load), visual only
+    this.procModel = null;      // procedural model (src/procedural/registry.js; off with window.steelMans.procedural = false), visual only
     this.mixer = null;
     this.builders = new Set();  // vehicles that built it during the last frame (HUD, rate)
     this._working = new Set();
@@ -152,8 +152,10 @@ export class Structure extends THREE.Group {
     await loadStats();
     const fp = await modelFootprint(this.unitId, this.race);
     this.setup(fp);
-    // Prototype switch (docs/notes/n3-procedural.md): procedural model instead of the GLB; footprint stays from the GLB
-    const proc = window.steelMans?.procedural === true && hasProceduralModel(this.unitId);
+    // Procedural model instead of the GLB when the id has one (PROC_BUILDINGS, docs/notes/proc-style-kit.md);
+    // footprint stays from the GLB
+    const proc = useProceduralModel(this.unitId);
+    if (proc) await loadBuildingStyles();
     const model = proc
       ? createProceduralStructure(this.unitId, this.race, TEAMS[this.team].color)
       : await loadModel(this.stats.model);

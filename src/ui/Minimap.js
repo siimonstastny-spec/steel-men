@@ -60,6 +60,11 @@ export class Minimap {
     this.damageTimer = 0;
     this.primed = false;          // first frame of a map: everything is "swept" once so the map is not empty
     this.layersDisposed = false;
+    this.res = MINIMAP.minPixelRatio; // [R2] backing pixels per logical px (MINIMAP.size); refreshed by #syncResolution
+    this.resDirty = true;             // measure the element on the next redraw
+    this.resWait = 0;                 // s left of the resize debounce
+    this._onResize = () => { this.resDirty = true; this.resWait = MINIMAP.resizeDebounce; };
+    window.addEventListener('resize', this._onResize);
     this.el = this.#createElement();
     this.canvas = this.el.querySelector('canvas');
     this.ctx = this.canvas.getContext('2d');
@@ -82,6 +87,10 @@ export class Minimap {
     const map = this.world.map;
     this.el.hidden = !map;
     if (!map) { this.primed = false; this.blips.clear(); return; }
+    if (this.resDirty) {
+      this.resWait -= elapsed;
+      if (this.resWait <= 0) this.#syncResolution(map);
+    }
     // Race known / changed (economy exists only after the stats are loaded, so getStats() is safe here)
     if (this.world.economy?.races?.[localTeam()] !== this.radarRace) this.#applyRace();
     if (this.backgroundMap !== map) { this.#renderBackground(map); this.blips.clear(); this.primed = false; }
@@ -96,6 +105,7 @@ export class Minimap {
   /** Releases DOM, canvases, listeners (the element owns the pointer listeners) and snapshots. */
   dispose() {
     this.layersDisposed = true;
+    window.removeEventListener('resize', this._onResize);
     this.el?.remove();
     for (const c of [this.background, this.fogLayer, this.overlay, this.trail, this.canvas]) {
       if (c) { c.width = 0; c.height = 0; }
@@ -135,10 +145,9 @@ export class Minimap {
       cursor: 'pointer',
     });
     const canvas = document.createElement('canvas');
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = canvas.height = Math.round(MINIMAP.size * ratio);
+    canvas.width = canvas.height = Math.round(MINIMAP.size * this.res);
     Object.assign(canvas.style, { width: `${MINIMAP.size}px`, height: `${MINIMAP.size}px` });
-    canvas.getContext('2d').scale(ratio, ratio);
+    canvas.getContext('2d').setTransform(this.res, 0, 0, this.res, 0, 0);
     el.appendChild(canvas);
     document.body.appendChild(el);
 
@@ -192,11 +201,27 @@ export class Minimap {
 
   // ---------- layers ----------
 
-  // Terrain by height + obstacles + super node + starts; drawn once per map
+  // [R2] Picks the backing-store resolution from the real on-screen size × devicePixelRatio and rebuilds the layers
+  #syncResolution(map) {
+    this.resDirty = false;
+    const css = this.canvas.clientWidth; // 0 while hidden: fall back to the logical size
+    const wanted = (css > 0 ? css / MINIMAP.size : 1) * (window.devicePixelRatio || 1);
+    const res = Math.round(THREE.MathUtils.clamp(wanted, MINIMAP.minPixelRatio, MINIMAP.maxPixelRatio) * 4) / 4;
+    if (res === this.res) return;
+    this.res = res;
+    this.canvas.width = this.canvas.height = Math.round(MINIMAP.size * res); // resets the context state
+    this.ctx.setTransform(res, 0, 0, res, 0, 0);
+    if (this.backgroundMap === map) this.#renderBackground(map); // a new map renders its own background right after
+    this.#buildLayers();
+  }
+
+  // Terrain by height + obstacles + super node + starts; drawn once per map (and per resolution change)
   #renderBackground(map) {
+    const px = Math.round(MINIMAP.size * this.res);
     const bg = document.createElement('canvas');
-    bg.width = bg.height = MINIMAP.size;
-    drawMapBackground(bg.getContext('2d'), map, MINIMAP.size);
+    bg.width = bg.height = px;
+    drawMapBackground(bg.getContext('2d'), map, px, { markScale: this.res });
+    if (this.background) { this.background.width = 0; this.background.height = 0; }
     this.background = bg;
     this.backgroundMap = map;
     this.fogVersion = -1;
@@ -261,11 +286,10 @@ export class Minimap {
   // Concentric range rings (clipped by the square canvas) + centre dot; drawn once per race
   #renderOverlay() {
     const n = MINIMAP.size;
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
     const c = document.createElement('canvas');
-    c.width = c.height = Math.round(n * ratio);
+    c.width = c.height = Math.round(n * this.res);
     const ctx = c.getContext('2d');
-    ctx.scale(ratio, ratio);
+    ctx.scale(this.res, this.res);
     const half = n / 2;
     const step = half / RADAR.ringsInside;
     ctx.strokeStyle = this.radarColor;
@@ -293,8 +317,9 @@ export class Minimap {
   #renderTrail() {
     const reach = Math.ceil(MINIMAP.size * Math.SQRT1_2) + 2; // centre -> corner
     const c = document.createElement('canvas');
-    c.width = c.height = reach * 2;
+    c.width = c.height = Math.round(reach * 2 * this.res);
     const ctx = c.getContext('2d');
+    ctx.scale(this.res, this.res);
     ctx.translate(reach, reach);
     ctx.fillStyle = this.radarColor;
     const steps = RADAR.trailSteps;
@@ -357,7 +382,7 @@ export class Minimap {
     ctx.fillStyle = TEAMS[team]?.color ?? '#fff';
     if (ally) { ctx.strokeStyle = PLAYERS_UI.minimapAllyOutline; ctx.lineWidth = PLAYERS_UI.minimapAllyOutlineWidth; }
     if (kind === KIND_STRUCTURE) {
-      const s = R2.minimap.structureHalf * scale;
+      const s = R2.minimap.structureHalf * MINIMAP.structureScale * scale; // [R2] small squares
       ctx.fillRect(x - s, y - s, s * 2, s * 2);
       if (ally) ctx.strokeRect(x - s, y - s, s * 2, s * 2);
     } else if (kind === KIND_AIR) { // [N7] triangle pointing up
@@ -398,7 +423,7 @@ export class Minimap {
     ctx.save();
     ctx.translate(half, half);
     ctx.rotate(angle);
-    ctx.drawImage(this.trail, -this.trailReach, -this.trailReach);
+    ctx.drawImage(this.trail, -this.trailReach, -this.trailReach, this.trailReach * 2, this.trailReach * 2);
     ctx.globalAlpha = RADAR.sweepLineAlpha;
     ctx.strokeStyle = this.radarColor;
     ctx.lineWidth = RADAR.sweepLineWidth;
@@ -473,7 +498,7 @@ export class Minimap {
  * @param {number} n  canvas size in px (square)
  * @param {{starts?: boolean}} [opts]  starts: false = no start rings (the preview draws its own)
  */
-export function drawMapBackground(ctx, map, n, { starts = true } = {}) {
+export function drawMapBackground(ctx, map, n, { starts = true, markScale = 1 } = {}) { // markScale: px multiplier of the start / super node marks (hi-res canvas)
   const toMini = (x, z) => [(x / map.size + 0.5) * n, (z / map.size + 0.5) * n];
   const img = ctx.createImageData(n, n);
   const c = new THREE.Color();
@@ -521,10 +546,11 @@ export function drawMapBackground(ctx, map, n, { starts = true } = {}) {
   }
   if (starts) {
     ctx.strokeStyle = MINIMAP.startColor;
+    ctx.lineWidth = markScale;
     for (const p of map.startPositions) {
       const [x, y] = toMini(p.x, p.z);
       ctx.beginPath();
-      ctx.arc(x, y, MINIMAP.startSize, 0, Math.PI * 2);
+      ctx.arc(x, y, MINIMAP.startSize * markScale, 0, Math.PI * 2);
       ctx.stroke();
     }
   }
@@ -532,7 +558,7 @@ export function drawMapBackground(ctx, map, n, { starts = true } = {}) {
     const [x, y] = toMini(map.superNode.x, map.superNode.z);
     ctx.fillStyle = MINIMAP.superNodeColor;
     ctx.beginPath();
-    ctx.arc(x, y, MINIMAP.superNodeSize, 0, Math.PI * 2);
+    ctx.arc(x, y, MINIMAP.superNodeSize * markScale, 0, Math.PI * 2);
     ctx.fill();
   }
 }

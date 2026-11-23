@@ -1,0 +1,105 @@
+{
+  "_doc": "Unit death explosions (visual only – never touches the simulation). Read by src/game/ExplosionStyles.js, played by Effects.unitDeath / explodeUnit / burn. Final effect = kinds[kind] x races[race]. Race keys are the stats.json race keys (default = unknown race / Frame parts). Kind: unitKinds[unitId] (vehicle id) ?? 'mech' (ModularMech) ?? 'aircraft' (airborne) ?? 'vehicle'. Colours are CSS hex; '$name' in a layer colour = races[race].palette[name]. Layer fields as VFX in config.js; a layer with 'kinds' is only played for those kinds. Pools: glow (additive sparks / plasma), smoke (rising puffs), debris (dark chunks that fall and lie on the ground); count x races.mix[pool], sizes x races.size, speed x races.speed.",
+
+  "engine": {
+    "seed": 1337,
+    "glowMax": 900,
+    "smokeMax": 350,
+    "debrisMax": 250,
+    "sphereDetail": 0,
+    "groundFriction": 6,
+    "smokeFadeStart": 0.65,
+    "smokeOpacity": 0.55,
+    "glowFadePower": 1.5,
+    "debrisLingerFade": 0.85
+  },
+
+  "unitKinds": { "hoverTruck": "builder", "drillTruck": "builder" },
+
+  "races": {
+    "default": {
+      "size": 0.9, "speed": 1, "ring": 0,
+      "mix": { "glow": 1, "smoke": 1, "debris": 1 },
+      "palette": { "core": "#fff2c0", "fire": "#ff8a2a", "spark": "#ffd25a", "smoke": "#2a2a2a", "debris": "#3a3430" },
+      "layers": [
+        { "model": "fireBall", "duration": 0.9, "scaleFrom": 0.3, "scaleTo": 1.8, "opacityFrom": 1, "opacityTo": 0, "height": 1.2, "spin": 2, "scroll": 0.6 },
+        { "model": "shockDome", "duration": 0.6, "scaleFrom": 0.2, "scaleTo": 1.9, "opacityFrom": 0.45, "opacityTo": 0, "height": 0, "flatten": 0.25 }
+      ]
+    },
+
+    "X": {
+      "size": 0.8, "speed": 0.9, "ring": 0,
+      "mix": { "glow": 1, "smoke": 1, "debris": 1 },
+      "palette": { "core": "#fff2c0", "fire": "#ff8a2a", "spark": "#ffd25a", "smoke": "#2a2a2a", "debris": "#3a3430" },
+      "layers": [
+        { "model": "fireBall", "duration": 0.8, "scaleFrom": 0.3, "scaleTo": 1.7, "opacityFrom": 1, "opacityTo": 0, "height": 1.2, "spin": 2, "scroll": 0.6 },
+        { "model": "fireBall", "delay": 0.15, "duration": 0.6, "scaleFrom": 0.2, "scaleTo": 1.0, "opacityFrom": 0.8, "opacityTo": 0, "height": 2, "spin": -3, "scroll": 0.8, "kinds": ["mech", "aircraft"] },
+        { "model": "shockDome", "duration": 0.55, "scaleFrom": 0.2, "scaleTo": 1.7, "opacityFrom": 0.45, "opacityTo": 0, "height": 0, "flatten": 0.25 }
+      ]
+    },
+
+    "Y": {
+      "size": 1.35, "speed": 0.8, "ring": 0,
+      "mix": { "glow": 1.2, "smoke": 1.6, "debris": 1.8 },
+      "palette": { "core": "#ffe9b0", "fire": "#ff5a1f", "spark": "#ff9a4a", "smoke": "#1c1a19", "debris": "#2e2622" },
+      "layers": [
+        { "model": "fireBall", "duration": 1.2, "scaleFrom": 0.3, "scaleTo": 2.4, "opacityFrom": 1, "opacityTo": 0, "height": 1.2, "spin": 2, "scroll": 0.5, "color": "#ff9a7a" },
+        { "model": "fireBall", "delay": 0.3, "duration": 1.0, "scaleFrom": 0.2, "scaleTo": 1.8, "opacityFrom": 0.9, "opacityTo": 0, "height": 2.2, "spin": -3, "scroll": 0.7, "kinds": ["mech", "aircraft"] },
+        { "model": "fireBall", "delay": 0.65, "duration": 0.9, "scaleFrom": 0.2, "scaleTo": 1.4, "opacityFrom": 0.8, "opacityTo": 0, "height": 1.6, "spin": 3, "scroll": 0.7, "kinds": ["mech"] },
+        { "model": "shockDome", "duration": 0.9, "scaleFrom": 0.2, "scaleTo": 3.0, "opacityFrom": 0.6, "opacityTo": 0, "height": 0, "flatten": 0.22 },
+        { "model": "shockDome", "delay": 0.25, "duration": 1.1, "scaleFrom": 0.2, "scaleTo": 3.6, "opacityFrom": 0.3, "opacityTo": 0, "height": 0, "flatten": 0.15, "kinds": ["mech"] },
+        { "model": "spiral", "delay": 0.1, "duration": 1.8, "scaleFrom": 0.4, "scaleTo": 1.5, "opacityFrom": 0.8, "opacityTo": 0, "height": 0, "spin": 3, "scroll": 1, "kinds": ["mech", "aircraft"] }
+      ]
+    },
+
+    "Z": {
+      "size": 1.0, "speed": 1.25, "ring": 0.55,
+      "mix": { "glow": 1.8, "smoke": 0.25, "debris": 0.3 },
+      "palette": { "core": "#e8ffd8", "fire": "#b84dff", "spark": "#5fd39a", "smoke": "#2b1740", "debris": "#2a2236" },
+      "layers": [
+        { "model": "fireBall", "textured": false, "duration": 0.9, "scaleFrom": 0.3, "scaleTo": 1.6, "opacityFrom": 0.9, "opacityTo": 0, "height": 1.2, "spin": 3, "color": "$spark" },
+        { "model": "empBlast", "textured": false, "duration": 0.75, "scaleFrom": 0.2, "scaleTo": 2.1, "opacityFrom": 0.9, "opacityTo": 0, "height": 0.3, "spin": 6, "color": "$fire" },
+        { "model": "shockDome", "textured": false, "duration": 0.6, "scaleFrom": 0.2, "scaleTo": 2.3, "opacityFrom": 0.5, "opacityTo": 0, "height": 0, "flatten": 0.3, "color": "$core" },
+        { "model": "empBlast", "textured": false, "delay": 0.35, "duration": 0.9, "scaleFrom": 0.2, "scaleTo": 2.8, "opacityFrom": 0.6, "opacityTo": 0, "height": 0.6, "spin": -5, "color": "$spark", "kinds": ["mech"] },
+        { "model": "spiral", "textured": false, "delay": 0.1, "duration": 1.2, "scaleFrom": 0.3, "scaleTo": 1.1, "opacityFrom": 0.8, "opacityTo": 0, "height": 0, "spin": 8, "color": "$fire", "kinds": ["mech", "aircraft"] }
+      ]
+    }
+  },
+
+  "kinds": {
+    "mech": {
+      "size": 1.0, "heightByAim": true, "delay": 1.8,
+      "burn": { "flameRate": 30, "smokeRate": 16, "height": 0.8, "spread": 0.35, "flameSize": [2.6, 0.5], "smokeSize": [3, 9], "flameLife": [0.4, 0.9], "smokeLife": [1.2, 2.2], "rise": 22, "smokeRise": 14 },
+      "pools": {
+        "glow":   { "count": 40, "speed": [25, 75], "up": 0.6, "size": [1.4, 0.2], "life": [0.4, 0.95], "gravity": 40, "drag": 0.8, "color": ["core", "fire"] },
+        "smoke":  { "count": 22, "speed": [8, 26], "up": 1, "size": [3, 10], "life": [1.4, 2.6], "gravity": -8, "drag": 1.2, "color": ["smoke", "smoke"] },
+        "debris": { "count": 14, "speed": [30, 85], "up": 0.9, "size": [1.4, 1.0], "life": [1.8, 2.8], "gravity": 120, "drag": 0.2, "color": ["debris", "debris"] }
+      }
+    },
+    "vehicle": {
+      "size": 0.6, "heightByAim": false, "delay": 0,
+      "pools": {
+        "glow":   { "count": 22, "speed": [18, 55], "up": 0.6, "size": [1.0, 0.2], "life": [0.35, 0.8], "gravity": 40, "drag": 0.8, "color": ["core", "fire"] },
+        "smoke":  { "count": 10, "speed": [6, 18], "up": 1, "size": [2, 6], "life": [1.0, 1.8], "gravity": -8, "drag": 1.2, "color": ["smoke", "smoke"] },
+        "debris": { "count": 8, "speed": [25, 65], "up": 0.9, "size": [1.0, 0.8], "life": [1.4, 2.2], "gravity": 120, "drag": 0.2, "color": ["debris", "debris"] }
+      }
+    },
+    "builder": {
+      "size": 0.3, "heightByAim": false, "delay": 0,
+      "pools": {
+        "glow":   { "count": 14, "speed": [12, 38], "up": 0.5, "size": [0.8, 0.15], "life": [0.3, 0.6], "gravity": 30, "drag": 0.9, "color": ["core", "spark"] },
+        "smoke":  { "count": 5, "speed": [4, 12], "up": 1, "size": [1.5, 4], "life": [0.8, 1.4], "gravity": -8, "drag": 1.2, "color": ["smoke", "smoke"] },
+        "debris": { "count": 4, "speed": [15, 40], "up": 0.9, "size": [0.8, 0.6], "life": [1.0, 1.6], "gravity": 120, "drag": 0.2, "color": ["debris", "debris"] }
+      }
+    },
+    "aircraft": {
+      "size": 0.78, "heightByAim": false, "delay": 0,
+      "burn": { "flameRate": 60, "smokeRate": 40, "height": 0, "spread": 0.25, "flameSize": [2.0, 0.4], "smokeSize": [2.5, 8], "flameLife": [0.3, 0.7], "smokeLife": [1.2, 2.4], "rise": 6, "smokeRise": 8 },
+      "pools": {
+        "glow":   { "count": 36, "speed": [25, 80], "up": 0.4, "size": [1.4, 0.2], "life": [0.4, 0.95], "gravity": 40, "drag": 0.8, "color": ["core", "fire"] },
+        "smoke":  { "count": 18, "speed": [8, 30], "up": 0.8, "size": [3, 9], "life": [1.4, 2.6], "gravity": -8, "drag": 1.2, "color": ["smoke", "smoke"] },
+        "debris": { "count": 18, "speed": [35, 100], "up": 0.5, "size": [1.3, 0.9], "life": [1.8, 2.8], "gravity": 120, "drag": 0.2, "color": ["debris", "debris"] }
+      }
+    }
+  }
+}

@@ -30,7 +30,7 @@ function formation(n, spacing) {
 }
 
 export class Crew extends THREE.Group {
-  constructor(race, { name = 'Posádka', team = PLAYER_TEAM } = {}) {
+  constructor(race, { name = 'Crew', team = PLAYER_TEAM } = {}) {
     super();
     this.name = name;
     this.race = race;
@@ -429,7 +429,8 @@ export class Crew extends THREE.Group {
     // mech's edge is in reach (CREW.board)
     if (this.order.type === 'board' && path.final && dist <= CREW.board.pathEndReach) {
       const mech = this.order.mech;
-      const edge = Math.hypot(target.x - this.position.x, target.z - this.position.z) - (mech.radius ?? 0);
+      // [W7] the legs' circle: the crew walks up to the legs (it passes under the shoulders / arms / wings)
+      const edge = Math.hypot(target.x - this.position.x, target.z - this.position.z) - (mech.footRadius ?? mech.radius ?? 0);
       if (edge <= getStats().rules.crew.boardRange + CREW.board.edgeBuffer) {
         play('crewBoard', { position: mech.position });
         mech.boardCrew(this);

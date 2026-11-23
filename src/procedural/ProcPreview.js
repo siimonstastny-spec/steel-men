@@ -1,9 +1,10 @@
-// Steel Mans – console preview of procedural buildings (prototype N3): the procedural model next to the current
-// GLB model, both animated by a requestAnimationFrame loop of their own (UI side, never the simulation).
+// Steel Mans – console preview of procedural buildings: the procedural model next to the current GLB model, both
+// animated by a requestAnimationFrame loop of their own (UI side, never the simulation). Any style key of
+// data/buildingStyles.json works (also one without a race in stats.json – the GLB beside it is then the first race's).
 //   const p = await spawnProceduralPreview(scene, { x: 0, y: 0, z: 0 }, 'Y', '#c8302c');
 //   p.producing = false;  p.model.stats();  p.dispose();
 import * as THREE from 'three';
-import { createProceduralStructure } from './VehicleFactoryProc.js';
+import { createProceduralStructure, loadBuildingStyles } from './registry.js';
 import { loadModel, loadGltf } from '../core/AssetLoader.js';
 import { applyTeamColor } from '../core/TeamColor.js';
 import { loadStats, unitStats } from '../data/Stats.js';
@@ -26,7 +27,7 @@ export const PROC_PREVIEW = {
  */
 export async function spawnProceduralPreview(scene, position = { x: 0, y: 0, z: 0 }, race = 'X', teamColor = '#3a5ccc',
   { id = 'vehicleFactory', withOriginal = true, producing = true, yaw = 0 } = {}) {
-  await loadStats();
+  await Promise.all([loadStats(), loadBuildingStyles()]);
   const stats = unitStats('structures', id, race);
   const scale = structureScale(stats);
   const model = createProceduralStructure(id, race, teamColor);

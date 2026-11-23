@@ -1,8 +1,9 @@
 // Steel Mans – [B1] shared game-setting comboboxes of the New game and multiplayer lobby screens (modern RTS style:
 // one labelled select per option). The screens own the state; this module only draws the controls and decodes changes.
 //
-//   optionsHtml(values, { maps, disabled })   rows "label + select" (map when `maps` is given, pre-build, energy cap,
+//   optionsHtml(values, { disabled })         rows "label + select" (pre-build, energy cap, population cap,
 //                                             ore multiplier, game speed, fog of war, victory condition)
+//   mapSelectHtml(values, { maps, disabled, random })  the map select (above the map preview; random = "Random" entry)
 //   readOptionChange(target)                  -> { key, value } of a changed `select[data-opt]` (typed value) or null
 //   friendlyFireHtml(ff, { disabled, attr })  the friendly-fire checkboxes (attr = data attribute name of the checkbox)
 //   syncOptions(root, values)                 sets every select[data-opt] in root from values (no re-render)
@@ -14,6 +15,8 @@ import { ORE_MULTIPLIER, oreMultiplierLabel } from '../game/OreMultiplier.js';
 import { START_MULTIPLIER, startMultiplierLabel } from '../game/StartMultiplier.js'; // [D4]
 import { START_RESEARCH, startResearchLabel } from '../game/StartResearch.js';
 import { t } from '../i18n/i18n.js';
+import { formatCapOption } from './formatAmount.js';
+import { RANDOM_MAP } from '../game/MapCatalog.js';
 
 try {
   const href = new URL('./setup.css', import.meta.url).href;
@@ -30,17 +33,19 @@ export const FF_OPTIONS = ['enabled', 'artilleryOnly', 'reduced'];
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
 // key = settings key; options built per call (labels follow the language)
-function defs(maps) {
+// [W5a] map choice: drawn above the map preview (mapSelectHtml), not among the rules; `random` adds the Random entry
+function mapDef(maps, random) {
+  const options = maps.map((m) => ({ value: m.id, label: `${m.name} (${t('setup.map.players', { n: m.players })})`, hint: m.description }));
+  if (random) options.push({ value: RANDOM_MAP, label: t('setup.map.random'), hint: t('lobby.map.randomHint') });
+  return { key: 'map', labelKey: 'setup.map', hintKey: null, options };
+}
+
+function defs() {
   const list = [];
-  if (maps) {
-    list.push({
-      key: 'map', labelKey: 'setup.map', hintKey: null,
-      options: maps.map((m) => ({ value: m.id, label: `${m.name} (${t('setup.map.players', { n: m.players })})`, hint: m.description })),
-    });
-  }
   list.push(
     { key: 'prebuild', labelKey: 'setup.prebuild', hintKey: 'setup.prebuild.hint', options: PREBUILD.options.map((v) => ({ value: v, label: prebuildLabel(v) })) },
-    { key: 'energyCap', labelKey: 'setup.energyCap', hintKey: 'setup.energyCap.hint', options: ECONOMY.energyCaps.map((v) => ({ value: v, label: String(v) })) },
+    { key: 'energyCap', labelKey: 'setup.energyCap', hintKey: 'setup.energyCap.hint', options: ECONOMY.energyCaps.map((v) => ({ value: v, label: formatCapOption(v) })) },
+    { key: 'populationCap', labelKey: 'setup.populationCap', hintKey: 'setup.populationCap.hint', options: ECONOMY.populationCaps.map((v) => ({ value: v, label: formatCapOption(v) })) },
     { key: 'oreMultiplier', labelKey: 'setup.oreMultiplier', hintKey: 'setup.oreMultiplier.hint', options: ORE_MULTIPLIER.options.map((v) => ({ value: v, label: oreMultiplierLabel(v) })) },
     { key: 'startMultiplier', labelKey: 'setup.startMultiplier', hintKey: 'setup.startMultiplier.hint', options: START_MULTIPLIER.options.map((v) => ({ value: v, label: startMultiplierLabel(v) })) }, // [D4]
     { key: 'startResearch', labelKey: 'setup.startResearch', hintKey: 'setup.startResearch.hint', options: START_RESEARCH.options.map((v) => ({ value: v, label: startResearchLabel(v) })) },
@@ -51,14 +56,23 @@ function defs(maps) {
   return list;
 }
 
-export function optionsHtml(values, { maps = null, disabled = false } = {}) {
-  return defs(maps).map((d) => {
-    const cur = String(values[d.key]);
-    const hint = d.hintKey ? t(d.hintKey) : (d.options.find((o) => String(o.value) === cur)?.hint ?? '');
-    return `<label class="opt-row" title="${escapeHtml(hint)}"><span class="opt-label">${t(d.labelKey)}</span>
-      <select class="opt-select" data-opt="${d.key}"${disabled ? ' disabled' : ''}>${d.options.map((o) =>
+function rowHtml(d, values, disabled) {
+  const cur = String(values[d.key]);
+  const hint = d.hintKey ? t(d.hintKey) : (d.options.find((o) => String(o.value) === cur)?.hint ?? '');
+  return `<label class="opt-row" title="${escapeHtml(hint)}"><span class="opt-label">${t(d.labelKey)}</span>
+    <select class="opt-select" data-opt="${d.key}"${disabled ? ' disabled' : ''}>${d.options.map((o) =>
     `<option value="${escapeHtml(o.value)}"${String(o.value) === cur ? ' selected' : ''}${o.hint ? ` title="${escapeHtml(o.hint)}"` : ''}>${escapeHtml(o.label)}</option>`).join('')}</select></label>`;
-  }).join('');
+}
+
+/** The rules comboboxes (the map select is separate: mapSelectHtml) */
+export function optionsHtml(values, { disabled = false } = {}) {
+  return defs().map((d) => rowHtml(d, values, disabled)).join('');
+}
+
+/** [W5a] Map combobox (shown above the map preview); random = add the "Random" entry (lobby); maps = GameMap list */
+export function mapSelectHtml(values, { maps, disabled = false, random = false } = {}) {
+  if (!maps?.length) return '';
+  return rowHtml(mapDef(maps, random), values, disabled);
 }
 
 /** { key, value } of a change event target; the value has the type of the option (number / 'infinite' / id), null if foreign */
@@ -66,7 +80,7 @@ export function readOptionChange(target) {
   const key = target?.dataset?.opt;
   if (!key) return null;
   if (key === 'map') return { key, value: target.value };
-  const def = defs(null).find((d) => d.key === key);
+  const def = defs().find((d) => d.key === key);
   const opt = def?.options.find((o) => String(o.value) === target.value);
   return opt ? { key, value: opt.value } : null;
 }

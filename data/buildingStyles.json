@@ -1,0 +1,177 @@
+{
+  "_doc": {
+    "about": "Faction styles of procedural buildings (src/procedural, docs/BUILDING-STYLE.md, docs/notes/proc-style-kit.md). Keys = race keys of stats.json (X/Y/Z…); a race that is not here uses the FIRST style. Keys starting with '_' are not styles. Code reads only the properties, never the faction names; 'label' is documentation.",
+    "_defaults": "merged under every style (missing properties)",
+    "silhouette": "shape family the building modules pick their shapes by: rounded | angular | round | faceted",
+    "edges": "{ radius (model units), segments (0 = sharp, 1 = chamfer, 2+ = round) } – big volumes only",
+    "neon": "0..1 strength of neon strips / windows (glow and number of extra veins)",
+    "neonTeam": "true = neon strips glow in the team colour",
+    "lights": "neon (lens + coloured halo) | lamp (classic caged warm bulb)",
+    "fan": "guarded (grille) | open (bare blades) | radiator (fins glowing while producing) | none (plasma orb instead)",
+    "crane": "gantry | heavyGantry | plasma (emitter + levitating ring, beam instead of hook) | tractorBeam (laser carries the load)",
+    "roofRails": "number of roof guide rails the crane runs on",
+    "markings": "hazard (yellow/black stripes) | light (thin neon lines) | none",
+    "industrial": "false = no pipes, tanks, chimneys, louvres",
+    "texture": "panel texture: clean | worn | smooth | circuit (ProcKit PROC_KIT.textures)",
+    "palette": "sRGB: base, secondary, metal, accent, neon (+ dark, ground, lower, window, interior, lamp, beacon, pipe, trim)",
+    "surface": "metalness / roughness of the main hull",
+    "reactorGlow": "glow colour of the advanced generator (tier 3)",
+    "anim": "tempo (speed multiplier of cranes), jerk (0..1 stepped piston-like travel), spin (fans / rings / radar), pulse (Hz of glow pulses), blink (s beacon period), glowRamp (1/s radiator heat-up), levitate (amplitude multiplier)",
+    "emblem": "{ render: neon | paint, color (sRGB), backlight (paint only, 0..1), paths: SVG path strings, viewBox 0 0 100 100, y down, closed subpaths, fill-rule evenodd (a subpath inside another is a hole) }"
+  },
+  "_defaults": {
+    "edges": { "radius": 0, "segments": 0 },
+    "neon": 0.5,
+    "neonTeam": false,
+    "lights": "neon",
+    "fan": "guarded",
+    "crane": "gantry",
+    "roofRails": 1,
+    "markings": "none",
+    "industrial": true,
+    "texture": "clean",
+    "silhouette": "rounded",
+    "surface": { "metal": 0.35, "rough": 0.6 },
+    "reactorGlow": "#ffffff",
+    "anim": { "tempo": 1, "jerk": 0, "spin": 1, "pulse": 0.6, "blink": 0.9, "glowRamp": 1.2, "levitate": 1 },
+    "emblem": { "render": "neon", "color": "#ffffff", "backlight": 0, "paths": [] }
+  },
+  "X": {
+    "label": "Earth – rounded, safe, medium neon",
+    "silhouette": "rounded",
+    "edges": { "radius": 0.35, "segments": 3 },
+    "neon": 0.5,
+    "neonTeam": true,
+    "lights": "neon",
+    "fan": "guarded",
+    "crane": "gantry",
+    "roofRails": 2,
+    "markings": "hazard",
+    "industrial": true,
+    "texture": "clean",
+    "palette": {
+      "base": "#a7abb1", "secondary": "#61656c", "metal": "#3b3e44", "accent": "#d9a21b", "neon": "#8fdcff",
+      "dark": "#1c1c1c", "ground": "#7e7c77", "lower": "#8d9198", "window": "#cdeaff", "interior": "#7a6040",
+      "lamp": "#ffd9a0", "beacon": "#ff9418", "pipe": "#56675a", "trim": "#c9ccd0"
+    },
+    "surface": { "metal": 0.35, "rough": 0.6 },
+    "reactorGlow": "#3aa8ff",
+    "anim": { "tempo": 1, "jerk": 0, "spin": 1, "pulse": 0.6, "blink": 0.9, "glowRamp": 1.2, "levitate": 1 },
+    "emblem": {
+      "render": "neon",
+      "color": "#59b8ff",
+      "paths": [
+        "M50 4 L55 12 L55 46 L62 53 L62 62 L57 62 L57 57 L53 53 L47 53 L43 57 L43 62 L38 62 L38 53 L45 46 L45 12 Z",
+        "M50 57.5 L56 61.5 L56 70 L52.5 73 L50 96 L47.5 73 L44 70 L44 61.5 Z",
+        "M22.91 15.33 A44 44 0 0 0 33.52 90.8 L36.14 84.31 A37 37 0 0 1 27.22 20.84 Z",
+        "M77.09 15.33 A44 44 0 0 1 66.48 90.8 L63.86 84.31 A37 37 0 0 0 72.78 20.84 Z",
+        "M24.61 32.22 A31 31 0 0 0 24.61 67.78 L29.52 64.34 A25 25 0 0 1 29.52 35.66 Z",
+        "M75.39 32.22 A31 31 0 0 1 75.39 67.78 L70.48 64.34 A25 25 0 0 0 70.48 35.66 Z"
+      ]
+    }
+  },
+  "Y": {
+    "label": "Mars – angular, massive, cruel, classic lamps",
+    "silhouette": "angular",
+    "edges": { "radius": 0, "segments": 0 },
+    "neon": 0.15,
+    "neonTeam": false,
+    "lights": "lamp",
+    "fan": "open",
+    "crane": "heavyGantry",
+    "roofRails": 1,
+    "markings": "none",
+    "industrial": true,
+    "texture": "worn",
+    "palette": {
+      "base": "#5d646e", "secondary": "#7c736b", "metal": "#2f2c2a", "accent": "#c9661f", "neon": "#ff6a2a",
+      "dark": "#1d1a18", "ground": "#8a6a58", "lower": "#8a3f22", "window": "#ffb35a", "interior": "#7a4a2a",
+      "lamp": "#ffc070", "beacon": "#ff4a1a", "pipe": "#7b4a33", "trim": "#a49a90"
+    },
+    "surface": { "metal": 0.5, "rough": 0.75 },
+    "reactorGlow": "#ff3020",
+    "anim": { "tempo": 0.7, "jerk": 0.6, "spin": 1.2, "pulse": 0.4, "blink": 1.2, "glowRamp": 1, "levitate": 1 },
+    "emblem": {
+      "render": "paint",
+      "color": "#d8261c",
+      "backlight": 0.25,
+      "paths": [
+        "M12 4 L17 22 L46 40 L46 49 L14 30 L6 35 L6 27 L11 24 Z",
+        "M22 42 L32 48 L32 70 L22 60 Z",
+        "M36 50 L44 55 L44 98 L36 82 Z",
+        "M88 4 L83 22 L54 40 L54 49 L86 30 L94 35 L94 27 L89 24 Z",
+        "M78 42 L68 48 L68 70 L78 60 Z",
+        "M64 50 L56 55 L56 98 L64 82 Z"
+      ]
+    }
+  },
+  "Z": {
+    "label": "Venus – round, alien, plasma, no industry",
+    "silhouette": "round",
+    "edges": { "radius": 0.9, "segments": 4 },
+    "neon": 0.9,
+    "neonTeam": false,
+    "lights": "neon",
+    "fan": "none",
+    "crane": "plasma",
+    "roofRails": 1,
+    "markings": "none",
+    "industrial": false,
+    "texture": "smooth",
+    "palette": {
+      "base": "#e3e2d3", "secondary": "#c4c6b4", "metal": "#8e9384", "accent": "#9b6bd6", "neon": "#d68bff",
+      "dark": "#20221e", "ground": "#9a9a86", "lower": "#cfd0c0", "window": "#e6c4ff", "interior": "#4a3a6a",
+      "lamp": "#f0d8ff", "beacon": "#d070ff", "pipe": "#e6e8dc", "trim": "#f4f3ea"
+    },
+    "surface": { "metal": 0.15, "rough": 0.32 },
+    "reactorGlow": "#a040ff",
+    "anim": { "tempo": 0.85, "jerk": 0, "spin": 0.6, "pulse": 0.8, "blink": 1.6, "glowRamp": 1, "levitate": 1 },
+    "emblem": {
+      "render": "neon",
+      "color": "#b75cff",
+      "paths": [
+        "M40 30 A10 10 0 1 0 60 30 A10 10 0 1 0 40 30 Z",
+        "M32 4 Q-4 16 8 50 Q14 28 32 4 Z",
+        "M68 4 Q104 16 92 50 Q86 28 68 4 Z",
+        "M47 46 L53 46 L53 62 L84 52 L88 58 L53 74 L52 88 L50 98 L48 88 L47 74 L12 58 L16 52 L47 62 Z",
+        "M10 68 Q14 86 36 92 Q24 80 20 66 Z",
+        "M90 68 Q86 86 64 92 Q76 80 80 66 Z"
+      ]
+    }
+  },
+  "W": {
+    "label": "Mercury – futuristic lasers, radiators, tractor beam",
+    "silhouette": "faceted",
+    "edges": { "radius": 0.2, "segments": 1 },
+    "neon": 0.85,
+    "neonTeam": false,
+    "lights": "neon",
+    "fan": "radiator",
+    "crane": "tractorBeam",
+    "roofRails": 1,
+    "markings": "light",
+    "industrial": false,
+    "texture": "circuit",
+    "palette": {
+      "base": "#3a3d44", "secondary": "#24262b", "metal": "#6b6f78", "accent": "#e8a321", "neon": "#ffb21e",
+      "dark": "#121316", "ground": "#55565a", "lower": "#2d2f35", "window": "#ffd27a", "interior": "#5a3a10",
+      "lamp": "#ffe2a0", "beacon": "#ffa21e", "pipe": "#8a8e96", "trim": "#c8a050"
+    },
+    "surface": { "metal": 0.75, "rough": 0.28 },
+    "reactorGlow": "#ffb020",
+    "anim": { "tempo": 1.5, "jerk": 0, "spin": 1, "pulse": 2.2, "blink": 0.5, "glowRamp": 2.5, "levitate": 0.6 },
+    "emblem": {
+      "render": "neon",
+      "color": "#ffb21e",
+      "paths": [
+        "M50 34 L64 48 L50 62 L36 48 Z M50 41 L43 48 L50 55 L57 48 Z",
+        "M50 2 L53.5 30 L50 33 L46.5 30 Z",
+        "M50 63 L54 72 L50 98 L46 72 Z",
+        "M30 18 L36 24 L14 48 L36 72 L30 78 L2 48 Z",
+        "M70 18 L64 24 L86 48 L64 72 L70 78 L98 48 Z",
+        "M36 34 L40 38 L30 48 L40 58 L36 62 L22 48 Z",
+        "M64 34 L60 38 L70 48 L60 58 L64 62 L78 48 Z"
+      ]
+    }
+  }
+}

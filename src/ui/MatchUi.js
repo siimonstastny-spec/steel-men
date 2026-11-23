@@ -40,10 +40,13 @@ export class MatchUi {
    * @param {(i: number) => string} deps.teamName   display name of a team ([N6] main.js: playerLabel(i) of a computer player)
    * @param {(returnTo: () => void) => void} deps.openSettings  shows the Settings screen, calls returnTo when it closes
    * @param {() => void} deps.quit                  back to the start menu
+   * @param {(() => void)|null} [deps.restart]      [W5c] single player: same settings, new seed (null = no Restart button; never shown in multiplayer)
    * @param {() => object|null} [deps.net]          the Lockstep of a multiplayer match, else null ([R5])
    * @param {() => string} [deps.nickname]          the local player's name, shown to everybody with a pause
    */
-  constructor({ teamName, openSettings, quit, net = () => null, nickname = () => '' }) {
+  constructor({ teamName, openSettings, quit, restart = null, canRestart = () => true, net = () => null, nickname = () => '' }) {
+    this.restart = restart;
+    this.canRestart = canRestart; // [W5c] false when the match did not start from the menu (no saved settings to restart with)
     this.teamName = teamName;
     this.openSettings = openSettings;
     this.quit = quit;
@@ -236,6 +239,7 @@ export class MatchUi {
       ${over ? `<button data-act="results">${t('match.menu.results')}</button>`
         : out ? `<button data-act="leave" class="danger">${t('match.menu.leave')}</button>`
         : `<button data-act="surrender" class="danger">${t('match.menu.surrender')}</button>`}
+      ${this.#canRestart ? `<button data-act="restart">${t('match.menu.restart')}</button>` : ''}
       <div class="match-actions">
         <button data-act="resume" class="primary">${t('match.menu.resume')}</button>
         <button data-act="quit">${t('match.menu.quit')}</button>
@@ -279,7 +283,13 @@ export class MatchUi {
     } else if (act === 'results') { this.closeMenu(); this.showEnd(this.match.result); }
     else if (act === 'observe') this.#observe();
     else if (act === 'toMenu') this.quit();
+    else if (act === 'restart') {
+      if (this.#canRestart && (this.match.result || await confirmDialog({ messageKey: 'dialog.restart', confirmKey: 'match.menu.restart' }))) this.restart();
+    }
   }
+
+  /** [W5c] Restart is offered in single player only (no lockstep) and only when main.js gave a restart callback */
+  get #canRestart() { return !!this.match && typeof this.restart === 'function' && !this.#net && this.canRestart(); }
 
   /** [N4] single player: set directly; multiplayer: the host asks the Lockstep (applied everywhere before the same tick) */
   #setSpeed(v) {
@@ -339,8 +349,9 @@ export class MatchUi {
       <div class="match-time">${t('match.duration')}: <b>${formatDuration(result.stats.time)}</b></div>
       ${this.#statsTable(result.stats, result)}
       <div class="match-actions">
-        <button data-act="toMenu"${result.left ? ' class="primary"' : ''}>${t('match.toMenu')}</button>
-        ${result.left ? '' : `<button data-act="observe" class="primary">${t('match.observe')}</button>`}
+        ${result.left ? '' : `<button data-act="observe">${t('match.observe')}</button>`}
+        ${this.#canRestart ? `<button data-act="restart">${t('match.restart')}</button>` : ''}
+        <button data-act="toMenu" class="primary">${t('match.toMenu')}</button>
       </div>
     </div>`;
     this.endEl.hidden = false;

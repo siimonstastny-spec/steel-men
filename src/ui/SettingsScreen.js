@@ -1,9 +1,10 @@
 // Steel Mans – Settings screen (tabs: Controls, Audio, Graphics, Game). Edits go to a draft (SettingsDraft.js);
 // the Save button writes them to the player profile (src/core/Profile.js) and applies them. Leaving with unsaved
 // changes asks: Save / Discard / Back (ChoiceDialog.js). Works the same when opened from the game menu.
-import { AUTO_ASSIST, GAME_CLOCK, GRAPHICS, I18N, KEYBINDINGS, KEY_ACTIONS, MOUSE, PROFILE, SELECTION, UI_SMALL } from '../config.js';
+import { graphicsPresetOf, graphicsPresetOptions } from '../core/Profile.js';
+import { AUTO_ASSIST, GAME_CLOCK, GRAPHICS, I18N, KEYBINDINGS, KEY_CATEGORIES, MOUSE, PROFILE, SELECTION, UI_SMALL } from '../config.js';
 import { cleanAvatarImage } from '../core/PlayerLabels.js';
-import { fileToAvatarData, humanAvatarHtml } from './Avatar.js';
+import { pickAvatarData, humanAvatarHtml } from './Avatar.js';
 import { onLanguageChange, t } from '../i18n/i18n.js';
 import { refreshVolumes } from '../audio/Sound.js';
 import { KEY_SLOTS, keyLabel } from './SettingsKeybindings.js';
@@ -11,6 +12,7 @@ import { SettingsDraft, fullscreenAvailable, isFullscreen } from './SettingsDraf
 import { choiceDialog } from './ChoiceDialog.js';
 
 const TABS = ['controls', 'audio', 'graphics', 'game'];
+const MOUSE_TAB = 'mouse'; // last vertical tab of Controls (i18n settings.controls.mouse)
 const PERCENT = 100;
 const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
@@ -22,6 +24,7 @@ export class SettingsScreen {
   constructor(el, { onBack } = {}) {
     this.onBack = onBack;
     this.tab = TABS[0];
+    this.keyCat = KEY_CATEGORIES[0].id; // open vertical tab of Controls
     this.listening = null;   // { action, slot } while waiting for a key
     this.message = '';
     this.avatarError = '';
@@ -161,13 +164,17 @@ export class SettingsScreen {
             ${listening ? t('settings.controls.pressKey') : (code ? esc(keyLabel(code)) : `<i>${t('settings.controls.unbound')}</i>`)}</button>`;
         }).join('')}
       </div>`).join('');
-    return `
+    // Vertical tabs: key categories from config KEY_CATEGORIES + the mouse sliders
+    const ids = [...KEY_CATEGORIES.map((c) => c.id), MOUSE_TAB];
+    if (!ids.includes(this.keyCat)) this.keyCat = ids[0];
+    const nav = `<div class="vtabs" role="tablist">${ids.map((id) =>
+      `<button class="vtab ${id === this.keyCat ? 'on' : ''}" role="tab" data-key-cat="${id}">${t(`settings.controls.${id}`)}</button>`).join('')}</div>`;
+    const category = KEY_CATEGORIES.find((c) => c.id === this.keyCat);
+    const body = category ? `
       <p class="menu-muted small">${t('settings.controls.hint')}</p>
       <p class="menu-warn" data-role="key-message" ${this.message ? '' : 'hidden'}>${esc(this.message)}</p>
-      <h3>${t('settings.controls.camera')}</h3>${keyRows(KEY_ACTIONS.camera)}
-      <h3>${t('settings.controls.commands')}</h3>${keyRows(KEY_ACTIONS.commands)}
-      <div class="menu-actions left"><button class="menu-btn" data-action="reset-keys">${t('settings.controls.resetKeys')}</button></div>
-      <h3>${t('settings.controls.mouse')}</h3>
+      ${keyRows(category.actions)}
+      <div class="menu-actions left"><button class="menu-btn" data-action="reset-keys">${t('settings.controls.resetKeys')}</button></div>` : `
       ${this.#slider('mouse.rotateSensitivity', t('settings.mouse.rotate'), s.mouse.rotateSensitivity, range)}
       ${this.#slider('mouse.zoomSensitivity', t('settings.mouse.zoom'), s.mouse.zoomSensitivity, range)}
       ${this.#slider('mouse.panSensitivity', t('settings.mouse.pan'), s.mouse.panSensitivity, range)}
@@ -175,6 +182,7 @@ export class SettingsScreen {
       ${this.#check('mouse.invertPan', t('settings.mouse.invertPan'), s.mouse.invertPan)}
       ${this.#check('mouse.invertZoom', t('settings.mouse.invertZoom'), s.mouse.invertZoom)}
       <div class="menu-actions left"><button class="menu-btn" data-action="reset-mouse">${t('common.reset')}</button></div>`;
+    return `<div class="vtabs-layout">${nav}<div class="vtab-body">${body}</div></div>`;
   }
 
   #audio() {
@@ -190,7 +198,19 @@ export class SettingsScreen {
 
   #graphics() {
     const current = this.draft.settings.graphics.quality;
+    const adv = this.draft.settings.graphics.advanced;
     const fsOk = fullscreenAvailable();
+    const advRows = Object.entries(GRAPHICS.advanced).map(([key, spec]) => {
+      const label = t(`settings.graphics.adv.${key}`);
+      if (spec.type === 'boolean') {
+        return `<label class="setting-row check"><input type="checkbox" data-role="gfx-adv" data-key="${key}" ${adv[key] ? 'checked' : ''}><span>${label}</span></label>`;
+      }
+      const opts = spec.values.map((v) => {
+        const text = spec.percent ? `${Math.round(v * PERCENT)} %` : t(`settings.graphics.adv.${key}.${v}`);
+        return `<option value="${v}" ${v === adv[key] ? 'selected' : ''}>${esc(text)}</option>`;
+      }).join('');
+      return `<label class="setting-row"><span>${label}</span><select data-role="gfx-adv" data-key="${key}">${opts}</select></label>`;
+    }).join('');
     return `
       <label class="setting-row check" title="${esc(t('settings.graphics.fullscreen.hint'))}">
         <input type="checkbox" data-role="fullscreen" ${this.draft.fullscreen ? 'checked' : ''} ${fsOk ? '' : 'disabled'}>
@@ -201,7 +221,10 @@ export class SettingsScreen {
       <div class="factions">${GRAPHICS.qualities.map((q) => `
         <button class="faction ${q === current ? 'on' : ''}" data-quality="${q}">
           <b>${t(`settings.graphics.${q}`)}</b><small>${t(`settings.graphics.${q}.hint`)}</small>
-        </button>`).join('')}</div>`;
+        </button>`).join('')}</div>
+      <p class="menu-muted small gfx-custom" ${current === GRAPHICS.customQuality ? '' : 'hidden'}>${t('settings.graphics.custom')}</p>
+      <div class="row-label gfx-advanced-title">${t('settings.graphics.advanced')}</div>
+      <div class="gfx-advanced">${advRows}</div>`;
   }
 
   #game() {
@@ -237,6 +260,7 @@ export class SettingsScreen {
     if (!btn) return;
     const d = btn.dataset;
     if (d.tab) { this.tab = d.tab; this.listening = null; this.message = ''; this.render(); }
+    else if (d.keyCat) { this.keyCat = d.keyCat; this.listening = null; this.message = ''; this.render(); }
     else if (d.action === 'back') this.requestLeave();
     else if (d.action === 'save') this.save();
     else if (d.keyAction !== undefined) {
@@ -247,12 +271,29 @@ export class SettingsScreen {
     else if (d.action === 'avatar-remove') { this.draft.set('avatar', ''); this.avatarError = ''; this.render(); }
     else if (d.action === 'reset-mouse') { this.draft.resetGroup('mouse'); this.render(); }
     else if (d.action === 'reset-audio') { this.draft.resetGroup('audio'); this.render(); }
-    else if (d.quality) { this.draft.set('graphics.quality', d.quality); this.render(); }
+    else if (d.quality) { this.#setPreset(d.quality); this.render(); }
+  }
+
+  /** A preset button overwrites every advanced option */
+  #setPreset(id) {
+    this.draft.set('graphics.advanced', graphicsPresetOptions(id));
+    this.draft.set('graphics.quality', id);
+  }
+
+  /** One advanced option changed by hand: the preset follows (Full / Reduced when it matches one, else Custom) */
+  #setAdvanced(input) {
+    const key = input.dataset.key;
+    const spec = GRAPHICS.advanced[key];
+    const value = spec.type === 'boolean' ? input.checked : spec.values.find((v) => String(v) === input.value);
+    if (value === undefined) return;
+    this.draft.set(`graphics.advanced.${key}`, value);
+    this.draft.set('graphics.quality', graphicsPresetOf(this.draft.settings.graphics.advanced));
   }
 
   #onInput(e) {
     const target = e.target;
     if (target.dataset.role === 'language') { this.draft.set('language', target.value); this.#syncSave(); return; }
+    if (target.dataset.role === 'gfx-adv') { this.#setAdvanced(target); this.render(); return; }
     if (target.dataset.role === 'fullscreen') { this.draft.fullscreen = target.checked; this.#syncSave(); return; }
     if (target.dataset.role === 'avatar-file') { if (e.type === 'change') this.#uploadAvatar(target); return; } // a file input fires input + change
     const { path, type } = target.dataset;
@@ -269,7 +310,8 @@ export class SettingsScreen {
   async #uploadAvatar(input) {
     const file = input.files?.[0];
     if (!file) return;
-    const data = await fileToAvatarData(file);
+    const data = await pickAvatarData(file);
+    if (data === undefined) { input.value = ''; return; } // [R7] crop dialog cancelled – keep the avatar, allow re-picking the same file
     const clean = data ? cleanAvatarImage(data) : '';
     if (clean) this.draft.set('avatar', clean);
     this.avatarError = clean ? '' : t('settings.game.avatarError');

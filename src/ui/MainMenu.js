@@ -8,7 +8,8 @@ import { validPrebuild } from '../game/PreBuild.js'; // [N8] pre-build phase opt
 import { oreMultiplierFromSettings } from '../game/OreMultiplier.js'; // [B1]
 import { startMultiplierFromSettings } from '../game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings } from '../game/StartResearch.js';
-import { optionsHtml, readOptionChange, syncOptions, friendlyFireHtml } from './GameOptions.js'; // [B1]
+import { optionsHtml, mapSelectHtml, readOptionChange, syncOptions, friendlyFireHtml } from './GameOptions.js'; // [B1]
+import { validPopulationCap } from '../game/Economy.js'; // [W5a]
 import {
   allianceLetter, ffaAlliances, presetAlliances, normalizeAlliances, hasEnoughAlliances, isAllianceId,
 } from '../core/AllianceSetup.js';
@@ -135,6 +136,7 @@ export class MainMenu {
       prebuild: validPrebuild(saved.prebuild), // [N8] pre-build phase in minutes (PREBUILD.options, 0 = off)
       // Economy: energy storage cap and deposits that never run out (Economy.js)
       energyCap: ECONOMY.energyCaps.includes(saved.energyCap) ? saved.energyCap : ECONOMY.defaultEnergyCap,
+      populationCap: validPopulationCap(saved.populationCap), // [W5a] 100..500 | 'infinite'
       oreMultiplier: oreMultiplierFromSettings(saved), // [B1] 0.5 | 1 | 2 | 4 | 'infinite' (old infiniteDeposits → 'infinite')
       startMultiplier: startMultiplierFromSettings(saved), // [D4] 0.5 | 1 | 2 | 4 | 'infinite' (starting resources)
       startResearch: startResearchFromSettings(saved), // 0 = none | 1 | 2 | 3 (starting research tier)
@@ -166,6 +168,7 @@ export class MainMenu {
   #mapBlock() {
     return `
       <div class="setup-map map-select">
+        <div class="map-pick" data-role="map-select"></div>
         <div class="map-select-body">
           <div class="map-preview-box" data-role="map-preview"></div>
           <div class="map-side">
@@ -327,12 +330,15 @@ export class MainMenu {
       }
     }
     const box = this.el.querySelector('[data-role="options"]');
+    const mapBox = this.el.querySelector('[data-role="map-select"]'); // [W5a] map select above the preview
     if (box) {
       if (this.optionsMaps !== this.maps) { // first draw, or the map catalogue arrived
         this.optionsMaps = this.maps;
-        box.innerHTML = optionsHtml(this.settings, { maps: this.maps.length ? this.maps : null });
+        box.innerHTML = optionsHtml(this.settings);
+        if (mapBox) mapBox.innerHTML = mapSelectHtml(this.settings, { maps: this.maps });
       }
       syncOptions(box, this.settings);
+      if (mapBox) syncOptions(mapBox, this.settings);
     }
   }
 
@@ -580,6 +586,7 @@ export class MainMenu {
       speed: this.settings.speed, // [N4] game speed multiplier (GAME_SPEED.options)
       prebuild: this.settings.prebuild, // [N8] pre-build minutes (PREBUILD.options, 0 = off)
       energyCap: this.settings.energyCap,
+      populationCap: this.settings.populationCap, // [W5a]
       oreMultiplier: this.settings.oreMultiplier, // [B1] 0.5 | 1 | 2 | 4 | 'infinite'
       startMultiplier: this.settings.startMultiplier, // [D4] 0.5 | 1 | 2 | 4 | 'infinite'
       startResearch: this.settings.startResearch, // 0 = none | 1 | 2 | 3

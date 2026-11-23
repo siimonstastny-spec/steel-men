@@ -525,7 +525,7 @@ export class ConstructionManager {
     if (!id) { job.state = 'failed'; return; }
     const stats = unitStats('structures', id, ai.race, ai.team);
     if (checkRules(this.world, ai.team, ai.race, id, stats)) { job.state = 'failed'; return; }
-    if (!this.world.economy.canAfford(ai.team, stats.cost)) { this.#defenseWait('money', stats.cost); return; }
+    if (!this.world.economy.canAffordUpfront(ai.team, stats.cost)) { this.#defenseWait('money', stats.cost); return; }
     if (!this.#defensePowered(job, stats, now)) { this.#defenseWait('power'); return; } // D3: plants first
     const builder = this.idleBuilders(job.point)[0];
     if (!builder) { this.#defenseWait('builder', stats.cost); return; }
@@ -622,7 +622,7 @@ export class ConstructionManager {
     const turretId = this.#turretFor(post);
     if (!turretId) { job.state = 'done'; return; }
     const stats = unitStats('structures', turretId, ai.race, ai.team);
-    if (!this.world.economy.canAfford(ai.team, stats.cost)) { this.#defenseWait('money', stats.cost); return; }
+    if (!this.world.economy.canAffordUpfront(ai.team, stats.cost)) { this.#defenseWait('money', stats.cost); return; }
     if (!this.#defensePowered(job, stats, now)) { this.#defenseWait('power'); return; } // D3: plants first
     const builder = this.idleBuilders(point)[0];
     if (!builder) { this.#defenseWait('builder', stats.cost); return; }

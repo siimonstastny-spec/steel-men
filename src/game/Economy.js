@@ -15,6 +15,16 @@
 //   • startMultiplier 'infinite': nothing is ever taken from the team, energy starts full and is never low
 //   Reading (no allocation): isLowEnergy(team), hasHq(team), workRate(team), energyFlow(team) → { income, drain }
 //   per second of the last tick, structure.powered (set every tick), startMultiplier.
+//
+// [W5b] (docs/notes/w5b-eco.md):
+//   • energyCap / populationCap settings accept ECONOMY.infinite ('infinite'); inside Economy that is Infinity.
+//     Shares of an unlimited energy cap use energyShareBase(team) (ECONOMY.infiniteCapReference + bank storage).
+//   • populationCap(team) = min(population of buildings, rules populationMax, populationLimit); populationMaxOf(team)
+//     = the most the team can ever reach (AI: is another supply building useful?)
+//   • infinite resources: every non-energy account (and energy with an unlimited cap) is fixed at
+//     ECONOMY.infiniteAmount; energy with a finite cap starts full and never decreases
+//   • deferred cost (ECONOMY.deferredResources, energy): canAffordUpfront / payUpfront / dueOf take only the rest of a
+//     cost when an item is queued; payDue(team, due, paid) takes the deferred part when the item really starts
 import { getStats } from '../data/Stats.js';
 import { OreDeposit } from './OreDeposit.js';
 import { PartStock } from './PartStock.js';
@@ -23,6 +33,20 @@ import { ORE_MULTIPLIER, isInfiniteOre, validOreMultiplier } from './OreMultipli
 import { validStartMultiplier, isInfiniteStart } from './StartMultiplier.js';
 
 const NO_FLOW = Object.freeze({ income: 0, drain: 0 }); // energyFlow of an unknown team
+const DEFERRED = new Set(ECONOMY.deferredResources ?? []);
+
+/** [W5b] Settings value → number: a positive number as is, Infinity for ECONOMY.infinite, else `fallback` resolved so */
+function resolveCap(value, fallback) {
+  const v = value === ECONOMY.infinite || (typeof value === 'number' && value > 0) ? value : fallback;
+  return v === ECONOMY.infinite ? Infinity : v;
+}
+
+/** [W5b] Energy cap setting (validated): a number of ECONOMY.energyCaps or ECONOMY.infinite */
+export const validEnergyCap = (v) => (ECONOMY.energyCaps.includes(v) ? v : ECONOMY.defaultEnergyCap);
+/** [W5b] Population cap setting (validated): a number of ECONOMY.populationCaps or ECONOMY.infinite */
+export const validPopulationCap = (v) => (ECONOMY.populationCaps.includes(v) ? v : ECONOMY.defaultPopulationCap);
+/** [W5b] Is a cap setting the unlimited one? */
+export const isInfiniteCap = (v) => v === ECONOMY.infinite;
 
 export class Economy {
   #primed = false; // hq state computed at least once (before the first update)
@@ -32,15 +56,23 @@ export class Economy {
    * @param {import('./World.js').World} world
    * @param {object} opts
    * @param {string[]} opts.races       race key per team (index = team)
-   * @param {number} [opts.energyCap]   energy storage cap (ECONOMY.energyCaps)
+   * @param {number|string} [opts.energyCap]   energy storage cap (ECONOMY.energyCaps, 'infinite' = none)
+   * @param {number|string} [opts.populationCap]  [W5b] population limit on top of the buildings' population
+   *   (ECONOMY.populationCaps, 'infinite' = none, the default)
    * @param {number|string} [opts.oreMultiplier]  [B1] ORE_MULTIPLIER.options: factor of the deposits' starting amount, or 'infinite'
    * @param {boolean} [opts.infiniteDeposits]  legacy: true = same as oreMultiplier 'infinite'
    * @param {number|string} [opts.startMultiplier]  [D1] factor of the starting resources, or 'infinite' (default 1)
    */
-  constructor(world, { races, energyCap = ECONOMY.defaultEnergyCap, oreMultiplier, infiniteDeposits = false, startMultiplier = 1 }) {
+  constructor(world, {
+    races, energyCap = ECONOMY.defaultEnergyCap, populationCap = ECONOMY.defaultPopulationCap,
+    oreMultiplier, infiniteDeposits = false, startMultiplier = 1,
+  }) {
     this.world = world;
     this.races = [...races];
-    this.energyCap = energyCap;
+    /** Energy cap of the menu (number; Infinity = unlimited) */
+    this.energyCap = resolveCap(energyCap, ECONOMY.defaultEnergyCap);
+    /** [W5b] population limit of the menu (number; Infinity = only the buildings and rules populationMax count) */
+    this.populationLimit = resolveCap(populationCap, ECONOMY.defaultPopulationCap);
     this.oreMultiplier = infiniteDeposits ? ORE_MULTIPLIER.infinite : validOreMultiplier(oreMultiplier);
     this.infiniteDeposits = isInfiniteOre(this.oreMultiplier);
     this.depositScale = this.infiniteDeposits ? 1 : this.oreMultiplier; // OreDeposit: initial amount × this (1 = unchanged)
@@ -51,8 +83,11 @@ export class Economy {
     const rules = getStats().rules.economy ?? {};
     const start = rules.startResources ?? {};
     const factor = this.infiniteResources ? 1 : this.startMultiplier;
-    const startEnergy = this.infiniteResources ? energyCap : (rules.startEnergyShare ?? 0) * energyCap * factor;
-    this.accounts = this.races.map(() => Object.fromEntries(this.resources.map((r) => [r, 0])));
+    const startEnergy = this.infiniteResources ? this.energyCap
+      : (rules.startEnergyShare ?? 0) * this.#shareCap(this.energyCap) * factor;
+    // [W5b] infinite resources: fixed accounts hold ECONOMY.infiniteAmount from the start (add() never changes them)
+    this.accounts = this.races.map(() => Object.fromEntries(this.resources
+      .map((r) => [r, this.#isFixed(r) ? ECONOMY.infiniteAmount : 0])));
     this.reserved = this.races.map(() => 0);
     // [D1] power state per team (refreshed by update; read without allocation)
     this.low = this.races.map(() => false);
@@ -62,14 +97,43 @@ export class Economy {
     this.drainAcc = this.races.map(() => 0);
     this.capBonus = this.races.map(() => 0); // energy storage of finished buildings (#refreshCap, inside update)
     this.races.forEach((_, team) => {
-      for (const r of this.resources) this.add(team, r, r === 'energy' ? startEnergy : (start[r] ?? 0) * factor, 'start');
+      for (const r of this.resources) {
+        if (!this.#isFixed(r)) this.add(team, r, r === 'energy' ? startEnergy : (start[r] ?? 0) * factor, 'start');
+      }
     });
     this.deposits = [];
     this.depositMeshes = [];
     this.parts = new PartStock(this.races.length); // finished robot parts (part factory → assembly bay)
   }
 
+  /** [W5b] A finite cap as is; an unlimited one → ECONOMY.infiniteCapReference (shares of the cap) */
+  #shareCap(cap) { return Number.isFinite(cap) ? cap : ECONOMY.infiniteCapReference; }
+
+  /** [W5b] Infinite resources: this account is fixed at ECONOMY.infiniteAmount (energy only with an unlimited cap) */
+  #isFixed(resource) {
+    return this.infiniteResources && (resource !== 'energy' || !Number.isFinite(this.energyCap));
+  }
+
   // ---------- power (D1) ----------
+
+  /**
+   * [W5b] Amount the shares of the energy cap are taken of (low energy, AI stock shares): the team's cap, or with an
+   * unlimited cap ECONOMY.infiniteCapReference + the storage of its finished buildings. Always finite.
+   */
+  energyShareBase(team) {
+    if (Number.isFinite(this.energyCap)) return this.capOf('energy', team);
+    return ECONOMY.infiniteCapReference + this.#storageOf('energy', team);
+  }
+
+  /** Storage of a resource in the team's finished buildings (capBonus inside update(), else one pass) */
+  #storageOf(resource, team) {
+    if (resource === 'energy' && this.#capFresh) return this.capBonus[team] ?? 0;
+    let sum = 0;
+    for (const b of this.world.structures) {
+      if (b.team === team && b.complete && !b.destroyed) sum += b.stats?.storage?.[resource] ?? 0;
+    }
+    return sum;
+  }
 
   /** Stored energy is below the low share of the cap (stays low until the recover share – ECONOMY_POWER) */
   isLowEnergy(team) { return this.low[team] ?? false; }
@@ -123,7 +187,7 @@ export class Economy {
   #refreshLow() {
     for (let team = 0; team < this.low.length; team++) {
       if (this.infiniteResources) { this.low[team] = false; continue; }
-      const cap = this.capOf('energy', team);
+      const cap = this.energyShareBase(team); // [W5b] finite also with an unlimited cap
       const share = this.low[team] ? ECONOMY_POWER.recoverShare : ECONOMY_POWER.lowEnergyShare;
       this.low[team] = this.amount(team, 'energy') < cap * share;
     }
@@ -164,6 +228,11 @@ export class Economy {
       amount *= getStats().rules.economy?.noHqIncomeFactor ?? 1;
     }
     if (resource === 'energy' && kind === 'income' && amount > 0) this.incomeAcc[team] += amount;
+    // [W5b] a fixed account (infinite resources) never changes; the statistics still see what came in
+    if (this.#isFixed(resource)) {
+      if (amount > 0 && kind !== 'start') this.onFlow?.(team, resource, amount, kind);
+      return 0;
+    }
     const before = acc[resource] ?? 0;
     // A removal never reaches the cap: skip the cap lookup (same result as clamping)
     acc[resource] = amount <= 0 ? Math.max(0, before + amount)
@@ -191,6 +260,73 @@ export class Economy {
     for (const [r, v] of Object.entries(cost)) this.add(team, r, Math.floor((v ?? 0) * factor), 'refund');
   }
 
+  // ---------- [W5b] deferred cost (ECONOMY.deferredResources: paid when the item really starts) ----------
+
+  /** Is this resource of a cost paid only at the real start? */
+  static isDeferred(resource) { return DEFERRED.has(resource); }
+
+  /** Can the team pay the part of a cost due at queueing (everything but the deferred resources)? No allocation. */
+  canAffordUpfront(team, cost = {}) {
+    if (this.infiniteResources && this.accounts[team]) return true;
+    for (const r in cost) if (!DEFERRED.has(r) && this.amount(team, r) < (cost[r] ?? 0)) return false;
+    return true;
+  }
+
+  /** Takes the part of a cost due at queueing, or nothing when it cannot be paid. @returns {boolean} */
+  payUpfront(team, cost = {}) {
+    if (!this.canAffordUpfront(team, cost)) return false;
+    for (const r in cost) if (!DEFERRED.has(r)) this.add(team, r, -(cost[r] ?? 0), 'spend');
+    return true;
+  }
+
+  /** The deferred part of a cost as a new object ({ energy: 40 }), or null when nothing is deferred */
+  dueOf(cost = {}) {
+    let due = null;
+    for (const r in cost) {
+      if (DEFERRED.has(r) && (cost[r] ?? 0) > 0) (due ??= {})[r] = cost[r];
+    }
+    return due;
+  }
+
+  /** Is anything of a due object (dueOf) still unpaid? No allocation. */
+  hasDue(due) {
+    if (!due) return false;
+    for (const r in due) if (due[r] > 0) return true;
+    return false;
+  }
+
+  /**
+   * Pays a due object (dueOf) when the item really starts: all of it or nothing. A resource is capped at the team's
+   * storage cap (a price above the cap could never be paid). Paid amounts move from `due` (→ 0) to `paid` (added),
+   * both mutated in place, so a cancel refunds exactly what was taken. No allocation.
+   * @returns {boolean} true = paid (or nothing due); false = not enough yet – try again next tick
+   */
+  payDue(team, due, paid) {
+    if (!due || !this.accounts[team]) return true;
+    if (this.infiniteResources) { for (const r in due) due[r] = 0; return true; } // [D1] nothing is ever taken
+    for (const r in due) {
+      if (due[r] > 0 && this.amount(team, r) < Math.min(due[r], this.capOf(r, team))) return false;
+    }
+    for (const r in due) {
+      if (!(due[r] > 0)) continue;
+      const need = Math.min(due[r], this.capOf(r, team));
+      this.add(team, r, -need, 'spend');
+      if (paid) paid[r] = (paid[r] ?? 0) + need;
+      due[r] = 0;
+    }
+    return true;
+  }
+
+  /**
+   * Refund of a cancelled item whose deferred part may not have been paid: factor × (cost without the deferred
+   * resources + `paid`). Command time only (allocates nothing but the loop).
+   */
+  refundPaid(team, cost = {}, paid = null, factor = 1) {
+    if (this.infiniteResources) return;
+    for (const r in cost) if (!DEFERRED.has(r)) this.add(team, r, Math.floor((cost[r] ?? 0) * factor), 'refund');
+    if (paid) for (const r in paid) this.add(team, r, Math.floor((paid[r] ?? 0) * factor), 'refund');
+  }
+
   /** Resources missing for a cost: { ore: 40 } (empty when affordable) */
   missing(team, cost = {}) {
     return Object.fromEntries(Object.entries(cost)
@@ -206,12 +342,21 @@ export class Economy {
    */
   populationCap(team) {
     const s = getStats();
-    const max = s.rules.economy?.populationMax ?? Infinity;
+    const max = this.populationMaxOf(team);
     if (s.races?.[this.races[team]]?.population?.fullFromStart) return max;
-    const provided = this.world.structures
-      .filter((b) => b.team === team && b.complete && !b.destroyed)
-      .reduce((sum, b) => sum + (b.stats.supplyProvided ?? 0), 0);
+    let provided = 0;
+    for (const b of this.world.structures) {
+      if (b.team === team && b.complete && !b.destroyed) provided += b.stats.supplyProvided ?? 0;
+    }
     return Math.min(max, provided);
+  }
+
+  /**
+   * [W5b] The most population the team can ever have: rules.economy.populationMax and the population limit of the
+   * menu (populationLimit), whichever is lower. Infinity = no limit. (team: for later per-team rules)
+   */
+  populationMaxOf(team) { // eslint-disable-line no-unused-vars
+    return Math.min(getStats().rules.economy?.populationMax ?? Infinity, this.populationLimit);
   }
 
   /**

@@ -15,7 +15,7 @@ import { localTeam } from '../core/LocalPlayer.js';
 import { getSettings } from '../core/Profile.js';
 import { formatGameTime, gameSpeed, speedLabel } from '../game/GameSpeed.js';
 import { getStats } from '../data/Stats.js';
-import { t } from '../i18n/i18n.js';
+import { t, getLanguage } from '../i18n/i18n.js';
 import { keyLabel, TARGETED_ORDERS } from '../input/CommandInput.js';
 import { OptionGrid } from './OptionGrid.js';
 import { SelectionPanel } from './SelectionPanel.js';
@@ -24,6 +24,7 @@ import { OrderQueueMarkers } from './OrderQueueMarkers.js';
 import { Pings } from './Pings.js'; // [N7] map pings, lost-part alerts
 import { ProductionQueue, progressOf } from './ProductionQueue.js';
 import { esc, wreckInfo } from './hudUtil.js';
+import { formatAmount } from './formatAmount.js';
 
 const ICONS = { ore: '⛏', energy: '⚡', population: '👥', idleCrew: '👷' };
 const GROUP_COUNT = 9;
@@ -77,6 +78,17 @@ export class Hud {
     this.prodMid = -1;         // mid strip height currently set (--hud-prod-mid, base px)
     this.layoutDirty = true;   // grid extras or queue changed: re-measure the panel (refresh)
     this.activeSet = new Set(); // recycled: production items in progress
+    this.cmdSlots = new Array(HUD.commandGrid.layouts.mech.length).fill(null); // recycled: command grid slots of the current selection
+    // Recycled command grid state: one item + one shared-per-slot onClick created once; signature of the last render
+    const cmdCount = this.cmdSlots.length;
+    this.cmdItems = new Array(cmdCount).fill(null);
+    this.cmdView = { items: this.cmdItems };
+    this.cmdItemPool = Array.from({ length: cmdCount }, (_, i) => ({
+      icon: '', label: '', hotkey: '', tip: '', disabled: false, on: false, pending: false,
+      onClick: () => { const name = this.cmdSlots[i]; if (name) { this.input.command(name); this.refresh(); } },
+    }));
+    this.cmdSig = { names: new Array(cmdCount).fill(undefined), enabled: new Array(cmdCount).fill(false),
+      repairing: undefined, stance: undefined, behaviour: undefined, pending: undefined, lang: undefined };
     this.onResize = () => { this.#applyScale(); this.#fitBudget(); this.#fitProduction(); };
     window.addEventListener('resize', this.onResize);
     this.#publishGeometry();
@@ -94,7 +106,7 @@ export class Hud {
     this.#createLayout();
     this.optionGrid = new OptionGrid(this.el.optionGrid, { columns: HUD.optionGrid.columns, minRows: 0 });
     const cmd = HUD.commandGrid;
-    this.commandGrid = new OptionGrid(this.el.commandGrid, { columns: cmd.columns, minRows: Math.ceil(cmd.layout.length / cmd.columns) });
+    this.commandGrid = new OptionGrid(this.el.commandGrid, { columns: cmd.columns, minRows: Math.ceil(cmd.layouts.mech.length / cmd.columns) });
     this.selectionPanel = new SelectionPanel(this.el.selection, { input, world });
     this.overlays = new UnitOverlays({ world, camera, dom, input, queue: this.queue, spawnPoint });
     this.orderMarkers = new OrderQueueMarkers({ world, input }); // Shift order queue on the ground
@@ -331,15 +343,15 @@ export class Hud {
     const c = this.energyTipCache; // tooltip text is rebuilt only when one of its inputs changes
     if (!c || c.cap !== energyCap || c.income !== income || c.drain !== drain || c.low !== low) {
       const dec = ECONOMY_ALERTS.flowDecimals;
-      const text = [t('hud.energyCap', { cap: energyCap }),
+      const text = [t('hud.energyCap', { cap: formatAmount(energyCap) }),
         flow ? t('hud.energyFlow', { income: flow.income.toFixed(dec), drain: flow.drain.toFixed(dec) }) : '',
         low ? t('hud.energyLow') : ''].filter(Boolean).join('\n');
       this.energyTipCache = { cap: energyCap, income, drain, low, text };
     }
     const energyTip = this.energyTipCache.text;
-    this.#set(this.el.resources, res('ore', ICONS.ore, Math.floor(eco.amount(team, 'ore')), false)
-      + res('energy', ICONS.energy, `${energy}/${energyCap}`, false, energyTip, low ? 'lowEnergy' : energy >= energyCap)
-      + res('population', ICONS.population, `${used}/${cap}`, false, t('hud.population'), used >= cap));
+    this.#set(this.el.resources, res('ore', ICONS.ore, formatAmount(eco.amount(team, 'ore')), false)
+      + res('energy', ICONS.energy, `${formatAmount(energy)}/${formatAmount(energyCap)}`, false, energyTip, low ? 'lowEnergy' : energy >= energyCap)
+      + res('population', ICONS.population, `${used}/${formatAmount(cap)}`, false, t('hud.population'), used >= cap));
   }
 
   /** Queue under the grid: one 40 px row per item, always all of them (max HUD.production.maxQueue per producer). When they
@@ -409,27 +421,64 @@ export class Hud {
 
   // ---------- bottom left: command grid ----------
 
+  /** Overlays the fixed layout of one unit kind onto cmdSlots */
+  #addKind(kind) {
+    const layout = HUD.commandGrid.layouts[kind];
+    for (let i = 0; i < layout.length; i++) if (layout[i]) this.cmdSlots[i] = layout[i];
+  }
+
   #renderCommandGrid() {
     const enabled = this.input.commands;
     const stance = this.input.stance;
     const behaviour = this.input.behaviour;
     const repairing = this.input.repairing;
-    const items = HUD.commandGrid.layout.map((name) => {
-      if (!name) return null;
+    // Fixed per-kind layouts (HUD.commandGrid.layouts) overlaid slot by slot for the selected kinds
+    const grid = this.cmdSlots;
+    grid.fill(null);
+    const input = this.input;
+    if (input.selectedMechs.length) this.#addKind('mech');
+    if (input.selectedCrews.length) this.#addKind('crew');
+    for (const v of input.selectedVehicles) {
+      this.#addKind('vehicle');
+      if (v.repairer) this.#addKind('repairVehicle');
+      if (v.canAttack) this.#addKind('combatVehicle');
+    }
+    if (input.selectedOwnStructures.length) this.#addKind('structure');
+    // Rebuild the items only when the "signature" changed (slot names, enabled flags, stance, behaviour, repairing, pending, language)
+    const sig = this.cmdSig;
+    const pending = input.pending;
+    const lang = getLanguage();
+    let changed = sig.repairing !== repairing || sig.stance !== stance || sig.behaviour !== behaviour
+      || sig.pending !== pending || sig.lang !== lang;
+    for (let i = 0; i < grid.length; i++) {
+      const name = grid[i];
+      const en = name ? Boolean(enabled[name]) : false;
+      if (sig.names[i] !== name || sig.enabled[i] !== en) { changed = true; sig.names[i] = name; sig.enabled[i] = en; }
+    }
+    if (!changed) return;
+    sig.repairing = repairing; sig.stance = stance; sig.behaviour = behaviour; sig.pending = pending; sig.lang = lang;
+    const items = this.cmdItems;
+    for (let i = 0; i < grid.length; i++) {
+      const name = grid[i];
+      if (!name) { items[i] = null; continue; }
       const key = KEYBINDINGS[name]?.[0];
       // The repair button turns into "stop repair" while the selected mechs are being repaired
       const look = name === 'repair' && repairing ? 'stopRepair' : name;
-      return {
-        icon: HUD.commandIcons[look] ?? '', label: t(`cmd.${look}`), hotkey: key ? keyLabel(key) : '',
-        tip: t(`cmd.${look}.tip`) + (key ? ` [${keyLabel(key)}]` : ''),
-        disabled: !enabled[name],
-        on: (name === 'stanceRanged' && stance === 'ranged') || (name === 'stanceMelee' && stance === 'melee')
-          || (BEHAVIOUR_CELLS[name] !== undefined && BEHAVIOUR_CELLS[name] === behaviour),
-        pending: TARGETED_ORDERS.includes(name) && this.input.pending === name,
-        onClick: () => { this.input.command(name); this.refresh(); },
-      };
-    });
-    this.commandGrid.show({ items });
+      const label = t(`cmd.${look}`);
+      const keyText = key ? keyLabel(key) : '';
+      const it = this.cmdItemPool[i];
+      // Long key names (Delete) are not drawn in the corner – they would be a second text next to the label; the tooltip has them
+      it.icon = HUD.commandIcons[look] ?? '';
+      it.label = label;
+      it.hotkey = keyText.length > HUD.commandGrid.hotkeyMaxLength ? '' : keyText;
+      it.tip = t(`cmd.${look}.tip`) + (key ? ` [${keyText}]` : '');
+      it.disabled = !enabled[name];
+      it.on = (name === 'stanceRanged' && stance === 'ranged') || (name === 'stanceMelee' && stance === 'melee')
+        || (BEHAVIOUR_CELLS[name] !== undefined && BEHAVIOUR_CELLS[name] === behaviour);
+      it.pending = TARGETED_ORDERS.includes(name) && pending === name;
+      items[i] = it;
+    }
+    this.commandGrid.show(this.cmdView);
   }
 
   // ---------- idle crews ----------

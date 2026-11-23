@@ -29,7 +29,8 @@
 //                      aiSeats: [{team, difficulty}],
 //                      channel, transport, selfId }   – channel stays open for the Lockstep
 //   lobby.leave()
-import { NET, TEAMS, LOBBY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, PREBUILD, UI_SMALL, MENU, ORE_MULTIPLIER, START_MULTIPLIER, START_RESEARCH } from '../config.js';
+import { NET, TEAMS, LOBBY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, PREBUILD, UI_SMALL, MENU, ORE_MULTIPLIER, START_MULTIPLIER, START_RESEARCH, ECONOMY } from '../config.js';
+import { loadMapCatalog, validMapChoice, isRandomMap, pickRandomMap } from '../game/MapCatalog.js'; // [W5a] Random map
 import { colorsTooSimilar, firstDistinctColor } from '../core/ColorCheck.js'; // [MP-POLISH]
 import { aiIdentity, cleanAiIdentity, hashSeed, pickAiIndex, usedNameIndices } from '../ai/AiProfiles.js'; // [N6]
 import { hasEnoughAlliances, isAllianceId, normalizeAlliances } from '../core/AllianceSetup.js';
@@ -233,6 +234,9 @@ export class Lobby {
     if ('oreMultiplier' in next && !ORE_MULTIPLIER.options.includes(next.oreMultiplier)) delete next.oreMultiplier; // [B1]
     if ('startMultiplier' in next && !START_MULTIPLIER.options.includes(next.startMultiplier)) delete next.startMultiplier; // [D4]
     if ('startResearch' in next && !START_RESEARCH.options.includes(next.startResearch)) delete next.startResearch;
+    if ('energyCap' in next && !ECONOMY.energyCaps.includes(next.energyCap)) delete next.energyCap; // [W5a]
+    if ('populationCap' in next && !ECONOMY.populationCaps.includes(next.populationCap)) delete next.populationCap; // [W5a]
+    if ('map' in next) next.map = validMapChoice(next.map); // [W5a] a map id or 'random'
     if ('infiniteDeposits' in next) delete next.infiniteDeposits; // [B1] replaced by oreMultiplier
     this.state.settings = clone({ ...this.state.settings, ...next });
     delete this.state.settings.infiniteDeposits;
@@ -306,14 +310,27 @@ export class Lobby {
     if (!this.isHost || !this.state || this.started) throw new Error(t('lobby.error.hostOnly'));
     this.#recompute(false);
     if (lobbyStartProblem(this.state.seats)) throw new Error(t('lobby.error.notReady'));
+    const settings = clone(this.state.settings);
+    const seed = randomSeed();
+    // [W5a] Random map: drawn here from the seed among maps with enough starts; clients only get the result (settings.map)
+    if (isRandomMap(settings.map)) {
+      const players = playingSeats(this.state.seats).length;
+      const maps = await loadMapCatalog();
+      if (this.closed || this.started) return;
+      settings.map = pickRandomMap(maps, players, seed);
+      settings.startPicks = {}; // picks need a real map; starts then come from the seed
+      settings.startPicksByTeam = {};
+    }
+    this.#recompute(false);
+    if (lobbyStartProblem(this.state.seats)) throw new Error(t('lobby.error.notReady'));
     // [N5b] Pack the open seats: seat index (= team) is the order of the open seats; closed seats are not in the game
     const packed = clone(playingSeats(this.state.seats)).map((s, team) => ({ ...s, team })); // [MP-POLISH] empty seats dropped
     const payload = {
       code: this.state.code,
       hostId: this.state.hostId,
-      seed: randomSeed(),
+      seed,
       settings: {
-        ...clone(this.state.settings),
+        ...settings,
         playerCount: packed.length,
         alliances: normalizeAlliances(packed.map((s) => s.alliance)),
       },

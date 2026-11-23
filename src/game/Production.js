@@ -3,7 +3,9 @@
 // (src/game/commands/productionCommands.js); the AI and remote players use exactly the same commands.
 //
 //   • one sequential queue per producer building (key = structure eid), HUD.production.maxQueue items each
-//   • queueing pays the cost at once and holds the population (supply) until the unit exists
+//   • queueing pays the cost at once and holds the population (supply) until the unit exists – [W5b] except the
+//     deferred resources (ECONOMY.deferredResources, energy): the first item of a queue pays them when it really
+//     starts (item.due → item.paid, Economy.payDue) and waits without progress until the team has them
 //   • build time = stats buildTime × HUD.production.timeScale, advanced by the simulation dt only
 //   • completion: vehicles / crews / mechs are spawned through injected callbacks (model loading lives in
 //     main.js), parts go into the team's PartStock, research / salvage analysis complete in world.research
@@ -14,7 +16,7 @@
 // Queue items are plain JSON (no object references):
 //   { id, team, producer (eid), kind: 'vehicle'|'crew'|'part'|'mech'|'research'|'analysis',
 //     unitId?, slot?, path?, set?, loadout?, parts?, researchId?, lootKey?, lootKind?,
-//     cost, supply, total, elapsed }
+//     cost, supply, total, elapsed, due?, paid? }   ([W5b] due / paid: deferred part of the cost, e.g. { energy: 40 })
 import { getStats, canProduce, unitStats, crewStats, partStats, mechStatsFromLoadout, mechAssemblyStats } from '../data/Stats.js';
 import * as THREE from 'three';
 import { HUD, ROBOT_PRODUCTION, RALLY, BAY_CREW } from '../config.js';
@@ -260,7 +262,7 @@ export class Production {
     const eco = this.economy;
     if (!eco) return REASON.none;
     if (!eco.canSupport(team, supply)) return REASON.population;
-    if (!eco.canAfford(team, cost)) return REASON.resources;
+    if (!eco.canAffordUpfront(team, cost)) return REASON.resources; // [W5b] deferred energy is paid at the start
     return REASON.none;
   }
 
@@ -517,14 +519,16 @@ export class Production {
     if (!this.queues.has(eid)) this.queues.set(eid, []);
     const team = structure.team;
     const eco = this.economy;
+    const due = eco?.dueOf(data.cost ?? {}) ?? null; // [W5b] paid when the item really starts (update)
     if (eco) {
-      eco.pay(team, data.cost ?? {});
+      eco.payUpfront(team, data.cost ?? {});
       eco.reserve(team, data.supply ?? 0);
     }
     const item = {
       id: this.nextItemId++, team, producer: eid, ...data,
       total: Math.max(0, (buildTime ?? 0) * HUD.production.timeScale), elapsed: 0,
     };
+    if (due) { item.due = due; item.paid = {}; }
     this.queues.get(eid).push(item);
     return item;
   }
@@ -546,7 +550,8 @@ export class Production {
     const eco = this.economy;
     if (eco) {
       eco.release(item.team, item.supply ?? 0);
-      eco.refund(item.team, item.cost ?? {}, getStats().rules.production?.cancelRefund ?? 1);
+      // [W5b] the deferred part comes back only when it was paid (item.paid)
+      eco.refundPaid(item.team, item.cost ?? {}, item.paid ?? null, getStats().rules.production?.cancelRefund ?? 1);
     }
     if (item.kind === 'mech' && ROBOT_PRODUCTION.cancelReturnsParts) for (const p of item.parts ?? []) this.stock?.add(item.team, p);
     if (item.kind === 'research') this.research?.clearActive(item.team, item.researchId);
@@ -577,6 +582,8 @@ export class Production {
       if (!item) { this.queues.delete(eid); continue; }
       // One place in the bay: an assembly does not start while a mech is serviced there
       if (item.kind === 'mech' && item.elapsed <= 0 && structure.service) continue;
+      // [W5b] the real start: the deferred part of the cost (energy); without it the item waits, drawing nothing
+      if (item.due && this.economy?.hasDue(item.due) && !this.economy.payDue(item.team, item.due, item.paid)) continue;
       // [D1] a working producer draws its energy; low energy slows it (Economy.drawPower → work rate)
       if (item.elapsed < item.total) item.elapsed += dt * (this.economy?.drawPower(structure, dt) ?? 1);
       else item.elapsed += dt;

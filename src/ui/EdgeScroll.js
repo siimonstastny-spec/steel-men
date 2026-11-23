@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { CAMERA } from '../config.js';
 import { getSettings } from '../core/Profile.js';
+import { clampToMap } from '../core/CameraBounds.js';
 
 const ROTATE_OR_PAN_BUTTONS = 2 | 4; // right (map drag) or middle (rotate) held – the camera is already moving
 
@@ -22,13 +23,25 @@ export class EdgeScroll {
     this._fwd = new THREE.Vector3();
     this._right = new THREE.Vector3();
     this._move = new THREE.Vector3();
-    window.addEventListener('pointermove', (e) => {
-      this.pointer = e.target === dom ? { x: e.clientX, y: e.clientY } : null;
+    this._pos = { x: 0, y: 0 }; // recycled pointer object (no allocation per event)
+    this._onMove = (e) => {
+      if (e.target === dom) { this._pos.x = e.clientX; this._pos.y = e.clientY; this.pointer = this._pos; }
+      else this.pointer = null;
       this.buttons = e.buttons;
-    });
-    document.addEventListener('pointerleave', () => { this.pointer = null; });       // cursor left the page
-    document.documentElement.addEventListener('mouseleave', () => { this.pointer = null; });
-    window.addEventListener('blur', () => { this.pointer = null; });
+    };
+    this._onLeave = () => { this.pointer = null; };
+    window.addEventListener('pointermove', this._onMove);
+    document.addEventListener('pointerleave', this._onLeave);                        // cursor left the page
+    document.documentElement.addEventListener('mouseleave', this._onLeave);
+    window.addEventListener('blur', this._onLeave);
+  }
+
+  dispose() {
+    window.removeEventListener('pointermove', this._onMove);
+    document.removeEventListener('pointerleave', this._onLeave);
+    document.documentElement.removeEventListener('mouseleave', this._onLeave);
+    window.removeEventListener('blur', this._onLeave);
+    this.pointer = null;
   }
 
   get enabled() {
@@ -54,5 +67,6 @@ export class EdgeScroll {
     this._move.multiplyScalar(CAMERA.edgeScrollSpeed * Math.max(1, distance / CAMERA.panReferenceDistance) * dt);
     this.camera.position.add(this._move);
     this.controls.target.add(this._move);
+    clampToMap(this.camera, this.controls);
   }
 }

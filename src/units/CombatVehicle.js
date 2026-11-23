@@ -284,8 +284,15 @@ export class CombatVehicle extends Vehicle {
   async #setupAnimation() {
     const name = this.stats.clips?.move;
     if (!name) return;
-    const clip = (await loadGltf(this.stats.model)).animations.find((a) => a.name === name);
-    if (!clip) return;
+    const animations = (await loadGltf(this.stats.model)).animations;
+    // [W8] a clip is also looked up by its position when the name differs (renamed export); a miss is reported
+    const clip = animations.find((a) => a.name === name) ?? (animations.length === 1 ? animations[0] : null);
+    if (!clip) {
+      console.warn(`[CombatVehicle] ${this.unitId}: clip "${name}" not found, model has: ${animations.map((a) => a.name).join(', ') || 'none'}`);
+      return;
+    }
+    const missing = clip.tracks.filter((tr) => !THREE.PropertyBinding.findNode(this.model, THREE.PropertyBinding.parseTrackName(tr.name).nodeName));
+    if (missing.length) console.warn(`[CombatVehicle] ${this.unitId}: ${missing.length} of ${clip.tracks.length} clip tracks have no node`, missing[0].name);
     this.mixer = new THREE.AnimationMixer(this.model);
     this.moveAction = this.mixer.clipAction(clip);
   }

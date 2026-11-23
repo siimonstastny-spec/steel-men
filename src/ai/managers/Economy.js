@@ -2,7 +2,7 @@
 // the team wants. It writes wishes to the blackboard (bb.minVehicles, bb.wantStructures); Production and
 // Construction carry them out. Harvest orders are given here.
 import { AI } from '../../config.js';
-import { getStats, unitStats } from '../../data/Stats.js';
+import { unitStats } from '../../data/Stats.js';
 import { PRIORITY, dist, isIdle, posOf, nearest, affordsAbove } from '../util.js';
 import { fullPopulation, resolveStructure, resolveVehicle, vehicleMatches, structureMatches } from '../AiData.js';
 import { checkRules } from '../../game/commands/buildCommands.js';
@@ -57,7 +57,8 @@ export class EconomyManager {
     const request = (ai.bb.powerRequest?.until ?? -Infinity) > now ? ai.bb.powerRequest.use : 0;
     const gap = powerGap(plan, request, cfg.coverage ?? 1, this.avgDemand);
     let count = plan.plants + Math.max(0, Math.ceil(gap / plan.plantIncome));
-    const cap = eco.energyCapOf(team);
+    const cap = eco.energyShareBase(team); // [W5b] finite also with an unlimited energy cap
+    const unlimited = !Number.isFinite(eco.energyCapOf(team));
     const stock = eco.amount(team, 'energy');
     const measuredShort = this.avgDemand > this.avgIncome * (cfg.reactShare ?? 1) && stock < cap * (cfg.stockShare ?? 0);
     const longLow = this.lowStreak >= (cfg.lowReactSeconds ?? Infinity);
@@ -67,8 +68,8 @@ export class EconomyManager {
     wants.push({ value: '@power', count: Math.max(count, plan.plants), priority });
     this.powerShort = gap > 0 || measuredShort || longLow;
 
-    // Energy banks: buffer for production bursts once the plants keep the store full
-    const banks = cfg.banks ?? 0;
+    // Energy banks: buffer for production bursts once the plants keep the store full ([W5b] useless without a cap)
+    const banks = unlimited ? 0 : cfg.banks ?? 0;
     if (banks > 0 && plan.plants >= (cfg.bankAfterPlants ?? Infinity) && stock >= cap * (cfg.bankWhenFull ?? 1)
       && resolveStructure('@storage', ai.race, ai.teamUnlocks)) {
       const have = ai.construction?.ownedCount('@storage') ?? 0;
@@ -162,7 +163,7 @@ export class EconomyManager {
     // Population: one supply building at a time while the headroom is small
     // [E1] the population Production keeps for aircraft (bb.airPopReserve) is not headroom
     if (!fullPopulation(ai.race) && resolveStructure('@supply', ai.race, unlocks)) {
-      const max = getStats().rules.economy?.populationMax ?? Infinity;
+      const max = eco.populationMaxOf(team); // [W5b] rules populationMax and the menu's population limit
       const cap = eco.populationCap(team);
       const supply = p.own.structures.filter((s) => (s.stats.supplyProvided ?? 0) > 0 && !s.stats.hq);
       const pending = supply.some((s) => !s.complete);
@@ -255,7 +256,7 @@ export class EconomyManager {
     // Population: full (no room for a truck) – a supply building first
     const cap = eco.populationCap(team);
     const used = eco.populationUsed(team);
-    const max = getStats().rules.economy?.populationMax ?? Infinity;
+    const max = eco.populationMaxOf(team); // [W5b] rules populationMax and the menu's population limit
     const truckSupply = truckId ? (unitStats('vehicles', truckId, ai.race, team)?.supply ?? 1) : 1;
     const popFull = !fullPopulation(ai.race) && cap < max && used + truckSupply > cap;
     if (popFull && resolveStructure('@supply', ai.race, unlocks)) {

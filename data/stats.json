@@ -9,7 +9,7 @@
     "mechAssembly": { "cost": { "ore": 40, "energy": 0 }, "buildTime": 8 },
     "mechSupply": 0,
     "overload": { "minSpeedFactor": 0.4 },
-    "crew": { "boardRange": 16, "boardTime": 1.5, "ejectDistance": 16, "ejectOnDestroy": true, "defaultBehaviour": "defensive" },
+    "crew": { "boardRange": 20, "boardTime": 1.5, "ejectDistance": 16, "ejectOnDestroy": true, "defaultBehaviour": "defensive" },
     "repair": {
       "fieldRate": 0.01, "buildingFactor": 10,
       "bay": { "entryRange": 12, "partSwapTime": 8, "costPerHp": { "ore": 0.1 },

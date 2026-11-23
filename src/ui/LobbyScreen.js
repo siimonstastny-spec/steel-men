@@ -8,12 +8,12 @@ import { validPrebuild } from '../game/PreBuild.js'; // [N8] pre-build phase opt
 import { oreMultiplierFromSettings } from '../game/OreMultiplier.js'; // [B1]
 import { startMultiplierFromSettings } from '../game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings } from '../game/StartResearch.js';
-import { optionsHtml, readOptionChange, friendlyFireHtml } from './GameOptions.js'; // [B1]
+import { optionsHtml, mapSelectHtml, readOptionChange, friendlyFireHtml } from './GameOptions.js'; // [B1]
 import { allianceLetter, ffaAlliances, hasEnoughAlliances, normalizeAlliances, presetAlliances } from '../core/AllianceSetup.js';
 import { colorsTooSimilar, firstDistinctColor } from '../core/ColorCheck.js';
 import { getAvatarImage, getSettings } from '../core/Profile.js';
 import { t } from '../i18n/i18n.js';
-import { loadMapCatalog, validMapId } from '../game/MapCatalog.js'; // [MAPS]
+import { loadMapCatalog, validMapId, validMapChoice, isRandomMap, maxMapPlayers } from '../game/MapCatalog.js'; // [MAPS]
 import { cleanPicks } from '../game/MapStarts.js';
 import { MapPreview, applyStartPick } from './MapPreview.js';
 import { getNetDiagnosis, inArtifact } from '../net/transports/index.js';
@@ -290,6 +290,9 @@ export class LobbyScreen {
       const ff = { ...this.#settings().friendlyFire, [d.lbFf]: e.target.checked };
       this.#setSetting('friendlyFire', ff);
     }
+    // [W5a] A select keeps focus after a change, and #render waits while one is focused (it would close the open list):
+    // the change then showed only after a click elsewhere. Blur → focusout → the pending render runs now.
+    if (e.target.matches?.('select')) e.target.blur();
   }
 
   // [N5b] Quick alliance layout over the open seats: everybody alone, or the preset of this player count (2 on 2)
@@ -310,11 +313,21 @@ export class LobbyScreen {
   // [MP-POLISH] Seats that will really play: open and filled. Empty open seats are dropped at start (Lobby.playingSeats),
   // so picks, their indices and the preview use exactly this list = the packed seat order.
   #openTeams() { return this.#seats().map((s, i) => (s.open && s.controller !== 'open' ? s.team ?? i : null)).filter((x) => x !== null); }
-  #mapPlayers() { return this.#currentMap()?.players ?? this.#seats().length; }
+  #isRandom() { return isRandomMap(this.#settings().map); }
+  // Random: the seats the biggest map has (the host picks among maps with enough starts at start, see Lobby.start)
+  #mapPlayers() {
+    if (this.#isRandom()) return maxMapPlayers(this.maps) || this.#seats().length;
+    return this.#currentMap()?.players ?? this.#seats().length;
+  }
 
   // Host picks a map: picks are cleared and open seats beyond the map's starts are closed (humans keep theirs)
   #setMap(id) {
     if (!this.#isHost()) return;
+    if (isRandomMap(id)) { // [W5a] no preview, no picks; the real map is drawn when the host starts
+      this.pickTeam = null;
+      this.#call(() => this.lobby.setSettings({ map: id, startPicksByTeam: {} }));
+      return;
+    }
     const map = this.maps.find((m) => m.id === validMapId(id));
     if (!map) return;
     this.pickTeam = null;
@@ -368,8 +381,17 @@ export class LobbyScreen {
       return `<button class="faction pick-seat${team === active ? ' on' : ''}" data-lb="pickSeat" data-team="${team}">
         <span class="team-dot" style="background:${color}"></span><b>${team + 1}</b></button>`;
     }).join('') : '';
+    const select = mapSelectHtml(this.#settings(), { maps: this.maps, disabled: !host, random: true });
+    if (this.#isRandom()) { // [W5a] Random: no preview and no start picks, just the explanation
+      return `
+      <div class="setup-map map-select">
+        <div class="map-pick">${select}</div>
+        <p class="menu-muted">${escapeHtml(t('lobby.map.randomHint'))}</p>
+      </div>`;
+    }
     return `
       <div class="setup-map map-select">
+        <div class="map-pick">${select}</div>
         <div class="map-select-body">
           <div class="map-preview-box" data-role="lb-map-preview"></div>
           <div class="map-side">
@@ -450,14 +472,15 @@ export class LobbyScreen {
     return {
       fogOfWar: s.fogOfWar ?? MENU.defaultFogMode,
       victory: s.victory ?? VICTORY.defaultCondition,
-      energyCap: s.energyCap ?? ECONOMY.defaultEnergyCap,
+      energyCap: ECONOMY.energyCaps.includes(s.energyCap) ? s.energyCap : ECONOMY.defaultEnergyCap,
+      populationCap: ECONOMY.populationCaps.includes(s.populationCap) ? s.populationCap : ECONOMY.defaultPopulationCap, // [W5a]
       speed: GAME_SPEED.options.includes(s.speed) ? s.speed : GAME_SPEED.default,
       prebuild: validPrebuild(s.prebuild), // [N8]
       oreMultiplier: oreMultiplierFromSettings(s), // [B1]
       startMultiplier: startMultiplierFromSettings(s), // [D4]
       startResearch: startResearchFromSettings(s),
       friendlyFire: { ...MENU.friendlyFire, ...(s.friendlyFire ?? {}) },
-      map: validMapId(s.map), // [MAPS]
+      map: validMapChoice(s.map), // [MAPS] map id or 'random' [W5a]
       startPicksByTeam: s.startPicksByTeam && typeof s.startPicksByTeam === 'object' ? s.startPicksByTeam : {},
     };
   }
@@ -742,7 +765,7 @@ export class LobbyScreen {
     return `
       <aside class="setup-side">
         <h3>${t('setup.rules')}${host ? '' : ` <small class="menu-muted">${t('lobby.hostOnly')}</small>`}</h3>
-        <div class="setup-options">${optionsHtml(s, { maps: this.maps.length ? this.maps : null, disabled: !host })}</div>
+        <div class="setup-options">${optionsHtml(s, { disabled: !host })}</div>
         <div class="setup-ff">${friendlyFireHtml(s.friendlyFire, { disabled: !host, attr: 'data-lb-ff' })}</div>
       </aside>`;
   }

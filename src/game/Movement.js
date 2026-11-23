@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { MOVEMENT, PATHFINDING, VEHICLE, MAPS, JUMP_JET } from '../config.js';
 import { clampToArea, confineUnits } from './PreBuild.js';
+import { collisionReach } from './Pathfinding.js';
 
 const DEG = Math.PI / 180;
 
@@ -22,7 +23,7 @@ export function resolveCollisions(units, world) {
       let dx = b.position.x - a.position.x;
       let dz = b.position.z - a.position.z;
       let dist = Math.hypot(dx, dz);
-      const minDist = a.radius + b.radius;
+      const minDist = contactDistance(a, b); // [W7] mech shoulders vs mechs / tall units, legs vs the rest
       if (dist >= minDist) continue;
       if (dist < MOVEMENT.overlapEpsilon) { // exactly on top of each other – pick a random direction
         const angle = world.rng.angle(); // seeded (lockstep determinism)
@@ -60,6 +61,15 @@ function airPath(unit, goal) {
   AIR_PATH.point.set(goal.x, unit.position.y, goal.z);
   AIR_PATH.remaining = Math.hypot(goal.x - unit.position.x, goal.z - unit.position.z);
   return AIR_PATH;
+}
+
+/**
+ * [W7] Centre distance at which two units touch: each one with the circle that reaches the other
+ * (Pathfinding.collisionReach – a mech's shoulder circle against mechs and units as tall as its shoulders, its foot
+ * circle against lower ones; other units have one circle).
+ */
+export function contactDistance(a, b) {
+  return collisionReach(a, Boolean(b.isMech), b.bodyHeight ?? 0) + collisionReach(b, Boolean(a.isMech), a.bodyHeight ?? 0);
 }
 
 /** Powered-down mechs (no crew) behave like obstacles – nobody can shove them away (buildings later too) */
@@ -114,6 +124,7 @@ export function followPath(unit, order, goal, ignore, dt) {
       // [R2] null / undefined ability = cannot fly / hop
       flyRange: unit.flightAbility?.range ?? 0, flyPenalty: JUMP_JET.flight.pathPenalty,
       hopRange: unit.hopAbility?.range ?? 0, hopPenalty: JUMP_JET.hop.pathPenalty,
+      body: unit, // [W7] obstacles inflated by the unit's circle that touches them (mech: shoulders / legs)
     });
     plan = order.nav = {
       waypoints: res.waypoints,
@@ -134,7 +145,7 @@ export function followPath(unit, order, goal, ignore, dt) {
   while (wp.length) {
     const near = Math.hypot(wp[0].x - unit.position.x, wp[0].z - unit.position.z) <= PATHFINDING.waypointReach;
     const next = wp[1] ?? end;
-    if (near || nav.segmentClear(unit.position, next, nav.shapesFor(unit.radius, [unit, ...ignore], canCrossRift(unit)))) wp.shift();
+    if (near || nav.segmentClear(unit.position, next, nav.shapesFor(unit.radius, [unit, ...ignore], canCrossRift(unit), unit))) wp.shift();
     else break;
   }
 

@@ -1,12 +1,14 @@
-// Steel Mans – procedural model kit (prototype N3). Shared helpers for buildings generated in code:
+// Steel Mans – procedural model kit. Shared low-level helpers for buildings generated in code:
 //   • one "paint" shader for every static and animated part: vertex colour + per-vertex surface attribute
 //     aSurface = (teamMask, metalness, roughness, emissive) → a whole building is a few draw calls
-//   • shared greyscale panel texture (seams, rivets, grime) used as bump map and diffuse detail
-//   • geometry builders (box, tapered box, cylinder, cone, hazard strip, pipe run) and a PartBuilder that merges
-//     them into one BufferGeometry with box-projected world-scale UVs
-//   • ref-counted caches: paint material per team colour, glow material per colour
+//   • panel textures from canvas, one per surface type (clean / worn / smooth / circuit – PROC_KIT.textures), used
+//     as bump map and diffuse detail (RGB: worn plates carry rust)
+//   • geometry builders (box, rounded box, tapered box, cylinder, cone, hazard strip, pipe run) and a PartBuilder that
+//     merges them into one BufferGeometry with box-projected world-scale UVs; GlowBuilder for additive glow layers
+//   • ref-counted caches: paint material per team colour + texture type, glow material per colour, textures
 // Team colour: the material has no `map`, so core/TeamColor.applyTeamColor leaves it alone; the team colour is
 // the uniform uTeamColor (setTeamColor on the model). Visual only – nothing here is read by the simulation.
+// Style-aware modules (fans, beacons, cranes, emblem…) live in ProcModules.js.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -14,16 +16,31 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 export const PROC_KIT = {
   textureSize: 256,        // px – panel texture (square, tiles)
   textureWorldSize: 6,     // model units covered by one texture tile
-  panelsPerTile: 3,        // panel grid per tile
-  seamWidth: 2,            // px
-  rivetRadius: 1.4,        // px
-  grimeSpots: 220,
-  streaks: 40,
-  baseGrey: 0.86,          // texture base brightness (diffuse multiplier)
-  detailStrength: 0.85,    // 0 = texture ignored in diffuse, 1 = full multiply
-  bumpScale: 1.2,
   textureSeed: 1337,
+  defaultTexture: 'clean', // used for an unknown texture type
   glowOpacity: 0.95,
+  // Panel textures by type (style.texture). kind = painter; baseGrey = diffuse multiplier, detail = 0 texture
+  // ignored in diffuse … 1 full multiply, bumpScale of the material; the rest are painter parameters (px / counts).
+  textures: {
+    clean: {
+      kind: 'plates', baseGrey: 0.9, plateVar: 0.04, panels: 2, stagger: 0, seam: 1, seamGrey: 0.6, split: 0.25,
+      rivets: false, rivetRadius: 1, grime: 40, grimeAlpha: 0.04, streaks: 0, rust: 0, scratches: 0,
+      detail: 0.55, bumpScale: 0.7,
+    },
+    worn: {
+      kind: 'plates', baseGrey: 0.82, plateVar: 0.12, panels: 3, stagger: 0.5, seam: 3, seamGrey: 0.2, split: 0.5,
+      rivets: true, rivetRadius: 1.6, grime: 320, grimeAlpha: 0.11, streaks: 70, rust: 70, rustAlpha: 0.35,
+      rustColor: [0.55, 0.26, 0.11], scratches: 60, detail: 0.95, bumpScale: 1.7,
+    },
+    smooth: {
+      kind: 'hex', baseGrey: 0.95, hexRows: 4, lineGrey: 0.86, lineWidth: 1, blotches: 50, blotchAlpha: 0.035,
+      detail: 0.3, bumpScale: 0.45,
+    },
+    circuit: {
+      kind: 'circuit', baseGrey: 0.9, diamonds: 4, seam: 1.5, seamGrey: 0.42, traces: 28, traceGrey: 0.72,
+      traceGrid: 32, traceDot: 1.6, detail: 0.6, bumpScale: 0.9,
+    },
+  },
 };
 
 // ---------------------------------------------------------------- deterministic rng (visual layout only)
@@ -40,95 +57,183 @@ export function makeRng(seed) {
   };
 }
 
-// ---------------------------------------------------------------- panel texture
+// ---------------------------------------------------------------- panel textures (one per type, ref-counted)
 
-let panelTexture = null;
-let panelTextureUsers = 0;
+/** Known texture type (style.texture), unknown → PROC_KIT.defaultTexture */
+export const textureTypeOf = (type) => (Object.hasOwn(PROC_KIT.textures, type) ? type : PROC_KIT.defaultTexture);
 
-function createPanelTexture() {
-  const k = PROC_KIT;
-  const size = k.textureSize;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const rng = makeRng(k.textureSeed);
-  const grey = (v) => {
-    const c = Math.round(Math.max(0, Math.min(1, v)) * 255);
-    return `rgb(${c},${c},${c})`;
-  };
-  ctx.fillStyle = grey(k.baseGrey);
+const css = (r, g, b, a = 1) => {
+  const c = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+  return `rgba(${c(r)},${c(g)},${c(b)},${a})`;
+};
+const grey = (v, a = 1) => css(v, v, v, a);
+
+function softSpot(ctx, x, y, r, color) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+}
+
+// Plates with seams (clean: few fine seams; worn: staggered heavy plates, rivets, rust, grime, streaks, scratches)
+function paintPlates(ctx, size, rng, o) {
+  ctx.fillStyle = grey(o.baseGrey);
   ctx.fillRect(0, 0, size, size);
-  const cell = size / k.panelsPerTile;
-  // panels: slight brightness variation per plate
-  for (let i = 0; i < k.panelsPerTile; i++) {
-    for (let j = 0; j < k.panelsPerTile; j++) {
-      ctx.fillStyle = grey(k.baseGrey + (rng() - 0.5) * 0.08);
-      ctx.fillRect(i * cell, j * cell, cell, cell);
-      // a split plate now and then
-      if (rng() < 0.4) {
-        ctx.fillStyle = grey(0.45);
-        ctx.fillRect(i * cell, j * cell + cell / 2 - k.seamWidth / 2, cell, k.seamWidth / 2);
+  const cell = size / o.panels;
+  const shiftOf = (row) => (row % 2 ? cell * o.stagger : 0);
+  for (let j = 0; j < o.panels; j++) {
+    for (let i = -1; i < o.panels; i++) {
+      const x = i * cell + shiftOf(j);
+      ctx.fillStyle = grey(o.baseGrey + (rng() - 0.5) * o.plateVar);
+      ctx.fillRect(x, j * cell, cell, cell);
+      if (rng() < o.split) {   // a split plate now and then
+        ctx.fillStyle = grey(o.seamGrey);
+        ctx.fillRect(x, j * cell + cell / 2 - o.seam / 4, cell, Math.max(1, o.seam / 2));
       }
     }
   }
-  // grime spots (soft, darker)
-  for (let n = 0; n < k.grimeSpots; n++) {
-    const r = 2 + rng() * 10;
-    const x = rng() * size;
-    const y = rng() * size;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, `rgba(0,0,0,${0.05 + rng() * 0.08})`);
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  for (let n = 0; n < o.rust; n++) {
+    const [r, g, b] = o.rustColor;
+    softSpot(ctx, rng() * size, rng() * size, 3 + rng() * 14, css(r, g, b, o.rustAlpha * (0.4 + rng() * 0.6)));
   }
-  // rain streaks below the seams
-  for (let n = 0; n < k.streaks; n++) {
+  for (let n = 0; n < o.grime; n++) softSpot(ctx, rng() * size, rng() * size, 2 + rng() * 10, grey(0, o.grimeAlpha * (0.5 + rng())));
+  for (let n = 0; n < o.streaks; n++) {   // rain streaks below the horizontal seams
     const x = rng() * size;
-    const y = Math.floor(rng() * k.panelsPerTile) * cell;
+    const y = Math.floor(rng() * o.panels) * cell;
     const len = cell * (0.3 + rng() * 0.6);
     const g = ctx.createLinearGradient(0, y, 0, y + len);
-    g.addColorStop(0, 'rgba(0,0,0,0.14)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
+    g.addColorStop(0, grey(0, 0.16));
+    g.addColorStop(1, grey(0, 0));
     ctx.fillStyle = g;
     ctx.fillRect(x, y, 1 + rng() * 2, len);
   }
-  // seams (dark recessed lines) + rivets along them
-  ctx.fillStyle = grey(0.28);
-  for (let i = 0; i <= k.panelsPerTile; i++) {
-    const p = Math.round(i * cell);
-    ctx.fillRect(p - k.seamWidth / 2, 0, k.seamWidth, size);
-    ctx.fillRect(0, p - k.seamWidth / 2, size, k.seamWidth);
+  ctx.strokeStyle = grey(1, 0.25);
+  ctx.lineWidth = 1;
+  for (let n = 0; n < o.scratches; n++) {
+    const x = rng() * size;
+    const y = rng() * size;
+    const a = rng() * Math.PI;
+    const len = 4 + rng() * 18;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len); ctx.stroke();
   }
-  const rivetStep = cell / 6;
-  for (let i = 0; i <= k.panelsPerTile; i++) {
-    for (let s = rivetStep / 2; s < size; s += rivetStep) {
-      for (const [x, y] of [[i * cell + 4, s], [s, i * cell + 4]]) {
-        ctx.fillStyle = grey(1);
-        ctx.beginPath(); ctx.arc(x, y, k.rivetRadius, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = grey(0.4);
-        ctx.beginPath(); ctx.arc(x + 0.6, y + 0.6, k.rivetRadius * 0.6, 0, Math.PI * 2); ctx.fill();
+  // seams: horizontal full lines, vertical per row (staggered rows)
+  ctx.fillStyle = grey(o.seamGrey);
+  for (let j = 0; j <= o.panels; j++) ctx.fillRect(0, Math.round(j * cell) - o.seam / 2, size, o.seam);
+  for (let j = 0; j < o.panels; j++) {
+    for (let i = -1; i <= o.panels; i++) ctx.fillRect(Math.round(i * cell + shiftOf(j)) - o.seam / 2, j * cell, o.seam, cell);
+  }
+  if (!o.rivets) return;
+  const step = cell / 6;
+  const rivet = (x, y) => {
+    ctx.fillStyle = grey(1);
+    ctx.beginPath(); ctx.arc(x, y, o.rivetRadius, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = grey(0.35);
+    ctx.beginPath(); ctx.arc(x + 0.6, y + 0.6, o.rivetRadius * 0.6, 0, Math.PI * 2); ctx.fill();
+  };
+  const inset = o.seam + o.rivetRadius * 2;
+  for (let j = 0; j <= o.panels; j++) for (let s = step / 2; s < size; s += step) rivet(s, j * cell + inset);
+  for (let j = 0; j < o.panels; j++) {
+    for (let i = 0; i <= o.panels; i++) for (let s = step / 2; s < cell; s += step) rivet(i * cell + shiftOf(j) + inset, j * cell + s);
+  }
+}
+
+// Smooth pearl surface: soft blotches and a faint hexagonal pattern (no seams)
+function paintHex(ctx, size, rng, o) {
+  ctx.fillStyle = grey(o.baseGrey);
+  ctx.fillRect(0, 0, size, size);
+  for (let n = 0; n < o.blotches; n++) {
+    softSpot(ctx, rng() * size, rng() * size, 10 + rng() * 40, grey(rng() < 0.5 ? 1 : 0, o.blotchAlpha));
+  }
+  const r = size / (3 * o.hexRows);                       // 2·hexRows rows of 1.5 r tile the height exactly
+  const colW = Math.sqrt(3) * r;
+  const cols = Math.max(1, Math.round(size / colW));
+  const sx = size / (cols * colW);                        // slight horizontal stretch so the columns tile too
+  ctx.strokeStyle = grey(o.lineGrey);
+  ctx.lineWidth = o.lineWidth;
+  for (let row = -1; row <= o.hexRows * 2; row++) {
+    for (let col = -1; col <= cols; col++) {
+      const cx = (col + (row % 2 ? 0.5 : 0)) * colW * sx;
+      const cy = row * 1.5 * r;
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const a = Math.PI / 6 + (k * Math.PI) / 3;
+        const x = cx + Math.cos(a) * r * sx;
+        const y = cy + Math.sin(a) * r;
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
+      ctx.closePath();
+      ctx.stroke();
     }
   }
+}
+
+// Precise diamond seams and engraved circuit traces
+function paintCircuit(ctx, size, rng, o) {
+  ctx.fillStyle = grey(o.baseGrey);
+  ctx.fillRect(0, 0, size, size);
+  const c = size / o.diamonds;
+  ctx.strokeStyle = grey(o.seamGrey);
+  ctx.lineWidth = o.seam;
+  for (let k = -o.diamonds; k <= o.diamonds * 2; k++) {
+    ctx.beginPath(); ctx.moveTo(k * c, 0); ctx.lineTo(k * c - size, size); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(k * c, 0); ctx.lineTo(k * c + size, size); ctx.stroke();
+  }
+  const g = size / o.traceGrid;
+  ctx.strokeStyle = grey(o.traceGrey);
+  ctx.fillStyle = grey(o.traceGrey);
+  ctx.lineWidth = 1;
+  const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1]];
+  for (let n = 0; n < o.traces; n++) {
+    let x = Math.floor(rng() * o.traceGrid) * g;
+    let y = Math.floor(rng() * o.traceGrid) * g;
+    ctx.beginPath(); ctx.arc(x, y, o.traceDot, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x, y);
+    const legs = 2 + Math.floor(rng() * 3);
+    for (let l = 0; l < legs; l++) {
+      const [dx, dy] = dirs[Math.floor(rng() * dirs.length)];
+      const len = (2 + Math.floor(rng() * 5)) * g;
+      x += dx * len; y += dy * len;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, o.traceDot, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+const PAINTERS = { plates: paintPlates, hex: paintHex, circuit: paintCircuit };
+
+function createPanelTexture(type) {
+  const o = PROC_KIT.textures[type];
+  const size = PROC_KIT.textureSize;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  PAINTERS[o.kind](ctx, size, makeRng(PROC_KIT.textureSeed), o);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.NoColorSpace;   // data: bump heights and a linear diffuse factor
+  tex.colorSpace = THREE.NoColorSpace;   // data: bump heights (red) and a linear diffuse factor (RGB)
   tex.anisotropy = 4;
   return tex;
 }
 
-function acquirePanelTexture() {
-  if (!panelTexture) panelTexture = createPanelTexture();
-  panelTextureUsers++;
-  return panelTexture;
+const textureCache = new Map();   // type -> { texture, users }
+
+function acquirePanelTexture(type) {
+  let entry = textureCache.get(type);
+  if (!entry) {
+    entry = { texture: createPanelTexture(type), users: 0 };
+    textureCache.set(type, entry);
+  }
+  entry.users++;
+  return entry.texture;
 }
 
-function releasePanelTexture() {
-  if (--panelTextureUsers > 0 || !panelTexture) return;
-  panelTexture.dispose();
-  panelTexture = null;
-  panelTextureUsers = 0;
+function releasePanelTexture(type) {
+  const entry = textureCache.get(type);
+  if (!entry || --entry.users > 0) return;
+  entry.texture.dispose();
+  textureCache.delete(type);
 }
 
 // ---------------------------------------------------------------- paint material (one shader for all parts)
@@ -145,45 +250,52 @@ function paintOnBeforeCompile(shader) {
     .replace('#include <common>', '#include <common>\nuniform vec3 uTeamColor;\nuniform float uDetail;\nvarying vec4 vSurface;')
     .replace('#include <color_fragment>', [
       '#include <color_fragment>',
-      'diffuseColor.rgb *= mix(1.0, texture2D(bumpMap, vBumpMapUv).r, uDetail);',
+      'diffuseColor.rgb *= mix(vec3(1.0), texture2D(bumpMap, vBumpMapUv).rgb, uDetail);',
       'diffuseColor.rgb *= mix(vec3(1.0), uTeamColor, vSurface.x);',
     ].join('\n'))
     .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vSurface.z;')
     .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vSurface.y;')
-    .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor * vSurface.w;');
+    // team-masked glowing parts (neon strips in the team colour) glow in the team colour
+    .replace('#include <emissivemap_fragment>',
+      '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor * mix(vec3(1.0), uTeamColor, vSurface.x) * vSurface.w;');
 }
 
-const paintCache = new Map();   // hex -> { material, users }
+const paintCache = new Map();   // "hex:texture" -> { material, users, type }
 
-/** Shared paint material for a team colour (ref-counted – pair with releasePaintMaterial) */
-export function acquirePaintMaterial(color) {
-  const hex = new THREE.Color(color).getHexString();
-  let entry = paintCache.get(hex);
+/**
+ * Shared paint material for a team colour and a panel texture type (style.texture), ref-counted – pair with
+ * releasePaintMaterial. All clones share one shader program.
+ */
+export function acquirePaintMaterial(color, texture = PROC_KIT.defaultTexture) {
+  const type = textureTypeOf(texture);
+  const key = `${new THREE.Color(color).getHexString()}:${type}`;
+  let entry = paintCache.get(key);
   if (!entry) {
+    const o = PROC_KIT.textures[type];
     const material = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      bumpMap: acquirePanelTexture(),
-      bumpScale: PROC_KIT.bumpScale,
+      bumpMap: acquirePanelTexture(type),
+      bumpScale: o.bumpScale,
     });
     material.userData.uTeamColor = { value: new THREE.Color(color) };
-    material.userData.uDetail = { value: PROC_KIT.detailStrength };
+    material.userData.uDetail = { value: o.detail };
     material.userData.procedural = true;
     material.onBeforeCompile = paintOnBeforeCompile;
     material.customProgramCacheKey = () => 'steelMansProcPaint';
-    entry = { material, users: 0, hex };
-    paintCache.set(hex, entry);
+    entry = { material, users: 0, type };
+    paintCache.set(key, entry);
   }
   entry.users++;
   return entry.material;
 }
 
 export function releasePaintMaterial(material) {
-  for (const [hex, entry] of paintCache) {
+  for (const [key, entry] of paintCache) {
     if (entry.material !== material) continue;
     if (--entry.users > 0) return;
     material.dispose();
-    paintCache.delete(hex);
-    releasePanelTexture();
+    paintCache.delete(key);
+    releasePanelTexture(entry.type);
     return;
   }
 }
@@ -282,6 +394,16 @@ export class PartBuilder {
   /** Box, origin at its centre unless t.base (origin at the bottom face) */
   box(w, h, d, s, t = {}) {
     const g = new THREE.BoxGeometry(w, h, d);
+    if (t.base) g.translate(0, h / 2, 0);
+    return this.add(g, s, t);
+  }
+
+  /**
+   * Box with rounded (segments ≥ 2) or chamfered (segments = 1) edges and corners, origin at its centre unless t.base.
+   * Triangles: 12 · (2·segments + 1)² – use it for big volumes only.
+   */
+  roundedBox(w, h, d, radius, segments, s, t = {}) {
+    const g = roundedBoxGeometry(w, h, d, radius, segments);
     if (t.base) g.translate(0, h / 2, 0);
     return this.add(g, s, t);
   }
@@ -395,6 +517,35 @@ export class PartBuilder {
   }
 }
 
+/**
+ * Rounded box geometry (centred): a subdivided unit box whose vertices are pushed onto an inner box + radius
+ * (same scheme as three's RoundedBoxGeometry addon, which is not vendored). segments = 1 gives a 45° chamfer.
+ */
+export function roundedBoxGeometry(w, h, d, radius, segments) {
+  const n = segments * 2 + 1;
+  const g = new THREE.BoxGeometry(1, 1, 1, n, n, n);
+  const pos = g.attributes.position;
+  const nor = g.attributes.normal;
+  const half = 0.5 / n;
+  const r = Math.min(radius, w / 2, h / 2, d / 2);
+  const bx = w / 2 - r;
+  const by = h / 2 - r;
+  const bz = d / 2 - r;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    let nx = x - Math.sign(x) * half;
+    let ny = y - Math.sign(y) * half;
+    let nz = z - Math.sign(z) * half;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    pos.setXYZ(i, Math.sign(x) * bx + nx * r, Math.sign(y) * by + ny * r, Math.sign(z) * bz + nz * r);
+    nor.setXYZ(i, nx, ny, nz);
+  }
+  return g;
+}
+
 /** Box (tri-planar by dominant normal axis) UV projection in world-scale units */
 function projectUvs(geo) {
   const pos = geo.attributes.position;
@@ -425,13 +576,86 @@ export function glowGeometry(points, radius) {
   return g;
 }
 
-/** Triangle count of a geometry */
-export const triangleCount = (geo) => (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
+const _ga = new THREE.Vector3();
+const _gb = new THREE.Vector3();
+const _gup = new THREE.Vector3(0, 1, 0);
+const _gq = new THREE.Quaternion();
+
+/**
+ * Position-only geometry for additive glow layers (halos, strips, beams, rings, arcs): every part is converted to
+ * non-indexed triangles and merged → one draw call per layer. `vertices` = vertex count so far (use it to record
+ * draw ranges, e.g. arc variants). Construction time only.
+ */
+export class GlowBuilder {
+  constructor() { this.parts = []; this.vertices = 0; }
+
+  add(geo, t = {}) {
+    place(geo, t);
+    let g = geo;
+    if (g.index) { g = geo.toNonIndexed(); geo.dispose(); }
+    for (const name of Object.keys(g.attributes)) if (name !== 'position') g.deleteAttribute(name);
+    this.parts.push(g);
+    this.vertices += g.attributes.position.count;
+    return this;
+  }
+
+  /** Small round halo (octahedron) at [x, y, z] */
+  point([x, y, z], radius) { return this.add(new THREE.OctahedronGeometry(radius, 1), { x, y, z }); }
+  box(w, h, d, t) { return this.add(new THREE.BoxGeometry(w, h, d), t); }
+  cylinder(rTop, rBottom, h, segments, t, openEnded = true) {
+    return this.add(new THREE.CylinderGeometry(rTop, rBottom, h, segments, 1, openEnded), t);
+  }
+  sphere(r, wSeg, hSeg, t) { return this.add(new THREE.SphereGeometry(r, wSeg, hSeg), t); }
+  torus(r, tube, radialSeg, tubularSeg, arc, t) { return this.add(new THREE.TorusGeometry(r, tube, radialSeg, tubularSeg, arc), t); }
+
+  /** Thin square beam from point a to point b ([x, y, z]) */
+  segment(a, b, thickness) {
+    _ga.fromArray(a);
+    _gb.fromArray(b);
+    const len = _ga.distanceTo(_gb);
+    if (len <= 0) return this;
+    const g = new THREE.BoxGeometry(thickness, len, thickness);
+    _gq.setFromUnitVectors(_gup, _gb.sub(_ga).normalize());
+    g.applyQuaternion(_gq);
+    g.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+    return this.add(g);
+  }
+
+  get empty() { return this.parts.length === 0; }
+
+  /** Merged geometry (null when nothing was added) */
+  build() {
+    if (this.empty) return null;
+    const merged = mergeGeometries(this.parts, false);
+    for (const p of this.parts) p.dispose();
+    this.parts = [];
+    merged.computeBoundingBox();
+    merged.computeBoundingSphere();
+    return merged;
+  }
+}
+
+/** Triangle count of a geometry (respects a finite draw range) */
+export function triangleCount(geo) {
+  const total = geo.index ? geo.index.count : geo.attributes.position.count;
+  return Math.min(total, geo.drawRange.count) / 3;
+}
 
 // ---------------------------------------------------------------- animation modules (visual only, no allocation in update)
 
 /** Smootherstep 0..1 (zero velocity and acceleration at both ends) */
 export const smootherstep = (t) => { const x = t <= 0 ? 0 : t >= 1 ? 1 : t; return x * x * x * (x * (x * 6 - 15) + 10); };
+
+/**
+ * Stepped ease 0..1: `steps` short smootherstep pushes with a stop between them (heavy, piston-like travel).
+ * Same mean speed as smootherstep, so TrackMover leg durations stay valid.
+ */
+export function steppedEase(t, steps) {
+  const x = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  const s = x * steps;
+  const k = Math.min(steps - 1, Math.floor(s));
+  return (k + smootherstep(s - k)) / steps;
+}
 
 /** Trapezoid 0→1→0 over t∈[0,1]: eased rise during `edge`, hold, eased fall during `edge` */
 export function plateau(t, edge = 0.3) {
@@ -487,9 +711,11 @@ export class Blinker {
  */
 export class TrackMover {
   /**
-   * @param {{rest:number[], stops:number[][], speed:number[], dwell?:number, minLeg?:number}} o
+   * @param {{rest:number[], stops:number[][], speed:number[], dwell?:number, minLeg?:number, steps?:number}} o
+   *   steps > 0 = jerky travel: each leg is split into `steps` pushes (steppedEase)
    */
-  constructor({ rest, stops, speed, dwell = 2, minLeg = 0.6 }) {
+  constructor({ rest, stops, speed, dwell = 2, minLeg = 0.6, steps = 0 }) {
+    this.steps = steps;
     this.axes = rest.length;
     this.rest = rest.slice();
     this.stops = stops.map((s) => s.slice());
@@ -531,7 +757,8 @@ export class TrackMover {
     }
     if (this.phase !== 'travel') return;
     this.legTime += delta;
-    const e = smootherstep(this.legTime / this.legDuration);
+    const t = this.legTime / this.legDuration;
+    const e = this.steps > 0 ? steppedEase(t, this.steps) : smootherstep(t);
     for (let k = 0; k < this.axes; k++) this.value[k] = this.from[k] + (this.to[k] - this.from[k]) * e;
     if (this.legTime < this.legDuration) return;
     if (this.toRest) { this.phase = 'rest'; this.next = 0; return; }

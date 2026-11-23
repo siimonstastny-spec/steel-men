@@ -2,7 +2,8 @@
 //   ([N5] a new order interrupts a running repair: repairInterruptible + unitCommands.give)
 //
 //   • Service in an own assembly bay (structure that produces 'mech'). A mech ordered into the bay (order
-//     'enterBay') drives up to it; its crew steps out and waits next to the bay; the mech stands on the bay's
+//     'enterBay') drives up to it; its crew steps out and waits next to the bay ([W7] or inside it, in the bay's crew
+//     queue, when there is room – BayCrew.js – and comes out aboard when the service ends); the mech stands on the bay's
 //     platform (where the assembly hologram is), not pickable or targetable (mech.bay, `inside`); a part being
 //     mounted is shown as a hologram in its slot (RobotProduction). In the bay it can be
 //       – repaired automatically (no order; also by the 'repair' task): bay.autoRepairBaseRate × autoRepairFactor
@@ -21,7 +22,8 @@
 //     repairs it (ModularMech.startRepair({ external: true })) – stopping that repair on the mech ends the order.
 import * as THREE from 'three';
 import { getStats, teamRule } from '../data/Stats.js';
-import { STRUCTURE, ROBOT_PRODUCTION, HOLOGRAM, ALLY_REPAIR, N1B } from '../config.js';
+import { STRUCTURE, ROBOT_PRODUCTION, HOLOGRAM, ALLY_REPAIR, N1B, BAY_CREW } from '../config.js';
+import { admitCrew, takeThisCrew } from './BayCrew.js'; // [W7] the serviced mech's crew waits inside the bay
 import { distanceToBox } from '../units/Vehicle.js';
 import { areAllies } from './Alliances.js'; // [N5FIX] allies repair each other's finished buildings
 
@@ -145,6 +147,8 @@ function admit(bay, mech) {
   mech.stopRepair();
   mech.order = null;
   const crew = mech.ejectCrew(); // steps out beside the mech, which stands at the gate
+  // [W7] room in the bay's crew queue (BayCrew.js): the crew goes in with its mech instead of waiting outside
+  if (crew) admitCrew(bay, crew);
   if (bay.serviceWaiting === mech) bay.serviceWaiting = null;
   mech.bay = bay;
   mech.speed = 0;
@@ -259,7 +263,11 @@ export function releaseMech(bay, { force = false } = {}) {
   mech.visible = true;
   mech.position.set(p.x, mech.world?.heightAt(p.x, p.z) ?? mech.position.y, p.z);
   mech.rotation.y = bay.rotation.y;
-  if (crew && !crew.dead && !crew.inside && !crew.order) crew.board(mech);
+  if (crew && !crew.dead && crew.bay === bay && takeThisCrew(bay, crew)) {
+    // [W7] the crew waited inside the bay: it comes out aboard, like a crew taking a newly assembled mech
+    mech.boardCrew(crew);
+    if (BAY_CREW.boardInstantly) mech.boardTimer = 0;
+  } else if (crew && !crew.dead && !crew.inside && !crew.order) crew.board(mech);
   return mech;
 }
 

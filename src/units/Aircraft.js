@@ -80,6 +80,7 @@ export class Aircraft extends CombatVehicle {
     const fallTime = Math.sqrt((2 * this.altitude) / cfg.gravity);
     const y0 = ghost.position.y;
     let t = 0;
+    const fire = world.effects.burn(this, ghost, cfg.maxTime); // [R9] burning while it falls
     world.effects.custom(cfg.maxTime, (dt, item) => {
       t += dt;
       const k = Math.min(1, t / fallTime);
@@ -94,7 +95,8 @@ export class Aircraft extends CombatVehicle {
       ghost.remove(this.model);
       disposeUniqueMaterials(this.model);
       const ground = new THREE.Vector3(ghost.position.x, world.heightAt(ghost.position.x, ghost.position.z), ghost.position.z);
-      world.effects.burst(VFX.mechExplosion, ground, { size: VEHICLE.explosionSize * cfg.explosionSize });
+      fire.stop();
+      world.effects.explodeUnit(this, { position: ground, fallbackSize: VEHICLE.explosionSize * cfg.explosionSize }); // [R9]
     });
   }
 

@@ -23,7 +23,7 @@ import { Structure, modelFootprint, cachedFootprint } from '../../units/Structur
 import { structureClassFor } from '../../units/structureClasses.js';
 import { queueOf, issueOrder } from '../../units/OrderQueue.js';
 import { CMD_BUILD } from '../../config.js';
-import { canPlace, placementBox, terrainFit, flattenTerrain } from '../Construction.js';
+import { canPlace, placementBox, terrainFit, flattenTerrain, setConstructionDue, refundConstruction } from '../Construction.js';
 import { commandBus, registerCommand, resolve, resolveOwn } from './CommandBus.js';
 import { boxInArea } from '../PreBuild.js';
 
@@ -205,7 +205,7 @@ function checkPlace(world, cmd) {
   if (!boxInArea(world, cmd.team, box)) return { error: 'blocked' }; // [N8] pre-build square
   const fit = terrainFit(world, box); // [R6] too steep under the footprint = blocked (the ground is levelled otherwise)
   if (!fit.ok) return { error: 'blocked' };
-  if (!world.economy.canAfford(cmd.team, stats.cost)) return { error: 'resources', cost: stats.cost };
+  if (!world.economy.canAffordUpfront(cmd.team, stats.cost)) return { error: 'resources', cost: stats.cost };
   return { stats, fp, builders, yaw, box, level: fit.level };
 }
 
@@ -220,9 +220,10 @@ registerCommand('placeStructure', {
     const res = checkPlace(world, cmd);
     if (res.error) return res;
     const { stats, fp, builders, yaw, box, level } = res;
-    if (!world.economy.pay(cmd.team, stats.cost)) return { error: 'resources', cost: stats.cost };
+    if (!world.economy.payUpfront(cmd.team, stats.cost)) return { error: 'resources', cost: stats.cost };
     const StructureClass = structureClassFor(stats, Structure); // armed buildings, wall posts (structureClasses.js)
     const structure = createStructure(StructureClass, cmd.unitId, cmd.race, { team: cmd.team, yaw }, fp);
+    setConstructionDue(world.economy, structure, stats.cost); // [W5b] energy is charged when the building really starts
     turnStructure(structure, fp, yaw); // any angle: the Structure constructor only knows quarter turns
     flattenTerrain(world, box, level); // [R6] level the ground first: addStructure takes the height from it
     addAndLoad(world, structure, cmd.x, cmd.z);
@@ -243,7 +244,7 @@ registerCommand('cancelConstruction', {
   /** Returns rules.construction.cancelRefund of the cost and removes the unfinished building */
   execute(world, cmd) {
     const s = resolve(world, cmd.structure);
-    world.economy?.refund(s.team, s.stats.cost, getStats().rules.construction?.cancelRefund ?? 0);
+    refundConstruction(world.economy, s, getStats().rules.construction?.cancelRefund ?? 0);
     s.destroy({ explode: false });
     return {};
   },
@@ -266,7 +267,7 @@ registerCommand('deleteStructure', {
     const refund = getStats().rules.construction?.cancelRefund ?? 0;
     for (const s of structuresToDelete(world, cmd)) {
       if (s.complete) { s.destroy(); continue; }
-      world.economy?.refund(s.team, s.stats.cost, refund);
+      refundConstruction(world.economy, s, refund);
       s.destroy({ explode: false });
     }
   },
@@ -313,7 +314,7 @@ export async function submitPlaceStructure({ team, race, unitId, x, z, yaw = 0, 
 export async function findPlacement(world, { team, race, unitId, near, yaw = 0, builders = [], maxRadius = SEARCH.maxRadius, step = SEARCH.step, gap = 0 }) {
   const fp = await modelFootprint(unitId, race);
   const stats = unitStats('structures', unitId, race);
-  if (checkRules(world, team, race, unitId, stats) || !world.economy.canAfford(team, stats.cost)) return null;
+  if (checkRules(world, team, race, unitId, stats) || !world.economy.canAffordUpfront(team, stats.cost)) return null;
   const own = buildersOf(world, eidsOf(builders), team);
   const snapped = quantizeYaw(yaw);
   const pad = Math.max(0, Number(gap) || 0);

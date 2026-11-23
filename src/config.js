@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v22.1';
+export const GAME_VERSION = 'v23';
 export const BASE64_MODEL_SUFFIX = '.txt';
 // Model folders (path prefixes) whose textures were exported upside down (V flipped – round floor pads came out
 // inside out): the loader mirrors the texture transform once per model (src/core/AssetLoader.js), team colour copies
@@ -56,6 +56,11 @@ export const CAMERA = {
   // Edge scrolling (src/ui/EdgeScroll.js, on/off in Settings → Game: settings.ui.edgeScroll)
   edgeScrollWidth: 8,         // px – cursor this close to a window edge pans the camera (only over the map, window focused)
   edgeScrollSpeed: 80,        // units/s at panReferenceDistance (farther away = proportionally faster, like WASD)
+};
+
+// Camera limits (src/core/CameraBounds.js): the look-at point may not leave the map
+export const CAMERA_BOUNDS = {
+  overshoot: 10,              // units – how far past the map edge the look-at point may go (the edge stays in view)
 };
 
 // Unit collisions and blocked move orders
@@ -181,6 +186,11 @@ export const MINIMAP = {
   damageColor: '#ffd166',
   damageRing: 6,             // px radius of the blink ring
   zIndex: 4,
+  // [R2] sharp rendering: backing store = size × clamp(CSS size / size × devicePixelRatio, minPixelRatio, maxPixelRatio)
+  minPixelRatio: 2,          // supersampling floor (also on 1× screens: the map is drawn at 2× and downsampled)
+  maxPixelRatio: 3,          // cap of the backing store (memory / terrain pre-render cost)
+  resizeDebounce: 0.25,      // s after the last window resize before the canvases are rebuilt
+  structureScale: 0.6,       // building squares = R2.minimap.structureHalf × this (smaller squares; units stay circles)
 };
 
 /**
@@ -324,7 +334,7 @@ export const NET = {
     // wss:// signalling relays. Trystero's own default list is a random set of obscure relays (many dead), so we pin
     // well-known public ones; empty = Trystero's default list. Verify with relayCheck.js (docs/notes/g-web-iframe.md).
     relayUrls: [
-      'wss://nostr.oxtr.dev',
+      'wss://relay.damus.io',
       'wss://nos.lol',
       'wss://relay.primal.net',
       'wss://offchain.pub',
@@ -334,6 +344,8 @@ export const NET = {
     relayRedundancy: 5,          // relays used at once from the default list
     warnOnRelayFailure: false,   // Trystero console warnings about single relays (noisy; one dead relay is normal)
     relayTimeoutMs: 10000,       // join(): no relay socket open by then = P2PError net.p2p.error.relays
+    outboxMax: 16,               // sends made before the first peer connected are held (max count, flushed to the first peer)
+    outboxTtlMs: 15000,          // ...and dropped when older than this
     relayPollMs: 100,            // how often join() checks the relay sockets
     handshakeTimeoutMs: 10000,   // Trystero peer handshake after the data channel opened
     lobbyJoinTimeoutMs: 25000,   // transport.joinTimeoutMs hint: finding the host over relays + WebRTC takes 2–15 s
@@ -1046,6 +1058,9 @@ export const I18N = {
   names: { cs: 'Čeština', en: 'English' },  // each language written in itself
 };
 
+/** Advanced graphics options of the Full preset (the shipped default of settings.graphics.advanced; see GRAPHICS) */
+const GRAPHICS_FULL = { pixelRatioCap: 2, pixelRatioScale: 1, shadows: true, shadowMapSize: 2048, shadowType: 'PCFSoftShadowMap' };
+
 /** Defaults of the player settings saved in the profile (see Settings screen) */
 export const SETTINGS_DEFAULTS = {
   language: null,                 // null = detect from the browser the first time
@@ -1053,7 +1068,8 @@ export const SETTINGS_DEFAULTS = {
   keybindings: {},                // action -> list of KeyboardEvent.code, only the remapped ones
   mouse: { rotateSensitivity: 1, zoomSensitivity: 1, panSensitivity: 1, invertRotate: false, invertZoom: false, invertPan: false },
   audio: { master: 0.8, effects: 1, music: 0.6 },
-  graphics: { quality: 'full' },  // 'full' | 'reduced' (see GRAPHICS)
+  // quality: 'full' | 'reduced' | 'custom' (always derived from `advanced`, see GRAPHICS); advanced: the individual options
+  graphics: { quality: 'full', advanced: { ...GRAPHICS_FULL } },
   ui: { alwaysShowHealthBars: false, alwaysShowBuildProgress: false, edgeScroll: true, autoAssist: true }, // autoAssist → setAutoAssist command at match start; copied to world.settings.ui by main.js; edgeScroll is read live
 };
 
@@ -1073,14 +1089,30 @@ export const GRAPHICS = {
     reduced: { pixelRatioCap: 1, pixelRatioScale: 0.6, shadows: true, shadowMapSize: 512, shadowType: 'BasicShadowMap', antialiasHint: false },
   },
   minPixelRatio: 0.4,
+  customQuality: 'custom',  // quality id shown when the advanced options match no preset (not selectable)
+  // Advanced options (Settings → Graphics → Advanced). Order = display order; `values` = allowed choices (select box),
+  // type 'boolean' = checkbox. i18n: `settings.graphics.adv.<key>`, choice labels `settings.graphics.adv.<key>.<value>`.
+  advanced: {
+    pixelRatioScale: { values: [1, 0.8, 0.6, 0.5, 0.4], percent: true },   // render resolution scale (× device pixel ratio)
+    pixelRatioCap: { values: [2, 1.5, 1] },                                // max device pixel ratio used
+    shadows: { type: 'boolean' },
+    shadowMapSize: { values: [2048, 1024, 512] },
+    shadowType: { values: ['PCFSoftShadowMap', 'PCFShadowMap', 'BasicShadowMap'] },
+  },
 };
 
 /** Remappable actions shown in Settings → Controls (order = display order). Camera keys are fixed to camera actions. */
+// Categories = vertical tabs of Settings → Controls (order = tab order; i18n key `settings.controls.<id>`).
+// Only the 'camera' category is a camera action (may use WASD / arrows); everything else is "command" for validation.
+export const KEY_CATEGORIES = [
+  { id: 'camera', actions: ['cameraForward', 'cameraBack', 'cameraLeft', 'cameraRight'] },
+  { id: 'commands', actions: ['eject', 'dropLeft', 'dropRight', 'attackMove', 'guard', 'patrol', 'cancel', 'move', 'stop', 'deleteUnit', 'stanceRanged', 'stanceMelee',
+    'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair'] },
+  { id: 'general', actions: ['rotateBuilding', 'idleCrew', 'idleBuilder', 'fullscreen', 'diplomacy'] },
+];
 export const KEY_ACTIONS = {
-  camera: ['cameraForward', 'cameraBack', 'cameraLeft', 'cameraRight'],
-  commands: ['eject', 'dropLeft', 'dropRight', 'attackMove', 'guard', 'patrol', 'cancel', 'move', 'stop', 'deleteUnit', 'stanceRanged', 'stanceMelee',
-    'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair', 'rotateBuilding',
-    'idleCrew', 'idleBuilder', 'fullscreen', 'diplomacy'],
+  camera: KEY_CATEGORIES.find((c) => c.id === 'camera').actions,
+  commands: KEY_CATEGORIES.filter((c) => c.id !== 'camera').flatMap((c) => c.actions),
 };
 // Keys reserved for the camera: never allowed on command actions (WASD + arrows)
 export const CAMERA_RESERVED_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
@@ -1137,17 +1169,57 @@ export const HUD = {
   hpThresholds: { warn: 0.5, critical: 0.01 },
   // Option grid (left): building, production inside buildings, robot parts
   optionGrid: { columns: 4, rows: 4 },
-  // Command grid (bottom left): command name per slot, row by row; null = empty slot
+  // Command grid (bottom left): FIXED layout per unit kind, row by row (4 columns); null = no button. Nothing is
+  // rearranged at runtime. All kinds share one master slot map, so a command sits on the same slot for every kind:
+  //   row 1 movement (move, attackMove, guard, patrol) · row 2 behaviours + delete · row 3 mech-only (stance, repair)
+  //   and builder-only (repairUnit) · row 4 empty except stop (= "Cancel order") on the last slot, bottom right.
+  // Repair / repairUnit do NOT share a slot with ranged / melee: one mech can have both stance (mixed weapons) and repair.
+  // A selection of several kinds shows the overlay of their layouts (slot by slot, no collisions by construction).
+  // Kinds: mech · crew · vehicle (any vehicle) · repairVehicle (vehicle with the repair ability) · combatVehicle (armed
+  // vehicle, takes combat orders) · structure (own building: only delete). A command whose kind is not selected is hidden.
+  // eject / dropLeft / dropRight are not in the grid: robot panel EJECT buttons + KEYBINDINGS (eject = E, drop arms
+  // have no default key, the player binds them in Settings → Controls).
   commandGrid: {
     columns: 4,
-    layout: [
-      // eject / dropLeft / dropRight are not in the grid any more: robot panel EJECT buttons + KEYBINDINGS (eject = E,
-      // dropLeft / dropRight have no default key, the player binds them in Settings → Controls)
-      'move', 'attackMove', 'guard', 'patrol',
-      'stop', 'stanceRanged', 'stanceMelee', 'repairUnit',
-      'deleteUnit', 'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive',
-      'repair',
-    ],
+    hotkeyMaxLength: 3,      // key hints longer than this (e.g. "Delete") are only in the tooltip, not in the cell corner
+    layouts: {
+      mech: [
+        'move', 'attackMove', 'guard', 'patrol',
+        'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'deleteUnit',
+        'stanceRanged', 'stanceMelee', 'repair', null,
+        null, null, null, 'stop',
+      ],
+      crew: [
+        'move', null, null, null,
+        null, 'behaviourDefensive', 'behaviourPassive', 'deleteUnit',
+        null, null, null, null,
+        null, null, null, 'stop',
+      ],
+      vehicle: [
+        'move', null, null, null,
+        null, null, null, 'deleteUnit',
+        null, null, null, null,
+        null, null, null, 'stop',
+      ],
+      repairVehicle: [
+        null, null, null, null,
+        null, null, null, null,
+        null, null, null, 'repairUnit',
+        null, null, null, null,
+      ],
+      combatVehicle: [
+        'move', 'attackMove', 'guard', 'patrol',
+        'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'deleteUnit',
+        null, null, null, null,
+        null, null, null, 'stop',
+      ],
+      structure: [
+        null, null, null, null,
+        null, null, null, 'deleteUnit',
+        null, null, null, null,
+        null, null, null, null,
+      ],
+    },
   },
   // Command icons (text glyphs – replace with images later)
   commandIcons: {
@@ -1279,8 +1351,23 @@ export const HUD_PANELS = {
  * OreDeposit.js, src/units/Vehicle.js, Structure.js, src/ui/BuildMenu.js.
  */
 export const ECONOMY = {
-  energyCaps: [200, 400, 600, 800, 1000], // new-game choice of the energy storage cap (world.settings.economy.energyCap)
+  // new-game choice of the energy storage cap (world.settings.economy.energyCap); 'infinite' = no cap
+  energyCaps: [200, 400, 600, 800, 1000, 1500, 2000, 'infinite'],
   defaultEnergyCap: 400,
+  // [W5b] new-game choice of the population limit on top of the population of buildings
+  // (world.settings.economy.populationCap); 'infinite' = no extra limit (behaviour before W5b)
+  populationCaps: [100, 200, 300, 400, 500, 'infinite'],
+  defaultPopulationCap: 'infinite',
+  infinite: 'infinite',                    // settings value of an unlimited cap (JSON-safe, unlike Infinity)
+  // [W5b] with an unlimited energy cap the shares of the cap (start energy, low energy, AI stock shares) are taken
+  // of this reference cap (+ the team's EnergyBank storage) instead
+  infiniteCapReference: 400,
+  // [W5b] infinite resources: every non-energy account (and energy with an unlimited cap) holds this fixed amount
+  // (AI reads a real number); the UI shows it as ∞ (src/ui/formatAmount.js)
+  infiniteAmount: 99999999999999,
+  // [W5b] resources of a cost paid only when the item really starts (production / research: first in its queue;
+  // construction: the first builder works on it) – queued items take none of it
+  deferredResources: ['energy'],
   messageTime: 2.5,                        // s a "not enough resources" message stays on screen
 };
 
@@ -1803,3 +1890,24 @@ export const AIR = {
   },
 };
 // --- [N7] end ---
+
+// --- [W7] mech collision bodies: shoulder circle + foot circle (Movement / Pathfinding – docs/notes/w7-crew-collision.md) ---
+// A mech has two circles: `radius` (shoulders: body + arms, unchanged) touches other mechs and everything as tall as
+// its shoulders or taller; `footRadius` (legs only) touches everything lower (crews, vehicles, low buildings / walls,
+// rifts). Both are measured from the model in ModularMech.#createRings; data may override them per part
+// (parts.<set>.legs.collision.footRadius, parts.<set>.torso.collision.shoulderHeight).
+export const MECH_COLLISION = {
+  footRadiusFactor: 0.48,            // foot radius = larger side of the legs' bounding box × this (= MOVEMENT.bodyRadiusFactor)
+  minFootRadius: 3,                  // units – foot radius never smaller than this
+  shoulderHeightFactor: 1,           // shoulder height = arm-socket height above the feet × this
+  unknownObstacleHeight: Infinity,   // height of a pathfinding obstacle without a known height (rocks, ridges, ore cores): tall
+};
+// --- [W7] end ---
+
+// --- [18] procedural buildings (src/procedural, docs/notes/proc-style-kit.md) ---
+// A structure with a procedural model (src/procedural/registry.js) uses it instead of its GLB; the footprint still
+// comes from the GLB. `window.steelMans.procedural = false` (before a building loads) switches back for comparison.
+export const PROC_BUILDINGS = {
+  enabled: true,
+};
+// --- [18] end ---

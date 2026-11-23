@@ -19,6 +19,7 @@ import { playerLabel } from '../core/PlayerLabels.js';
 import { raceName } from '../data/Stats.js';
 import { isConfirmDialogOpen } from './ConfirmDialog.js';
 import { playerAvatarHtml } from './Avatar.js';
+import { formatAmount } from './formatAmount.js';
 import { onLanguageChange, t } from '../i18n/i18n.js';
 
 const U = DIPLOMACY.ui;
@@ -194,7 +195,7 @@ export class DiplomacyView {
     const me = localTeam();
     const own = this.el.querySelector('[data-own]');
     if (own && eco) {
-      own.textContent = t('dip.own', { list: eco.resources.map((r) => `${t(`hud.${r}`)} ${Math.floor(eco.amount(me, r))}`).join(', ') });
+      own.textContent = t('dip.own', { list: eco.resources.map((r) => `${t(`hud.${r}`)} ${formatAmount(eco.amount(me, r))}`).join(', ') });
     }
     for (const cell of this.el.querySelectorAll('[data-state-of]')) {
       const team = Number(cell.dataset.stateOf);

@@ -1,0 +1,8 @@
+/* [W4] Game cursors. CommandInput.js sets style.cursor to var(--cursor-mine) / var(--cursor-attack).
+   Fallbacks (copy / crosshair) apply when the variable is missing or the image fails to load. */
+:root {
+  /* Same glyph as the ore icon in the resource bar (ui/Hud.js ICONS.ore). Change both together, or move the glyph to config. */
+  --cursor-mine: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Ctext x='16' y='25' font-size='24' text-anchor='middle'%3E%E2%9B%8F%3C/text%3E%3C/svg%3E") 16 16, copy;
+  /* Crosshair: ring + cross, red with dark outline for contrast */
+  --cursor-attack: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' fill='none'%3E%3Cg stroke='%23000' stroke-width='5'%3E%3Ccircle cx='16' cy='16' r='9'/%3E%3Cpath d='M16 2v9M16 21v9M2 16h9M21 16h9'/%3E%3C/g%3E%3Cg stroke='%23ff3030' stroke-width='2'%3E%3Ccircle cx='16' cy='16' r='9'/%3E%3Cpath d='M16 2v9M16 21v9M2 16h9M21 16h9'/%3E%3C/g%3E%3C/svg%3E") 16 16, crosshair;
+}

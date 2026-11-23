@@ -108,15 +108,17 @@ export function playerAvatarHtml(team, color, place = 'menu') {
 }
 
 /** Crops / scales a picture source (bitmap or image) to a size x size JPEG data URL, first quality step that fits maxLength */
-function squareData(source, width, height, size, steps, maxLength) {
-  const side = Math.min(width, height);
-  if (!side) return null;
+function squareData(source, width, height, size, steps, maxLength, crop = null) {
+  const side = crop ? crop.side : Math.min(width, height);
+  if (!(side > 0)) return null;
+  const sx = crop ? crop.sx : (width - side) / 2;
+  const sy = crop ? crop.sy : (height - side) / 2;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const g = canvas.getContext('2d');
   g.fillStyle = H.background; // transparent PNGs would turn black in a JPEG
   g.fillRect(0, 0, size, size);
-  g.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, size, size);
+  g.drawImage(source, sx, sy, side, side, 0, 0, size, size);
   for (const q of steps) {
     const url = canvas.toDataURL(H.mime, q);
     if (cleanAvatarImage(url, maxLength)) return url;
@@ -150,6 +152,28 @@ export async function fileToAvatarData(file) {
   try {
     bitmap = await createImageBitmap(file);
     return squareData(bitmap, bitmap.width, bitmap.height, H.size, H.qualitySteps, H.maxDataLength);
+  } catch {
+    return null;
+  } finally {
+    bitmap?.close?.();
+  }
+}
+
+/**
+ * Like fileToAvatarData, but the user first picks the square in a crop dialog (drag + zoom, AvatarCropper.js).
+ * @returns {Promise<string|null|undefined>} data URL; null = not an image / too big / undecodable (show the error);
+ *   undefined = the user cancelled the dialog (change nothing)
+ */
+export async function pickAvatarData(file) {
+  if (!file || !String(file.type).startsWith('image/') || file.size > H.maxFileBytes) return null;
+  let bitmap = null;
+  try {
+    bitmap = await createImageBitmap(file);
+    if (!bitmap.width || !bitmap.height) return null;
+    const { openAvatarCropper } = await import('./AvatarCropper.js');
+    const crop = await openAvatarCropper(bitmap);
+    if (!crop) return undefined;
+    return squareData(bitmap, bitmap.width, bitmap.height, H.size, H.qualitySteps, H.maxDataLength, crop);
   } catch {
     return null;
   } finally {

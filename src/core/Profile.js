@@ -1,7 +1,7 @@
 // Steel Mans – local player profile in localStorage (one key, PROFILE.storageKey).
 // Holds nickname, language, settings (keys, mouse, audio, graphics, ui) and the last new-game choice.
 // Storage may be blocked or hold garbage: everything falls back to defaults, nothing throws.
-import { PROFILE, SETTINGS_DEFAULTS, ORE_MULTIPLIER } from '../config.js';
+import { PROFILE, SETTINGS_DEFAULTS, ORE_MULTIPLIER, GRAPHICS } from '../config.js';
 import { cleanAvatarImage } from './PlayerLabels.js';
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -26,6 +26,42 @@ function sanitize(defaults, data) {
   return out;
 }
 
+// ---------- graphics (quality preset + advanced options) ----------
+
+const ADV_KEYS = Object.keys(GRAPHICS.advanced);
+
+/** The advanced options of a preset (a fresh object), unknown id = Full */
+export function graphicsPresetOptions(id) {
+  const p = GRAPHICS.presets[id] ?? GRAPHICS.presets.full;
+  return Object.fromEntries(ADV_KEYS.map((k) => [k, p[k]]));
+}
+
+/** Preset id whose options equal `advanced`, or GRAPHICS.customQuality when none does */
+export function graphicsPresetOf(advanced) {
+  return GRAPHICS.qualities.find((q) => ADV_KEYS.every((k) => advanced[k] === GRAPHICS.presets[q][k])) ?? GRAPHICS.customQuality;
+}
+
+/** Valid advanced options: every key present, a value outside the allowed choices falls back to `fallback` (Full by default) */
+function cleanAdvanced(data, fallback = graphicsPresetOptions('full')) {
+  return Object.fromEntries(ADV_KEYS.map((k) => {
+    const spec = GRAPHICS.advanced[k];
+    const v = data?.[k];
+    const ok = spec.type === 'boolean' ? typeof v === 'boolean' : spec.values.includes(v);
+    return [k, ok ? v : fallback[k]];
+  }));
+}
+
+/** Settings graphics group made consistent: an old profile (only `quality`) takes over that preset's options;
+ *  `quality` is always derived from the options, so it is 'custom' when they match no preset */
+function normalizeGraphics(g) {
+  const legacy = GRAPHICS.qualities.includes(g?.quality) ? g.quality : 'full';
+  const advanced = cleanAdvanced(g?.advanced, graphicsPresetOptions(legacy));
+  return { quality: graphicsPresetOf(advanced), advanced };
+}
+
+/** Advanced graphics options in effect (the same shape as a GRAPHICS preset, without antialiasHint) */
+export const getGraphicsOptions = (graphics = getSettings().graphics) => cleanAdvanced(graphics?.advanced);
+
 function defaults() {
   return { version: PROFILE.version, settings: clone(SETTINGS_DEFAULTS), newGame: null };
 }
@@ -48,6 +84,7 @@ function load() {
   if (stored) {
     profile.settings = sanitize(SETTINGS_DEFAULTS, stored.settings);
     profile.settings.avatar = cleanAvatarImage(profile.settings.avatar); // [UISMALL] hand-edited garbage becomes the silhouette
+    profile.settings.graphics = normalizeGraphics(isObject(stored.settings) ? stored.settings.graphics : null); // old profiles: only `quality`
     profile.newGame = isObject(stored.newGame) ? stored.newGame : null;
   } else {
     // First run with the profile: take over the last new-game choice from the older key

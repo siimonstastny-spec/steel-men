@@ -8,9 +8,11 @@
 //     appears in the world (Production.#tickGather) and is active at once (BAY_CREW.boardInstantly).
 //   • Command 'releaseBayCrew' (Production.#planBayCrew) lets all queued crews out around the bay (free spawn spots).
 //     A destroyed / lost bay lets them out too (Production.update → releaseLostBays).
-//   • Kept apart from the bay service (Repair.js): the serviced mech's crew stands outside (bay.service.crew) and
-//     never enters the queue by itself, the queue never feeds a serviced mech, and a mech is only assembled while no
-//     mech is serviced – so the two never meet. See the note for details.
+//   • Bay service (Repair.js): [W7] the serviced mech's crew goes into the queue with it when there is room (it counts
+//     towards the capacity like any queued crew and can be let out); when the service ends the mech takes exactly that
+//     crew back (takeThisCrew) and is active at once (BAY_CREW.boardInstantly). Without room the crew stands outside
+//     as before (bay.service.crew). The queue never feeds a serviced mech by itself, and a mech is only assembled
+//     while no mech is serviced. See docs/notes/n2-baycrew.md and w7-crew-collision.md.
 //
 // Deterministic: called only from command executors and simulation ticks, iteration in queue / eid order.
 import { BAY_CREW } from '../config.js';
@@ -69,6 +71,20 @@ export function takeCrew(bay) {
   const crew = bayCrews(bay).shift() ?? null;
   if (crew) crew.bay = null;
   return crew;
+}
+
+/**
+ * [W7] Takes this crew (wherever it is in the queue) out of the bay; it stays hidden, the caller boards it into a
+ * mech at once (the serviced mech's own crew when the service ends – Repair.releaseMech).
+ * @returns {boolean} false when the crew is not waiting in this bay
+ */
+export function takeThisCrew(bay, crew) {
+  const q = bayCrews(bay);
+  const i = q.indexOf(crew);
+  if (i < 0) return false;
+  q.splice(i, 1);
+  crew.bay = null;
+  return true;
 }
 
 /**
