@@ -1,6 +1,7 @@
 // Steel Mans – map preview canvas (New game menu, lobby): minimap-style picture of a map with clickable start
 // positions. A start shows the seat that picked it (team colour + seat number). Clicks call onPick(startIndex).
-import { MAPS } from '../config.js';
+import { MAPS, MAP_PLANET_I18N_PREFIX } from '../config.js';
+import { t } from '../i18n/i18n.js';
 import { drawMapBackground } from './Minimap.js';
 
 const P = MAPS.preview;
@@ -79,6 +80,16 @@ export class MapPreview {
         ctx.fillText(mark.label, x, y + 0.5);
       }
     });
+    if (this.map.planetId) { // planet name, bottom-left corner
+      ctx.font = P.planetLabelFont;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.shadowColor = P.planetLabelShadow;
+      ctx.shadowBlur = 3;
+      ctx.fillStyle = P.planetLabelColor;
+      ctx.fillText(t(MAP_PLANET_I18N_PREFIX + this.map.planetId), P.planetLabelPad, P.size - P.planetLabelPad);
+      ctx.shadowBlur = 0;
+    }
   }
 
   dispose() {

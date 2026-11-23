@@ -56,8 +56,9 @@ export class MainMenu {
    * @param {(startInfo: {settings: object, seats: object[], seed: number, localTeam: number, startAtMs: number},
    *          net: {transport: object, lobby: object}) => void} [opts.onMultiplayerStart]  lobby started a game
    */
-  constructor(el, { races, teams, onStart, multiplayer = null, onMultiplayerStart = null }) {
+  constructor(el, { races, teams, onStart, multiplayer = null, onMultiplayerStart = null, loading = null }) {
     this.el = el;
+    this.loading = loading; // [W6] LoadingScreen (src/ui/LoadingScreen.js): shown from Start until onStart / onMultiplayerStart settle
     this.races = races;
     this.teams = teams;
     this.maxPlayers = teams.length; // [N5b] seats of the new-game menu (TEAMS.length)
@@ -434,7 +435,7 @@ export class MainMenu {
       multiplayer: this.multiplayer,
       races: this.races,
       teams: this.teams,
-      onStart: (info, net) => { this.show(false); this.onMultiplayerStart?.(info, net); },
+      onStart: (info, net) => { this.#launch(() => this.onMultiplayerStart?.(info, net)); },
       onBack: () => this.show('home'),
       onUnavailable: () => { this.mpUnavailable = true; this.#refreshMultiplayerButton(); if (this.screen === 'lobby') this.show('home'); },
     });
@@ -596,7 +597,20 @@ export class MainMenu {
     };
     // The profile keeps the whole menu state (all seats and the raw alliance ids), not only the seats in play
     saveNewGame(this.settings); // saveNewGame clones
+    this.#launch(() => this.onStart?.(settings));
+  }
+
+  /**
+   * [W6] Hides the menu and covers the screen with the loading screen until `start()` (a promise from main.js:
+   * the match is built, in multiplayer every player is loaded) settles. Without a loading screen: as before.
+   */
+  #launch(start) {
+    const loading = this.loading;
+    loading?.show();
     this.show(false);
-    this.onStart?.(settings);
+    (async () => {
+      await loading?.painted; // the overlay is drawn before the heavy work starts
+      try { await start(); } finally { loading?.hide(); }
+    })().catch((err) => console.error(err));
   }
 }

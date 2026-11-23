@@ -10,7 +10,7 @@
 //   above units   health / progress bars (UnitOverlays), wreck tooltip under the cursor
 // --hud-scale (unitless, on :root) = clamp(min(W / 1920, H / 1080), HUD_V2.scaleMin, HUD_V2.scaleMax), updated on resize.
 import * as THREE from 'three';
-import { HUD, HUD_V2, ECONOMY_ALERTS, KEYBINDINGS, SIM, GAME_CLOCK, GAME_SPEED, IDLE_BUILDER } from '../config.js';
+import { HUD, HUD_V2, ECONOMY_ALERTS, KEYBINDINGS, SIM, GAME_CLOCK, GAME_SPEED, IDLE_BUILDER, IDLE_DRILL } from '../config.js';
 import { localTeam } from '../core/LocalPlayer.js';
 import { getSettings } from '../core/Profile.js';
 import { formatGameTime, gameSpeed, speedLabel } from '../game/GameSpeed.js';
@@ -18,19 +18,20 @@ import { getStats } from '../data/Stats.js';
 import { t, getLanguage } from '../i18n/i18n.js';
 import { keyLabel, TARGETED_ORDERS } from '../input/CommandInput.js';
 import { OptionGrid } from './OptionGrid.js';
+import { setHtmlKeepScroll } from './scrollKeep.js';
 import { SelectionPanel } from './SelectionPanel.js';
 import { UnitOverlays } from './UnitOverlays.js';
 import { OrderQueueMarkers } from './OrderQueueMarkers.js';
 import { Pings } from './Pings.js'; // [N7] map pings, lost-part alerts
-import { ProductionQueue, progressOf } from './ProductionQueue.js';
+import { ProductionQueue } from './ProductionQueue.js';
+import { QueueFrame } from './QueueFrame.js'; // [W3] all queues of the player in a frame above the statistics
 import { esc, wreckInfo } from './hudUtil.js';
 import { formatAmount } from './formatAmount.js';
 
 const ICONS = { ore: '⛏', energy: '⚡', population: '👥', idleCrew: '👷' };
 const GROUP_COUNT = 9;
-const PERCENT = 100;
 const GEOMETRY_VARS = ['--hud-prod-y', '--hud-prod-top-h', '--hud-prod-bottom-h', '--hud-prod-row-h', '--hud-prod-col-y', '--hud-idle-from-bottom',
-  '--hud-ml', '--hud-mr', '--hud-mt', '--hud-mb', '--hud-idle-scale', '--hud-backdrop'];
+  '--hud-ml', '--hud-mr', '--hud-mt', '--hud-mb', '--hud-idle-left', '--hud-idle-size', '--hud-idle-gap', '--hud-backdrop'];
 // Command grid cells highlighted when the selection has this behaviour
 const BEHAVIOUR_CELLS = { behaviourAggressive: 'aggressive', behaviourDefensive: 'defensive', behaviourPassive: 'passive' };
 
@@ -68,6 +69,8 @@ export class Hud {
     this.idleBuilderHandler = () => this.selectNextIdleBuilder();
     this.input.onIdleCrew = this.idleCrewHandler;
     this.input.onIdleBuilder = this.idleBuilderHandler;
+    this.idleDrillHandler = () => this.selectNextIdleDrill();     // KEYBINDINGS.idleDrill (CommandInput.onIdleDrill)
+    this.input.onIdleDrill = this.idleDrillHandler;
     this.dom = dom;
     this.focus = focus;
     this.pointerOnCanvas = false; // the wreck tooltip hides while the cursor is over a panel
@@ -77,7 +80,6 @@ export class Hud {
     this.prodFree = 0;         // base px the production panel may grow beyond production_top + production_bottom (stays above the idle buttons)
     this.prodMid = -1;         // mid strip height currently set (--hud-prod-mid, base px)
     this.layoutDirty = true;   // grid extras or queue changed: re-measure the panel (refresh)
-    this.activeSet = new Set(); // recycled: production items in progress
     this.cmdSlots = new Array(HUD.commandGrid.layouts.mech.length).fill(null); // recycled: command grid slots of the current selection
     // Recycled command grid state: one item + one shared-per-slot onClick created once; signature of the last render
     const cmdCount = this.cmdSlots.length;
@@ -101,12 +103,19 @@ export class Hud {
     this.idleIndex = 0;
     this.idleBuilderTime = new WeakMap(); // builder vehicle -> seconds without an order
     this.idleBuilderIndex = 0;
+    this.idleDrillTime = new WeakMap(); // drill truck -> seconds without an order
+    this.idleDrillIndex = 0;
     this.timer = 0;
 
     this.#createLayout();
     this.optionGrid = new OptionGrid(this.el.optionGrid, { columns: HUD.optionGrid.columns, minRows: 0 });
     const cmd = HUD.commandGrid;
     this.commandGrid = new OptionGrid(this.el.commandGrid, { columns: cmd.columns, minRows: Math.ceil(cmd.layouts.mech.length / cmd.columns) });
+    this.queueFrame = new QueueFrame({
+      world, queue: this.queue, parent: this.root, spawnPoint,
+      focusAt: (x, z) => this.focus?.(new THREE.Vector3(x, this.world.heightAt(x, z), z)),
+      onChange: () => this.refresh(),
+    });
     this.selectionPanel = new SelectionPanel(this.el.selection, { input, world });
     this.overlays = new UnitOverlays({ world, camera, dom, input, queue: this.queue, spawnPoint });
     this.orderMarkers = new OrderQueueMarkers({ world, input }); // Shift order queue on the ground
@@ -130,7 +139,8 @@ export class Hud {
     window.removeEventListener('resize', this.onResize);
     if (this.input.onIdleCrew === this.idleCrewHandler) this.input.onIdleCrew = null;
     if (this.input.onIdleBuilder === this.idleBuilderHandler) this.input.onIdleBuilder = null;
-    for (const part of [this.selectionPanel, this.overlays, this.orderMarkers, this.pings]) part?.dispose?.();
+    if (this.input.onIdleDrill === this.idleDrillHandler) this.input.onIdleDrill = null;
+    for (const part of [this.queueFrame, this.selectionPanel, this.overlays, this.orderMarkers, this.pings]) part?.dispose?.();
     this.root.remove();
     this.el.message.remove();
     this.el.tooltip.remove();
@@ -156,7 +166,9 @@ export class Hud {
     style.setProperty('--hud-mr', String(b.right));
     style.setProperty('--hud-mt', String(b.top));
     style.setProperty('--hud-mb', String(b.bottom));
-    style.setProperty('--hud-idle-scale', String(HUD_V2.idleButtonScale));
+    style.setProperty('--hud-idle-left', String(HUD_V2.idleButton.left));
+    style.setProperty('--hud-idle-size', String(HUD_V2.idleButton.size));
+    style.setProperty('--hud-idle-gap', String(HUD_V2.idleButton.gap));
     style.setProperty('--hud-backdrop', String(HUD_V2.frameBackdrop));
   }
 
@@ -230,7 +242,7 @@ export class Hud {
 
   refresh() {
     this.#renderResources();
-    this.#renderQueue();
+    this.queueFrame.update();
     this.#renderGroups();
     this.#renderOptionGrid();
     this.#renderCommandGrid();
@@ -268,13 +280,13 @@ export class Hud {
       <div class="hud-popup hud-help" data-el="help" hidden></div>
       <div class="hud-prod" data-el="prod">
         <div class="hud-prod-art"><i class="t"></i><i class="m"></i><i class="b"></i></div>
-        <div class="hud-prod-col" data-el="prodCol">
+        <div class="hud-prod-col" data-el="prodCol" data-scroll-key="prodCol">
           <div data-el="optionGrid"></div>
-          <div class="hud-queue" data-el="queue"></div>
         </div>
       </div>
       <button class="hud-idle hud-idle-crew" data-el="idle" hidden></button>
       <button class="hud-idle hud-idle-builder" data-el="idleBuilder" hidden></button>
+      <button class="hud-idle hud-idle-drill" data-el="idleDrill" hidden></button>
       <div class="hud-cmd" data-el="commandGrid"></div>
       <div class="hud-bottom-center"><div data-el="selection"></div></div>`;
     document.body.appendChild(root);
@@ -291,8 +303,6 @@ export class Hud {
     this.el.tooltip = tip;
 
     // pointerdown: panels are refreshed several times a second, a click could fall between two refreshes
-    this.el.queue.addEventListener('pointerdown', (e) => this.#onQueuePointer(e));
-    this.el.queue.addEventListener('contextmenu', (e) => e.preventDefault());
     this.el.groups.addEventListener('pointerdown', (e) => {
       const n = e.target.closest('[data-group]')?.dataset.group;
       if (n === undefined || e.button !== 0) return;
@@ -301,6 +311,7 @@ export class Hud {
     });
     this.el.idle.addEventListener('pointerdown', (e) => { if (e.button === 0) { e.preventDefault(); this.selectNextIdleCrew(); } });
     this.el.idleBuilder.addEventListener('pointerdown', (e) => { if (e.button === 0) { e.preventDefault(); this.selectNextIdleBuilder(); } });
+    this.el.idleDrill.addEventListener('pointerdown', (e) => { if (e.button === 0) { e.preventDefault(); this.selectNextIdleDrill(); } });
     this.el.dipBtn.addEventListener('pointerdown', (e) => { if (e.button === 0) { e.preventDefault(); this.diplomacy?.toggle(); } });
     this.el.helpBtn.title = t('hud.help');
     this.el.helpBtn.addEventListener('pointerdown', (e) => {
@@ -354,37 +365,7 @@ export class Hud {
       + res('population', ICONS.population, `${used}/${formatAmount(cap)}`, false, t('hud.population'), used >= cap));
   }
 
-  /** Queue under the grid: one 40 px row per item, always all of them (max HUD.production.maxQueue per producer). When they
-   *  do not fit, the column of the production panel scrolls inside the panel (max-height), so every item can be cancelled. */
-  #renderQueue() {
-    const items = this.queue.items;
-    const shown = items.length;
-    const active = this.activeSet;
-    active.clear();
-    for (const it of this.queue.active) active.add(it);
-    let html = '';
-    for (let i = 0; i < shown; i++) {
-      const it = items[i];
-      const pct = active.has(it) ? progressOf(it) * PERCENT : 0;
-      const left = Math.max(0, it.total - it.elapsed).toFixed(0);
-      html += `<div class="hud-qitem ${active.has(it) ? '' : 'waiting'}" data-q="${it.id}" title="${esc(it.label)} – ${left} s · ${esc(t('hud.queue.hint'))}">`
-        + `<span class="ico">${it.icon}</span><span class="nm">${esc(it.label)}</span><span class="tm">${left} s</span>`
-        + `<span class="bar" style="width:${pct}%"></span></div>`;
-    }
-    if (this.#set(this.el.queue, html)) this.layoutDirty = true;
-  }
-
-  #onQueuePointer(e) {
-    const id = Number(e.target.closest('[data-q]')?.dataset.q);
-    if (!id) return;
-    e.preventDefault();
-    const item = this.queue.items.find((i) => i.id === id);
-    if (!item) return;
-    if (e.button === 2) { this.queue.cancel(id); this.refresh(); return; }
-    // Camera to the production site: the building later, now the spawn point of the producer
-    const p = this.spawnPoint?.(item.producer);
-    if (p && e.button === 0) this.focus?.(new THREE.Vector3(p.x, this.world.heightAt(p.x, p.z), p.z));
-  }
+  // The production queues (and the builders' constructions) are shown by QueueFrame (src/ui/QueueFrame.js)
 
   // ---------- top right: control groups ----------
 
@@ -411,11 +392,11 @@ export class Hud {
     const page = this.buildMenu?.view() ?? null;
     const hasOptions = Boolean(page) && (Boolean(page.tabs?.length) || Boolean(page.summary?.length) || Boolean(page.action)
       || page.items?.some(Boolean));
-    const show = hasOptions || this.queue.items.length > 0; // nothing to choose and nothing queued: no panel
+    const show = hasOptions; // nothing to choose: no panel (the queues have their own frame, QueueFrame)
     if (this.el.prod.hidden === show) { this.el.prod.hidden = !show; this.layoutDirty = true; }
     if (!show) return;
     const before = this.optionGrid.signature;
-    this.optionGrid.show(hasOptions ? page : { title: page?.title ?? t('hud.queue.title'), items: [] });
+    this.optionGrid.show(page);
     if (this.optionGrid.signature !== before) this.layoutDirty = true; // tabs may have changed the height
   }
 
@@ -491,17 +472,41 @@ export class Hud {
     for (const v of this.world.vehicles) { // builders: no order = neither building nor repairing nor moving
       const idle = v.team === localTeam() && !v.dead && v.canConstruct && !v.order;
       this.idleBuilderTime.set(v, idle ? (this.idleBuilderTime.get(v) ?? 0) + dt : 0);
+      // drill trucks: a mining truck keeps its harvest order, so no order = standing
+      const drillIdle = v.team === localTeam() && !v.dead && !!v.harvester && !v.order;
+      this.idleDrillTime.set(v, drillIdle ? (this.idleDrillTime.get(v) ?? 0) + dt : 0);
     }
   }
 
+  // The idle lists are read several times per refresh: one recycled array per class (valid until the next read)
+  get idleDrills() {
+    const out = (this.idleDrillList ??= []);
+    out.length = 0;
+    const team = localTeam();
+    for (const v of this.world.vehicles) {
+      if (v.team === team && !v.dead && !!v.harvester && (this.idleDrillTime.get(v) ?? 0) >= IDLE_DRILL.minIdleTime) out.push(v);
+    }
+    return out;
+  }
+
   get idleBuilders() {
-    return this.world.vehicles.filter((v) => v.team === localTeam() && !v.dead && v.canConstruct
-      && (this.idleBuilderTime.get(v) ?? 0) >= IDLE_BUILDER.minIdleTime);
+    const out = (this.idleBuilderList ??= []);
+    out.length = 0;
+    const team = localTeam();
+    for (const v of this.world.vehicles) {
+      if (v.team === team && !v.dead && v.canConstruct && (this.idleBuilderTime.get(v) ?? 0) >= IDLE_BUILDER.minIdleTime) out.push(v);
+    }
+    return out;
   }
 
   get idleCrews() {
-    return this.world.crews.filter((c) => c.team === localTeam() && !c.dead && !c.inside
-      && (this.idleTime.get(c) ?? 0) >= HUD.idleCrew.minIdleTime);
+    const out = (this.idleCrewList ??= []);
+    out.length = 0;
+    const team = localTeam();
+    for (const c of this.world.crews) {
+      if (c.team === team && !c.dead && !c.inside && (this.idleTime.get(c) ?? 0) >= HUD.idleCrew.minIdleTime) out.push(c);
+    }
+    return out;
   }
 
   #renderIdle() {
@@ -513,6 +518,21 @@ export class Hud {
     this.el.idleBuilder.hidden = builders === 0;
     this.#set(this.el.idleBuilder, `${IDLE_BUILDER.icon}<b>${builders}</b>`);
     this.el.idleBuilder.title = t('idle.builders.title', { count: builders });
+    const drills = this.idleDrills.length;
+    this.el.idleDrill.hidden = drills === 0;
+    this.#set(this.el.idleDrill, `${IDLE_DRILL.icon}<b>${drills}</b>`);
+    this.el.idleDrill.title = t('idle.drills.title', { count: drills });
+  }
+
+  /** Selects the next idle drill truck (cycles) and centres the camera on it */
+  selectNextIdleDrill() {
+    const list = this.idleDrills;
+    if (!list.length) return;
+    this.idleDrillIndex = (this.idleDrillIndex + 1) % list.length;
+    const truck = list[this.idleDrillIndex];
+    this.input.select(truck);
+    this.focus?.(truck.position.clone());
+    this.refresh();
   }
 
   /** Selects the next idle builder (cycles) and centres the camera on it */
@@ -572,7 +592,7 @@ export class Hud {
   #set(el, html) {
     if (el._html === html) return false;
     el._html = html;
-    el.innerHTML = html;
+    setHtmlKeepScroll(el, html); // scroller of the production column (data-scroll-key) must not jump to the top
     return true;
   }
 }

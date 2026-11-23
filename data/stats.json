@@ -30,7 +30,7 @@
       "builderRange": 10,
       "startHpFraction": 0.1
     },
-    "production": { "cancelRefund": 1 },
+    "production": { "cancelRefund": 1, "partSellFactor": 0.5 },
     "diplomacy": { "tributeLoss": 0.25 },
     "research": {
       "tiers": {
@@ -86,6 +86,16 @@
         ]
       },
       "minHitChance": 0.05,
+      "accuracy": {
+        "optimalRangeFactor": 0.4,
+        "longRangeFactor": 0.7,
+        "movingPenalty": 0.25,
+        "movingRefSize": 3,
+        "homingIgnoresMoving": true,
+        "meleeAccuracyFactor": 0.9,
+        "missScatterRangeFactor": 0.05,
+        "missHitsInPath": true
+      },
       "hitLocationWeights": { "torso": 0.4, "legs": 0.3, "leftArm": 0.15, "rightArm": 0.15 },
       "brokenArmDetachChance": 0.1,
       "damageSyncThreshold": 0.4
@@ -404,7 +414,7 @@
     "HomingMissile": {
       "arm": { "cost": { "ore": 110, "energy": 40 }, "buildTime": 11, "hp": 75, "armor": { "physical": 10, "energy": 10 }, "mass": 22,
                "weapons": [{ "id": "homingMissile", "damage": { "physical": 30, "energy": 0 }, "range": 90, "minRange": 15, "attackTime": 1.5, "cooldown": 3, "projectileSpeed": 90, "projectileSize": 1.2, "projectileShape": "missile",
-                             "splashRadius": 8, "accuracy": 1, "targets": ["ground", "air"] }] }
+                             "splashRadius": 8, "accuracy": 1, "homing": true, "targets": ["ground", "air"] }] }
     },
     "KatanaSword": {
       "arm": { "cost": { "ore": 85, "energy": 10 }, "buildTime": 8, "hp": 85, "armor": { "physical": 15, "energy": 5 }, "mass": 16,
@@ -452,7 +462,7 @@
     "SniperLaser": {
       "arm": { "cost": { "ore": 120, "energy": 80 }, "buildTime": 12, "hp": 65, "armor": { "physical": 5, "energy": 20 }, "mass": 18,
                "requires": ["researchFacility"], "requiresResearch": ["plasmaWeapons"],
-               "weapons": [{ "id": "sniperLaser", "stopsToFire": true, "damage": { "physical": 0, "energy": 55 }, "range": 160, "attackTime": 2.0, "hitAt": 0.7, "cooldown": 4, "accuracy": 0.95 }] }
+               "weapons": [{ "id": "sniperLaser", "stopsToFire": true, "damage": { "physical": 0, "energy": 55 }, "range": 160, "attackTime": 2.0, "hitAt": 0.7, "cooldown": 4, "accuracy": 0.95, "accuracyLongFactor": 0.95 }] }
     }
   },
 
@@ -496,7 +506,7 @@
       "turret": { "socket": "socket_c6e5475c", "launchSocket": "socket_Launch_1", "turnSpeed": 120,
                   "models": { "X": "3DVehicles/07ffdb79.glb", "Y": "3DVehicles/cca308dc.glb", "Z": "3DVehicles/4a377a72.glb" } },
       "weapons": [{ "id": "carMissiles", "mount": "turret", "fireArc": 30, "damage": { "physical": 25, "energy": 0 }, "burst": 2, "range": 110, "minRange": 20, "attackTime": 1.5, "cooldown": 4,
-                    "projectileSpeed": 99, "projectileShape": "missile", "splashRadius": 4, "targets": ["ground", "air"] }]
+                    "projectileSpeed": 99, "projectileShape": "missile", "splashRadius": 4, "homing": true, "targets": ["ground", "air"] }]
     },
     "mobileArtillery": {
       "model": "3DVehicles/MobileArtillery{race}_Anim.glb", "modelScale": 0.85,
@@ -591,6 +601,7 @@
     "matterConverter": {
       "model": "3DStructures{race}/MatterConverter{race}_Anim.glb",
       "hq": true,
+      "builderFallback": "hoverTruck",
       "cost": { "ore": 600, "energy": 200 }, "buildTime": 90,
       "hp": 2500, "armor": { "physical": 60, "energy": 40 }, "sightRange": 120,
       "supplyProvided": 20,
@@ -664,7 +675,7 @@
       "cost": { "ore": 350, "energy": 250 }, "buildTime": 50,
       "hp": 1100, "armor": { "physical": 50, "energy": 40 }, "sightRange": 120,
       "requires": ["researchFacility"], "energyUse": 3,
-      "weapons": [{ "id": "railGun", "damage": { "physical": 120, "energy": 0 }, "range": 180, "attackTime": 1.0, "hitAt": 0.2, "cooldown": 6, "accuracy": 0.95 }]
+      "weapons": [{ "id": "railGun", "damage": { "physical": 120, "energy": 0 }, "range": 180, "attackTime": 1.0, "hitAt": 0.2, "cooldown": 6, "accuracy": 0.95, "accuracyLongFactor": 0.95 }]
     },
     "mobileWall": {
       "model": "3DStructures{race}/MobileWall{race}_Anim.glb", "modelScale": 1.5,

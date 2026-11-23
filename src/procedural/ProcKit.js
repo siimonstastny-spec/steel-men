@@ -5,12 +5,13 @@
 //     as bump map and diffuse detail (RGB: worn plates carry rust)
 //   • geometry builders (box, rounded box, tapered box, cylinder, cone, hazard strip, pipe run) and a PartBuilder that
 //     merges them into one BufferGeometry with box-projected world-scale UVs; GlowBuilder for additive glow layers
-//   • ref-counted caches: paint material per team colour + texture type, glow material per colour, textures
+//   • ref-counted caches: paint material per team colour + texture type, textures (glow materials: ProcModules GlowLayer)
 // Team colour: the material has no `map`, so core/TeamColor.applyTeamColor leaves it alone; the team colour is
 // the uniform uTeamColor (setTeamColor on the model). Visual only – nothing here is read by the simulation.
 // Style-aware modules (fans, beacons, cranes, emblem…) live in ProcModules.js.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { HIGHLIGHT, BUILDING_LOD } from '../config.js';
 
 /** Kit tuning (visual only) */
 export const PROC_KIT = {
@@ -18,7 +19,6 @@ export const PROC_KIT = {
   textureWorldSize: 6,     // model units covered by one texture tile
   textureSeed: 1337,
   defaultTexture: 'clean', // used for an unknown texture type
-  glowOpacity: 0.95,
   // Panel textures by type (style.texture). kind = painter; baseGrey = diffuse multiplier, detail = 0 texture
   // ignored in diffuse … 1 full multiply, bumpScale of the material; the rest are painter parameters (px / counts).
   textures: {
@@ -203,14 +203,41 @@ function paintCircuit(ctx, size, rng, o) {
 
 const PAINTERS = { plates: paintPlates, hex: paintHex, circuit: paintCircuit };
 
-function createPanelTexture(type) {
+let textureSizeNow = PROC_KIT.textureSize;   // px, changed by setPanelTextureSize (building quality level)
+
+// Painted always at PROC_KIT.textureSize (painter parameters are in px of that size), smaller sizes are downscaled copies
+function paintPanelCanvas(type) {
   const o = PROC_KIT.textures[type];
-  const size = PROC_KIT.textureSize;
+  const full = PROC_KIT.textureSize;
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  PAINTERS[o.kind](ctx, size, makeRng(PROC_KIT.textureSeed), o);
-  const tex = new THREE.CanvasTexture(canvas);
+  canvas.width = canvas.height = full;
+  PAINTERS[o.kind](canvas.getContext('2d'), full, makeRng(PROC_KIT.textureSeed), o);
+  if (textureSizeNow === full) return canvas;
+  const small = document.createElement('canvas');
+  small.width = small.height = textureSizeNow;
+  const ctx = small.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(canvas, 0, 0, textureSizeNow, textureSizeNow);
+  return small;
+}
+
+/**
+ * Resolution of the panel textures (px). Existing textures are repainted in place (materials keep working), new ones
+ * are created at this size. Called by the building quality level (BuildingBatcher).
+ */
+export function setPanelTextureSize(px) {
+  if (px === textureSizeNow) return;
+  textureSizeNow = px;
+  for (const [type, entry] of textureCache) {
+    const tex = entry.texture;
+    tex.dispose();                      // new GPU storage for the new size
+    tex.image = paintPanelCanvas(type);
+    tex.needsUpdate = true;
+  }
+}
+
+function createPanelTexture(type) {
+  const tex = new THREE.CanvasTexture(paintPanelCanvas(type));
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.NoColorSpace;   // data: bump heights (red) and a linear diffuse factor (RGB)
   tex.anisotropy = 4;
@@ -241,8 +268,9 @@ function releasePanelTexture(type) {
 // Regular function: three.js calls it as material.onBeforeCompile(shader) → `this` = material. One function for
 // all team clones = one shader program; each clone keeps its own uTeamColor uniform.
 function paintOnBeforeCompile(shader) {
-  shader.uniforms.uTeamColor = this.userData.uTeamColor;
   shader.uniforms.uDetail = this.userData.uDetail;
+  if (this.defines.PROC_INSTANCED !== undefined) { paintInstancedShader(shader, this.userData.uHighlight); return; }
+  shader.uniforms.uTeamColor = this.userData.uTeamColor;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nattribute vec4 aSurface;\nvarying vec4 vSurface;')
     .replace('#include <color_vertex>', '#include <color_vertex>\nvSurface = aSurface;');
@@ -258,6 +286,65 @@ function paintOnBeforeCompile(shader) {
     // team-masked glowing parts (neon strips in the team colour) glow in the team colour
     .replace('#include <emissivemap_fragment>',
       '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor * mix(vec3(1.0), uTeamColor, vSurface.x) * vSurface.w;');
+}
+
+// Instanced variant (BuildingBatcher): per-instance attribute aInst = (team colour rgb, hover highlight 0..1) replaces
+// the uTeamColor uniform; the hover highlight adds the HIGHLIGHT emissive. Same texture / surface logic otherwise.
+function paintInstancedShader(shader, highlight) {
+  shader.uniforms.uHighlight = highlight;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec4 aSurface;\nattribute vec4 aInst;\nvarying vec4 vSurface;\nvarying vec4 vInst;')
+    .replace('#include <color_vertex>', '#include <color_vertex>\nvSurface = aSurface;\nvInst = aInst;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform float uDetail;\nuniform vec3 uHighlight;\nvarying vec4 vSurface;\nvarying vec4 vInst;')
+    .replace('#include <color_fragment>', [
+      '#include <color_fragment>',
+      'diffuseColor.rgb *= mix(vec3(1.0), texture2D(bumpMap, vBumpMapUv).rgb, uDetail);',
+      'diffuseColor.rgb *= mix(vec3(1.0), vInst.rgb, vSurface.x);',
+    ].join('\n'))
+    .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vSurface.z;')
+    .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vSurface.y;')
+    .replace('#include <emissivemap_fragment>', [
+      '#include <emissivemap_fragment>',
+      'totalEmissiveRadiance += vColor * mix(vec3(1.0), vInst.rgb, vSurface.x) * vSurface.w + uHighlight * vInst.a;',
+    ].join('\n'));
+}
+
+const highlightUniform = { value: new THREE.Color(HIGHLIGHT.color).multiplyScalar(HIGHLIGHT.intensity) };
+const instancedCache = new Map();   // texture type -> { material, users }
+
+/**
+ * Instanced paint material (InstancedMesh with an `aInst` InstancedBufferAttribute, see BuildingBatcher), one per
+ * panel texture type, ref-counted – pair with releaseInstancedPaintMaterial.
+ */
+export function acquireInstancedPaintMaterial(texture = PROC_KIT.defaultTexture) {
+  const type = textureTypeOf(texture);
+  let entry = instancedCache.get(type);
+  if (!entry) {
+    const o = PROC_KIT.textures[type];
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true, bumpMap: acquirePanelTexture(type), bumpScale: o.bumpScale });
+    material.defines.PROC_INSTANCED = '';
+    material.userData.uDetail = { value: o.detail };
+    material.userData.uHighlight = highlightUniform;
+    material.userData.procedural = true;
+    material.onBeforeCompile = paintOnBeforeCompile;
+    material.customProgramCacheKey = () => 'steelMansProcPaintInstanced';
+    entry = { material, users: 0, type };
+    instancedCache.set(type, entry);
+  }
+  entry.users++;
+  return entry.material;
+}
+
+export function releaseInstancedPaintMaterial(material) {
+  for (const [type, entry] of instancedCache) {
+    if (entry.material !== material) continue;
+    if (--entry.users > 0) return;
+    material.dispose();
+    instancedCache.delete(type);
+    releasePanelTexture(entry.type);
+    return;
+  }
 }
 
 const paintCache = new Map();   // "hex:texture" -> { material, users, type }
@@ -296,34 +383,6 @@ export function releasePaintMaterial(material) {
     material.dispose();
     paintCache.delete(key);
     releasePanelTexture(entry.type);
-    return;
-  }
-}
-
-const glowCache = new Map();    // hex -> { material, users }
-
-/** Shared additive glow material (beacon light halos), ref-counted */
-export function acquireGlowMaterial(color) {
-  const hex = new THREE.Color(color).getHexString();
-  let entry = glowCache.get(hex);
-  if (!entry) {
-    const material = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: PROC_KIT.glowOpacity,
-      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-    });
-    entry = { material, users: 0 };
-    glowCache.set(hex, entry);
-  }
-  entry.users++;
-  return entry.material;
-}
-
-export function releaseGlowMaterial(material) {
-  for (const [hex, entry] of glowCache) {
-    if (entry.material !== material) continue;
-    if (--entry.users > 0) return;
-    material.dispose();
-    glowCache.delete(hex);
     return;
   }
 }
@@ -384,11 +443,23 @@ function paintGeo(g, s) {
  * All add* methods take (dimensions…, surface, placement) and return the builder.
  */
 export class PartBuilder {
-  constructor() { this.parts = []; }
+  constructor() { this.parts = []; }   // entries { geo, detail (explicit 0..2 | null = by size), size, round }
 
-  add(geo, s, t) {
-    this.parts.push(paintGeo(place(geo, t), s));
+  /**
+   * Stores a finished part. `detail` = coarsest LOD the part still appears in: 0 = fine detail (LOD0 only),
+   * 1 = also in LOD1, 2 = also in the LOD2 silhouette; null = by size (share of the whole building, BUILDING_LOD.partMinShare).
+   */
+  #push(geo, detail = null, round = null) {
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const size = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
+    this.parts.push({ geo, detail, size, round });
     return this;
+  }
+
+  /** Placement key `detail: 0|1|2` of any add* method marks the part (see #push); default = by size */
+  add(geo, s, t) {
+    return this.#push(paintGeo(place(geo, t), s), t?.detail ?? null);
   }
 
   /** Box, origin at its centre unless t.base (origin at the bottom face) */
@@ -405,7 +476,7 @@ export class PartBuilder {
   roundedBox(w, h, d, radius, segments, s, t = {}) {
     const g = roundedBoxGeometry(w, h, d, radius, segments);
     if (t.base) g.translate(0, h / 2, 0);
-    return this.add(g, s, t);
+    return this.#push(paintGeo(place(g, t), s), t.detail ?? null, { w, h, d, radius, s, t });
   }
 
   /** Box whose top face is narrower in X (topW) and optionally in Z (topD) – sloped walls, buttresses. Origin at the bottom. */
@@ -481,8 +552,7 @@ export class PartBuilder {
     const idx = new Uint32Array(n);
     for (let i = 0; i < n; i++) idx[i] = i;
     g.setIndex(new THREE.BufferAttribute(idx, 1));
-    this.parts.push(g);
-    return this;
+    return this.#push(g, t.detail ?? null);
   }
 
   /** Pipe along a polyline of [x, y, z] points: a cylinder per segment and a ball at each inner joint */
@@ -499,21 +569,67 @@ export class PartBuilder {
       q.setFromUnitVectors(up, b.clone().sub(a).normalize());
       g.applyQuaternion(q);
       g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
-      this.parts.push(paintGeo(g, s));
+      this.#push(paintGeo(g, s));
       if (i > 0) this.sphere(radius * 1.15, segments, Math.max(3, segments / 2), s, { x: a.x, y: a.y, z: a.z });
     }
     return this;
   }
 
-  /** Merges everything into one indexed geometry with box-projected UVs (PROC_KIT.textureWorldSize per tile) */
+  /** Merges everything (LOD0) into one indexed geometry with box-projected UVs (PROC_KIT.textureWorldSize per tile) */
   build() {
-    const merged = mergeGeometries(this.parts, false);
-    for (const p of this.parts) p.dispose();
-    this.parts = [];
+    const merged = this.#merge(0, 0);
+    this.#release();
+    return merged;
+  }
+
+  /**
+   * Geometry set of a building, one merged geometry per LOD (index = LOD, BUILDING_LOD.levels): LOD0 = everything,
+   * LOD1 = without fine parts (rounded boxes chamfered), LOD2 = coarse silhouette (rounded boxes plain). A part is in
+   * LOD n when its `detail` ≥ n (explicit placement key) or – without one – its largest side is at least
+   * BUILDING_LOD.partMinShare[n] of the building's largest side. Every LOD holds at least the largest part.
+   */
+  buildLods() {
+    const box = new THREE.Box3();
+    for (const p of this.parts) box.union(p.geo.boundingBox);
+    const extent = Math.max(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z);
+    const out = [];
+    for (let lod = 0; lod < BUILDING_LOD.levels; lod++) out.push(this.#merge(lod, extent));
+    this.#release();
+    return out;
+  }
+
+  #levelOf(p, extent) {
+    if (p.detail !== null) return p.detail;
+    let level = 0;
+    for (let n = 1; n < BUILDING_LOD.levels; n++) if (p.size >= extent * BUILDING_LOD.partMinShare[n]) level = n;
+    return level;
+  }
+
+  #merge(lod, extent) {
+    let picks = this.parts.filter((p) => this.#levelOf(p, extent) >= lod);
+    if (!picks.length) picks = [this.parts.reduce((a, b) => (b.size > a.size ? b : a))];
+    const temp = [];
+    const geos = picks.map((p) => {
+      const segments = BUILDING_LOD.roundedSegments[lod];
+      if (!p.round || segments === null) return p.geo;
+      const { w, h, d, radius, s, t } = p.round;
+      const g = segments > 0 ? roundedBoxGeometry(w, h, d, radius, segments) : new THREE.BoxGeometry(w, h, d);
+      if (t.base) g.translate(0, h / 2, 0);
+      paintGeo(place(g, t), s);
+      temp.push(g);
+      return g;
+    });
+    const merged = mergeGeometries(geos, false);
+    for (const g of temp) g.dispose();
     projectUvs(merged);
     merged.computeBoundingBox();
     merged.computeBoundingSphere();
     return merged;
+  }
+
+  #release() {
+    for (const p of this.parts) p.geo.dispose();
+    this.parts = [];
   }
 }
 
@@ -565,15 +681,6 @@ function projectUvs(geo) {
     uv[i * 2 + 1] = v * k;
   }
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-}
-
-/** Plain geometry (position only) for glow halos – merged small octahedra at the given points */
-export function glowGeometry(points, radius) {
-  const parts = points.map(([x, y, z]) => new THREE.OctahedronGeometry(radius, 1).translate(x, y, z));
-  for (const p of parts) { p.deleteAttribute('uv'); p.deleteAttribute('normal'); }
-  const g = mergeGeometries(parts, false);
-  for (const p of parts) p.dispose();
-  return g;
 }
 
 const _ga = new THREE.Vector3();

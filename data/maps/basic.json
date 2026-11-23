@@ -2,6 +2,7 @@
   "name": "gen_01AI",
   "description": "Čtyři rohové základny, uprostřed super node se surovinami.",
   "startAssignment": "fixed",
+  "oreMultiplier": 1,
   "size": 900,
   "startPositions": [
     { "x": -300, "z": 300 },

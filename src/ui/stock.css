@@ -1,0 +1,41 @@
+/* Steel Mans – part stock window (src/ui/StockWindow.js, docs/notes/f1-inventory.md) */
+#stock-window {
+  position: fixed; inset: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  font: 13px system-ui, sans-serif; color: var(--hud-text, #dfe6ee);
+}
+#stock-window[hidden] { display: none; }
+#stock-window .stk-panel {
+  width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px);
+  display: flex; flex-direction: column; box-sizing: border-box; padding: 16px 20px;
+  background: var(--menu-brushed, none), linear-gradient(180deg, rgba(34, 41, 48, 0.97), rgba(14, 18, 22, 0.97));
+  border: 1px solid var(--hud-border, #3a4652);
+}
+#stock-window h2 { margin: 0 0 8px; font-size: 18px; letter-spacing: 0.04em; text-transform: uppercase; }
+#stock-window h3 { margin: 10px 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; opacity: 0.6; }
+#stock-window .stk-hint { margin: 0 0 8px; font-size: 12px; opacity: 0.65; }
+#stock-window .stk-list { flex: 1 1 auto; min-height: 120px; max-height: 50vh; overflow-y: auto; }
+#stock-window .stk-empty { opacity: 0.6; padding: 16px 4px; }
+#stock-window .stk-row {
+  display: flex; align-items: center; gap: 12px; padding: 5px 8px; cursor: pointer;
+  border-top: 1px solid rgba(223, 230, 238, 0.1); border-left: 3px solid transparent;
+}
+#stock-window .stk-row:hover { background: rgba(80, 130, 190, 0.15); }
+#stock-window .stk-row.on { border-left-color: var(--hud-neon, #6fb7ff); background: rgba(80, 130, 190, 0.35); }
+#stock-window .stk-name { flex: 1 1 auto; }
+#stock-window .stk-name small { opacity: 0.6; margin-left: 6px; }
+#stock-window .stk-hp, #stock-window .stk-value { opacity: 0.8; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#stock-window .stk-count { min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+#stock-window .stk-warn { margin: 8px 0 0; color: #ff9a8a; }
+#stock-window .stk-sell { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+#stock-window .stk-gain { flex: 1 1 auto; font-variant-numeric: tabular-nums; }
+#stock-window button {
+  font: inherit; color: inherit; cursor: pointer; padding: 3px 12px;
+  background: rgba(58, 70, 82, 0.6); border: 1px solid var(--hud-border, #3a4652);
+}
+#stock-window button:hover:not(:disabled) { border-color: var(--hud-neon, #6fb7ff); }
+#stock-window button:disabled { opacity: 0.4; cursor: default; }
+#stock-window .stk-sell button { font-weight: 600; }
+/* back / close on the left (project rule: left returns, right continues) */
+#stock-window .stk-actions { display: flex; justify-content: flex-start; margin-top: 12px; }

@@ -2,7 +2,7 @@
 // All numbers come from data/stats.json (weapon stats and rules.combat).
 import * as THREE from 'three';
 import { getStats, applyArmor, teamRule } from '../data/Stats.js';
-import { VFX, AUDIO, TARGET_PRIORITY, MELEE_STRUCTURE, AIR } from '../config.js';
+import { VFX, AUDIO, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY } from '../config.js';
 import { play } from '../audio/Sound.js';
 import { applyWeaponEffects } from './StatusEffects.js';
 import { areAllies } from './Alliances.js';
@@ -270,15 +270,27 @@ export function releaseAttack(world, attacker, weapon, target, { hit = 'single' 
       if (s.spread > 0) { firePellet(world, attacker, s, from, aim, color); return; }
       // Hit roll when the shot leaves: a miss flies into the ground beside the target (and may splash there)
       noteAttacker(target, attacker); // lets idle units fight back (even when the shot misses)
-      const onTarget = rollHit(world, s, target);
-      const miss = onTarget ? null : missPoint(world, target);
+      const onTarget = rollHit(world, attacker, s, target);
+      let miss = onTarget ? null : missPoint(world, attacker, s, target);
+      // A missed shot hits whatever stands in its way (a unit or a wreck) before reaching the ground beside the target
+      let victim = null;
+      let wreck = null;
+      let victimFactor = 1;
+      if (miss && ACCURACY.enabled && getStats().rules.combat.accuracy.missHitsInPath) {
+        const block = interceptMiss(world, attacker, s, target, from, miss);
+        if (block) { miss = block.point; victim = block.unit ?? null; wreck = block.wreck ?? null; victimFactor = block.factor ?? 1; }
+      }
+      const land = (point) => {
+        if (wreck) { resolveWreckImpact(world, attacker, s, wreck, point); return; }
+        if (victim && areEnemies(attacker, victim)) noteAttacker(victim, attacker);
+        resolveShot(world, attacker, s, victim ?? target, point, from, onTarget || !!victim, victimFactor);
+      };
       if (s.projectileSpeed > 0) {
         const homing = () => (isTargetable(target) ? aimPoint(target, _v) : aim);
-        world.effects.projectile(from, miss ? () => miss : homing, s.projectileSpeed, color,
-          (point) => resolveShot(world, attacker, s, target, point, from, onTarget), projectileLook(s));
+        world.effects.projectile(from, miss ? () => miss : homing, s.projectileSpeed, color, land, projectileLook(s));
       } else {
         world.effects.tracer(from, miss ?? aim, color);
-        resolveShot(world, attacker, s, target, miss ?? aim, from, onTarget);
+        land(miss ?? aim);
       }
     });
   }
@@ -301,10 +313,10 @@ function projectileLook(s) {
  * (target surface on a hit, the ground beside it on a miss); piercing into units behind. XP for the crew.
  * @param {THREE.Vector3} from  where the shot came from (direction of the pierce)
  */
-function resolveShot(world, attacker, s, target, point, from, hit) {
+function resolveShot(world, attacker, s, target, point, from, hit, factor = 1) {
   const score = { dealt: 0, kills: 0 };
   const landed = hit && isTargetable(target);
-  if (landed) applyHit(world, attacker, s, target, 1, attacker.position, 1, score);
+  if (landed) applyHit(world, attacker, s, target, factor, attacker.position, 1, score);
   // The blast happens on the target's surface facing the shooter, not in its centre (a big mech would swallow it);
   // a near miss on the ground can still catch the target itself
   if (s.splashRadius > 0) {
@@ -315,13 +327,92 @@ function resolveShot(world, attacker, s, target, point, from, hit) {
 }
 
 // All rolls use the world's seeded generator (src/core/Rng.js) – never Math.random (lockstep determinism)
-const rollHit = (world, s, unit) => world.rng.next() < THREE.MathUtils.clamp(
-  s.accuracy - (unit.evasion ?? 0), getStats().rules.combat.minHitChance, 1);
+const rollHit = (world, attacker, s, unit) => world.rng.next() < hitChance(s, attacker, unit);
 
-// Where a missed shot lands: the ground just beside the target (rules.combat.missScatter beyond its edge)
-function missPoint(world, target) {
+/**
+ * Chance (minHitChance … 1) that one shot / blow of weapon stats `s` hits `unit` (rules.combat.accuracy, ACCURACY.enabled):
+ *  - melee: accuracy × meleeAccuracyFactor − evasion (no range or movement part);
+ *  - ranged: accuracy × rangeFactor − evasion − movingPenalty, where rangeFactor falls linearly from 1 (up to
+ *    optimalRangeFactor × range) to longRangeFactor (at the weapon's range) – a weapon may override both with
+ *    accuracyOptimalRange / accuracyLongFactor – and the moving penalty is movingPenalty × min(1, target speed ×
+ *    flight time / movingRefSize); hitscan weapons and homing missiles (s.homing) have no moving penalty.
+ * Target size does not matter. Pure function of positions and data (no rng): the report below and the AI may call it.
+ */
+export function hitChance(s, attacker, unit) {
+  const rules = getStats().rules.combat;
+  const evasion = unit.evasion ?? 0;
+  if (!ACCURACY.enabled) return THREE.MathUtils.clamp(s.accuracy - evasion, rules.minHitChance, 1);
+  const a = rules.accuracy;
+  if (s.class === 'melee') return THREE.MathUtils.clamp(s.accuracy * a.meleeAccuracyFactor - evasion, rules.minHitChance, 1);
+  const dist = edgeDistance(attacker, unit);
+  const optimal = (s.accuracyOptimalRange ?? a.optimalRangeFactor) * s.range;
+  const t = s.range > optimal ? THREE.MathUtils.clamp((dist - optimal) / (s.range - optimal), 0, 1) : 0;
+  let chance = s.accuracy * THREE.MathUtils.lerp(1, s.accuracyLongFactor ?? a.longRangeFactor, t) - evasion;
+  if (s.projectileSpeed > 0 && !(s.homing && a.homingIgnoresMoving)) {
+    chance -= a.movingPenalty * Math.min(1, ((unit.speed ?? 0) * (dist / s.projectileSpeed)) / a.movingRefSize);
+  }
+  return THREE.MathUtils.clamp(chance, rules.minHitChance, 1);
+}
+
+/**
+ * First unit or wreck a missed shot meets on its way from the muzzle to the miss point (the target itself is
+ * excluded – it was missed). Units the shot cannot hurt (own units without friendly fire, wrong layer) are passed.
+ * @returns {{ point, unit?, wreck?, factor? }|null}  factor = friendly-fire damage factor of the unit
+ */
+const MISS_DIR = new THREE.Vector3();  // scratch: direction of a missed shot (interceptMiss)
+const MISS_EXCLUDE = [null, null];     // scratch: [attacker, target] of a missed shot
+const WRECK_RAY = new THREE.Ray();     // scratch: ray of traceWreck
+const WRECK_POINT = new THREE.Vector3();
+function interceptMiss(world, attacker, s, target, from, miss) {
+  const length = from.distanceTo(miss);
+  if (length < EPSILON) return null;
+  const dir = MISS_DIR.copy(miss).sub(from).divideScalar(length);
+  MISS_EXCLUDE[0] = attacker; MISS_EXCLUDE[1] = target;
+  const [unit] = traceUnits(world, attacker, s, from, dir, length, MISS_EXCLUDE, 1);
+  const wreck = traceWreck(world, from, dir, unit ? unit.t : length);
+  if (wreck) return { point: wreck.point, wreck: wreck.wreck };
+  return unit ? { point: unit.point, unit: unit.unit, factor: unit.factor } : null;
+}
+
+// A shot that ended on a wreck: damage to it (× 1) and the blast around the impact point
+function resolveWreckImpact(world, attacker, s, wreck, point) {
+  const score = { dealt: 0, kills: 0 };
+  damageWreck(world, wreck, s, 1);
+  if (s.splashRadius > 0) explode(world, attacker, s, point, [], score);
+  awardXp(attacker, score.dealt, score.kills);
+}
+
+/**
+ * Console test: hit statistics of a weapon (stats object, e.g. one of mech.weapons[i].stats) against a target at
+ * several shares of its range – uses the formula (hitChance) and 'shots' real rolls of world.rng.
+ * Changes the rng state: only for tests (steelMans.world is not advanced otherwise). Target speed is read from `target`.
+ * @returns {{ rangeShare, distance, chance, hitRate }[]}
+ */
+export function accuracyReport(world, attacker, s, target, shots = ACCURACY.testShots) {
+  const out = [];
+  const home = { x: attacker.position.x, z: attacker.position.z };
+  const saved = { x: target.position.x, z: target.position.z };
+  for (const share of ACCURACY.testRangeSteps) {
+    const dist = Math.max(s.minRange ?? 0, s.range * share) + (target.radius ?? 0);
+    target.position.x = home.x;
+    target.position.z = home.z + dist;
+    const chance = hitChance(s, attacker, target);
+    let hits = 0;
+    for (let i = 0; i < shots; i++) if (world.rng.next() < chance) hits++;
+    out.push({ rangeShare: share, distance: dist, chance, hitRate: hits / shots });
+  }
+  target.position.x = saved.x;
+  target.position.z = saved.z;
+  return out;
+}
+
+// Where a missed shot lands: the ground just beside the target (rules.combat.missScatter beyond its edge, plus
+// accuracy.missScatterRangeFactor × the distance, so far shots land farther off)
+function missPoint(world, attacker, s, target) {
   const a = world.rng.angle();
-  const d = (target.radius ?? 0) + world.rng.next() * getStats().rules.combat.missScatter;
+  const rules = getStats().rules.combat;
+  const far = ACCURACY.enabled ? rules.accuracy.missScatterRangeFactor * edgeDistance(attacker, target) : 0;
+  const d = (target.radius ?? 0) + world.rng.next() * (rules.missScatter + far);
   const p = groundPoint(world, { x: target.position.x + Math.sin(a) * d, z: target.position.z + Math.cos(a) * d });
   if (target.airborne) p.y = target.position.y + (target.aimHeight ?? 0); // [N7] a miss at an aircraft bursts in the air
   return p;
@@ -342,10 +433,8 @@ function resolveMelee(world, attacker, s, target, hit) {
 
 /** Hit roll (accuracy − evasion) and damage × factor on one unit; returns true when it hit */
 function hitTarget(world, attacker, s, unit, factor, source, score) {
-  const rules = getStats().rules.combat;
   noteAttacker(unit, attacker); // lets idle units fight back (even when the shot misses)
-  const chance = THREE.MathUtils.clamp(s.accuracy - (unit.evasion ?? 0), rules.minHitChance, 1);
-  if (world.rng.next() >= chance) return false;
+  if (world.rng.next() >= hitChance(s, attacker, unit)) return false;
   applyHit(world, attacker, s, unit, factor, source, 1, score);
   return true;
 }
@@ -410,9 +499,8 @@ function sweep(world, attacker, s, target, wide, score) {
     if (unit === target || !hitsLayer(s, unit)) continue; // [NQ3] a swing does not reach an aircraft above
     const ff = sideFactor(world, attacker, unit, s);
     if (ff <= 0 || edgeDistance(attacker, unit) > radius || Math.abs(angleTo(attacker, unit.position)) > arc / 2) continue;
-    const chance = THREE.MathUtils.clamp(s.accuracy - (unit.evasion ?? 0), getStats().rules.combat.minHitChance, 1);
     if (areEnemies(attacker, unit)) noteAttacker(unit, attacker);
-    if (world.rng.next() < chance) applyHit(world, attacker, s, unit, factor * ff, attacker.position, effectFactor, score);
+    if (world.rng.next() < hitChance(s, attacker, unit)) applyHit(world, attacker, s, unit, factor * ff, attacker.position, effectFactor, score);
   }
   // Wrecks in the arc get hit for sure (pure geometry: nearest point of the wreck within radius and arc)
   const near = new THREE.Vector3();
@@ -484,8 +572,8 @@ function traceUnits(world, attacker, s, from, dir, length, exclude, max) {
 
 /** Nearest wreck a ray enters within `length` (wreck shape = its bounding box), or null */
 function traceWreck(world, from, dir, length) {
-  const ray = new THREE.Ray(from, dir);
-  const p = new THREE.Vector3();
+  const ray = WRECK_RAY.set(from, dir);
+  const p = WRECK_POINT;
   let best = null;
   for (const wreck of world.damageableWrecks) {
     if (!ray.intersectBox(wreck.bounds(), p)) continue;

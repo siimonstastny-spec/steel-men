@@ -33,6 +33,10 @@ export function loadBuildingStyles(url = STYLES_URL) {
       if (keys.length === 0) throw new Error(`BuildingStyles ${url}: no styles`);
       styles = Object.fromEntries(keys.map((k) => [k, Object.freeze({ key: k, ...deepMerge(defaults, data[k]) })]));
       return styles;
+    })
+    .catch((err) => {
+      stylesPromise = null;   // a failed load is not cached: the next call tries again
+      throw err;
     });
   return stylesPromise;
 }

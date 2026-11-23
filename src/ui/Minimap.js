@@ -505,7 +505,8 @@ export function drawMapBackground(ctx, map, n, { starts = true, markScale = 1 } 
   if (map.ascii) {
     // [MAPS] colour of the cell under each pixel
     const names = Object.keys(CELL);
-    const colors = names.map((k) => new THREE.Color(MAPS.ascii.colors[k] ?? MAPS.ascii.colors.grass));
+    const palette = map.planet?.colors ?? MAPS.ascii.colors; // planet palette (MAP_PLANETS) when the map has one
+    const colors = names.map((k) => new THREE.Color(palette[k] ?? palette.grass));
     for (let py = 0; py < n; py++) {
       for (let px = 0; px < n; px++) {
         const col = colors[map.cellAt(((px + 0.5) / n - 0.5) * map.size, ((py + 0.5) / n - 0.5) * map.size)];

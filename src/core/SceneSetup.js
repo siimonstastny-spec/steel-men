@@ -31,8 +31,11 @@ export function createScene(container) {
   controls.update();
 
   // Světla
-  scene.add(new THREE.HemisphereLight(0xdde8ff, 0x3a3326, 0.9));
+  const hemi = new THREE.HemisphereLight(0xdde8ff, 0x3a3326, 0.9);
+  hemi.name = 'hemiLight';
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+  sun.name = 'sunLight';
   sun.position.set(...MAP.sunOffset);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -59,6 +62,32 @@ export function createScene(container) {
   });
 
   return { renderer, scene, camera, controls, ground };
+}
+
+/**
+ * [MAPS] Planet look of a map (MAP_PLANETS in config.js): light colours / intensities, background and fog.
+ * `planet` = a MAP_PLANETS entry, or null = the default look created above (maps without a planet look unchanged).
+ * Runs once per map build, no allocations in the frame loop.
+ */
+export function applyPlanetLook(scene, planet) {
+  const sun = scene.getObjectByName('sunLight');
+  const hemi = scene.getObjectByName('hemiLight');
+  const base = (scene.userData.baseLook ??= {
+    background: R2.void.color, fogColor: R2.void.color, fogNear: R2.void.fogNear, fogFar: R2.void.fogFar,
+    sunColor: sun?.color.getHex(), sunIntensity: sun?.intensity,
+    hemiSky: hemi?.color.getHex(), hemiGround: hemi?.groundColor.getHex(), hemiIntensity: hemi?.intensity,
+  });
+  const sky = planet?.sky;
+  const bg = sky?.color ?? base.background;
+  scene.background = new THREE.Color(bg);
+  if (sky && sky.fogNear === null) scene.fog = null;
+  else scene.fog = new THREE.Fog(sky ? sky.color : base.fogColor, sky?.fogNear ?? base.fogNear, sky?.fogFar ?? base.fogFar);
+  if (sun) { sun.color.setHex(planet?.sun.color ?? base.sunColor); sun.intensity = planet?.sun.intensity ?? base.sunIntensity; }
+  if (hemi) {
+    hemi.color.setHex(planet?.hemi.sky ?? base.hemiSky);
+    hemi.groundColor.setHex(planet?.hemi.ground ?? base.hemiGround);
+    hemi.intensity = planet?.hemi.intensity ?? base.hemiIntensity;
+  }
 }
 
 // Default terrain before a map loads: flat centre, gentle hills around (menu background)

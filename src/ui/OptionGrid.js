@@ -9,6 +9,7 @@
 //     action:  { label, tip, disabled, onClick }      optional wide button at the bottom
 // The DOM is rebuilt only when the visible content changes, so buttons keep hover / focus between refreshes.
 import { t } from '../i18n/i18n.js';
+import { setHtmlKeepScroll } from './scrollKeep.js';
 
 const esc = (s) => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
 
@@ -34,7 +35,7 @@ export class OptionGrid {
     const html = this.#html(view);
     if (html === this.signature) return;
     this.signature = html;
-    this.el.innerHTML = html;
+    setHtmlKeepScroll(this.el, html);
     this.#fit();
   }
 
@@ -68,7 +69,7 @@ export class OptionGrid {
       ? `<div class="hud-summary">${summary.map((r) => `<div class="${r.warn ? 'warn' : ''}"><span>${esc(r.label)}</span><b>${esc(r.value)}</b></div>`).join('')}</div>` : '';
     const act = action
       ? `<button class="hud-action" data-action="1" title="${esc(action.tip)}" ${action.disabled ? 'disabled' : ''}>${esc(action.label)}</button>` : '';
-    return `${head}${tabRow}<div class="hud-grid">${cells.join('')}</div>${sum}${act}`;
+    return `${head}${tabRow}<div class="hud-grid" data-scroll-key="grid">${cells.join('')}</div>${sum}${act}`;
   }
 
   #onPointer(e) {

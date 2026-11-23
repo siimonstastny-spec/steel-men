@@ -24,7 +24,7 @@ export const FACTORY_ANIM = {
   scannerSpeed: 1.6,       // rad/s – crystal scanner head of the pylon tower
   doorSpeed: 1.6,          // 1/s
   doorMinScale: 0.07,      // rolled-up door height share
-  blinkDuty: 0.5,          // beacon period = style.anim.blink
+  blinkDuty: 0.5,          // share of the beacon period with the lights on (the period itself is style.anim.blink)
   idleGlow: 0.35,          // plasma / laser glow share while not producing
   phaseStep: 0.37,         // s – pulse phase offset per instance
   arcSeed: 7919,
@@ -51,6 +51,84 @@ const LAYOUT = {
   emblemFront: 1.0,                      // emblem size on the door header
   emblemSide: 2.2, emblemSideZ: 9.15,    // emblem size / position on the long walls (front bay)
   emblemBay: 5,                          // bay (between pilasterZ[i] and [i + 1]) with the side emblem – no window there
+};
+
+/**
+ * Small details of the factory (model units; "Share" = share of the related size, "out" = distance in front of a face,
+ * "below" = distance under the wall top / tower top) – the same for every shape.
+ */
+const DETAIL = {
+  apronLift: 0.01,
+  plinth: { over: 0.3, h: 0.7, overD: 0.15 },          // hall plinth: wider than the hall, front stays flush
+  cornerSegments: 12,
+  column: { w: 0.45, extraH: 0.1, d: 0.6, out: 0.2 },
+  rib: { rTop: 0.26, rBottom: 0.3, out: 0.12, segments: 10 },
+  fin: { w: 0.9, hShare: 0.92, t: 0.1, out: 0.45, neonW: 0.04, neonShare: 0.8, neonD: 0.14, neonOut: 0.92, neonY: 0.06 },
+  buttress: { hShare: 0.8, w: 0.9, d: 0.7, footW: 1.2, footH: 0.5, footD: 1.1, footOut: 0.45 },
+  vein: { w: 0.06, hShare: 0.7, d: 0.1, out: 0.45, yShare: 0.45 },
+  band: { below: 1.6, inset: 0.4, h: 0.6, t: 0.06 },
+  neonBand: { below: 0.95, h: 0.1, t: 0.05 },
+  lower: { y: 1.6, h: 1.1, t: 0.05 },
+  window: { below: 2.6, belowButtress: 3.2, frameW: 2.5, frameH: 0.85, t: 0.05, glassW: 2.2, glassH: 0.55, glassOut: 0.02 },
+  slotZ: [-6.5, -2.5, 1.5], slotY: 2.6,                 // left wall: louvres / lens plates / plasma slots
+  louvre: { w: 2.6, h: 1.6, t: 0.12, slats: 4, slatY0: 2.0, slatStep: 0.38, slatW: 2.3, slatH: 0.12, slatT: 0.1, slatOut: 0.08 },
+  lensPlate: { t: 0.12, s: 1.4, out: 0.06, neonT: 0.04, neonS: 0.6, neonOut: 0.14 },
+  slot: { r: 0.32, h: 1.8, segments: 12, out: 0.05, neonT: 0.06, neonH: 1.4, neonD: 0.12, neonOut: 0.38 },
+  crewDoor: {
+    z: 9.2, y: 1.25, w: 1.2, h: 2.2, t: 0.08, lightY: 2.6, lightW: 0.3, lightH: 0.15, lightT: 0.1, lightOut: 0.04,
+    markLen: 1.6, markH: 0.4, markY: 0.45, markOut: 0.2,
+  },
+  front: {
+    interiorGap: 0.1, interiorT: 0.05, interiorOut: 0.03, jambW: 0.9, jambExtra: 0.7, jambD: 0.6, jambZ: 0.3,
+    jambMarkH: 0.5, jambMarkY: 0.3, jambMarkZ: 0.61, footMarkLen: 1.3, footMarkX: 1.15, footMarkY: 0.35, footMarkZ: 0.02,
+    headerH: 1.1, headerD: 0.7, neonH: 0.08, neonT: 0.04, neonY: 0.08, neonZ: 0.67, emblemY: 0.6, emblemZ: 0.65,
+  },
+  clerestory: {
+    slabOver: 0.4, w: 5, h: 1.3, d: 18, winX: 2.52, winT: 0.05, winH: 0.5, winD: 16, winY: 0.75,
+    holeW: 2.4, holeT: 0.05, holeD: 3.0, holeY: 1.31, markLen: 2.4, markH: 0.3, markY: 1.32, markZ: 1.65,
+  },
+  armored: {
+    slabOver: 0.5, parapetT: 0.35, parapetH: 0.5, parapetOut: 0.07, humpW: 6.0, humpTopW: 4.4, humpH: 0.9, humpD: 18,
+    slopeRun: 0.8, winT: 0.04, winH: 0.14, winD: 14, winX: 2.62, winY: 0.45, holeW: 2.2, holeT: 0.05, holeD: 2.8, holeY: 0.91,
+  },
+  vault: { segments: 20, ribOut: 0.04, ribT: 0.14, neonW: 1.2, neonH: 0.08, neonInset: 4, holeW: 2.2, holeT: 0.08, holeD: 2.6, holeLift: 0.02 },
+  ridge: {
+    slabOver: 0.3, inset: 2, neonW: 0.08, neonH: 0.06, neonInset: 0.4, neonLift: 0.01,
+    spikeY: 0.5, spikeEnd: 0.4, spikeH: 0.9, spikeR: 1.6, edgeT: 0.05, edgeOut: 0.1, edgeInset: 0.4,   // spike Y / H: × rise, R: × LAYOUT.spikeR
+  },
+  roundTower: {
+    rTop: 1.7, rBottom: 1.8, segments: 16, neonR: 1.73, neonH: 0.5, neonBelow: 0.9, domeR: 1.75, domeFlat: 0.4,
+    coilLift: 0.5, coilH: 1.6, coilR: 0.5, arcA: [1.3, 0.35, 0], arcB: [-0.9, 0.4, 1.0], beaconLift: 0.2,   // arc anchors: offsets from (tx, tH, tz)
+  },
+  pylon: { w: 1.4, neonW: 1.5, neonH: 0.08, neonBelow: 0.3, laserR: 0.5, laserTopR: 0.22, laserBelow: 0.55, lasers: 4 },
+  boxTower: {
+    w: 3.2, taperW: 3.6, taperTopW: 2.8, winBelow: 0.9, winOut: 0.02, winInset: 0.4, winH: 0.45, winT: 0.05, capOver: 0.3,
+    capH: 0.3, mastRTop: 0.12, mastRBottom: 0.16, mastH: 0.8, mastLift: 0.55, radarLift: 0.95, beaconLift: 0.3,
+  },
+  towerBeacon: 1.2,                                     // tower beacon offset from the tower axis (X and Z)
+  cornerBeacon: { vaultOut: 0.15, parapetZ: 0.8, inset: 0.6 },
+  vent: { pedestalOut: 0.15, pedestalSink: 0.1, pedestalLift: 0.15, segments: 16 },
+  pipes: {
+    y: 1.7, front: 10.0, back: -12.3, riseBelow: 0.5, r: 0.2, lowFront: 8.5, lowY: 2.4, lowBack: -11.6, lowR: 0.16,
+    bracketZ0: -10, bracketZ1: 7, bracketStep: 3.4, bracketY: 2.05, bracketOver: 0.2, bracketH: 1.2, bracketD: 0.15,
+    valveR: 0.3, valveH: 0.5, valveZ: -3, wheelR: 0.25, wheelT: 0.06, wheelOut: 0.35,
+  },
+  conduit: {
+    s: 0.25, out: 0.12, y: 1.2, inset: 2, neonW: 0.06, neonH: 0.08, neonInset: 2.2, neonOut: 0.27,
+    podZ: [-10, -4, 2, 8], podR: 0.45, podOut: 0.2, podFlat: 0.6, glowOut: 0.35,
+  },
+  emitters: { z: [-9, -2, 5], w: 0.6, h: 2.6, d: 1.2, lensRTop: 0.16, lensRBottom: 0.2, lensH: 0.18, lensY: 2.69, linkInset: 0.7, linkY: [1.0, 2.2] },
+  rearZ: 0.65,                                          // rear equipment: distance behind the hall
+  tanks: [[2.6, 3.4], [-1.2, 2.6]], tankY: 0.95, tankR: 0.55,   // tanks: [x, length]
+  generator: {
+    w: 5.0, h: 2.2, d: 1.0, x: 1.5, slatW: 4.4, slatH: 0.12, slatT: 0.06, slats: 3, slatY0: 0.8, slatStep: 0.45, slatZ: 0.52,
+    chimneyX: [3.4, 4.0], chimneyH: 3.8, chimneyR: 0.26,
+  },
+  coils: { x: [0.5, 3.0], h: 2.2, r: 0.45 },
+  lensBlocks: {
+    back: 0.6, x: [-0.5, 3.0], w: 1.3, h: 2.4, d: 0.8, lensRTop: 0.22, lensRBottom: 0.28, lensH: 0.2, lensY: 2.5,
+    laserY: 2.7, roofLift: 0.1, roofIn: 0.15, linkA: [0.25, 1.4], linkB: [2.25, 1.4],   // link: [x, y]
+  },
 };
 
 /**
@@ -89,6 +167,7 @@ const railsOf = (kit, shape) => shape.rails.slice(0, Math.max(1, kit.style.roofR
 
 function buildStatic(kit, shape) {
   const L = LAYOUT;
+  const D = DETAIL;
   const S = kit.S;
   const st = kit.style;
   const b = new PartBuilder();
@@ -112,118 +191,148 @@ function buildStatic(kit, shape) {
   // ground: pad, gantry rails, apron marking
   b.box(L.padHalfX * 2, L.padH, L.padHalfZ * 2, S.ground, { base: true });
   if (legged) for (const side of [-1, 1]) b.box(L.groundRailW, L.groundRailH, L.railHalfZ * 2, S.frame, { base: true, x: side * L.railX, y: L.padH });
-  marking(b, kit, L.doorHalfW * 2, L.apronH, { rx: -Math.PI / 2, y: L.padH + 0.01, z: L.hallZ1 + L.apronZ });
+  marking(b, kit, L.doorHalfW * 2, L.apronH, { rx: -Math.PI / 2, y: L.padH + D.apronLift, z: L.hallZ1 + L.apronZ });
 
   // hall body
-  b.box(hb * 2 + 0.3, 0.7, hallD + 0.15, S.hullDark, { base: true, z: hallCz - 0.075 });   // front stays flush (door)
+  const P = D.plinth;
+  b.box(hb * 2 + P.over, P.h, hallD + P.overD, S.hullDark, { base: true, z: hallCz - P.overD / 2 });   // front stays flush (door)
   if (hb !== ht) b.taperedBox(hb * 2, ht * 2, H, hallD, S.hull, { z: hallCz });
   else styledBox(b, kit, hb * 2, H, hallD, S.hull, { base: true, z: hallCz }, shape.hallEdge);
   if (shape.cornerR) {
-    for (const sx of [-1, 1]) for (const z of [L.hallZ0, L.hallZ1]) b.cylinder(shape.cornerR, shape.cornerR, H, 12, S.hull, { x: sx * hb, y: H / 2, z });
+    for (const sx of [-1, 1]) {
+      for (const z of [L.hallZ0, L.hallZ1]) b.cylinder(shape.cornerR, shape.cornerR, H, D.cornerSegments, S.hull, { x: sx * hb, y: H / 2, z });
+    }
   }
 
   // long walls: pilasters / buttresses / ribs / fins, bands, windows, lower plates, side emblem in the front bay
+  const Wn = D.window;
   for (const side of [-1, 1]) {
     for (const z of L.pilasterZ) {
       switch (shape.pilaster) {
-        case 'column': b.box(0.45, H + 0.1, 0.6, S.frame, { base: true, x: side * (hb + 0.2), z }); break;
-        case 'rib': b.cylinder(0.26, 0.3, H, 10, S.hullDark, { x: side * (hb + 0.12), y: H / 2, z }); break;
-        case 'fin':
-          b.box(0.9, H * 0.92, 0.1, S.frame, { base: true, x: side * (hb + 0.45), z });
-          neonStrip(b, kit, 0.04, H * 0.8, 0.14, { base: true, x: side * (hb + 0.92), y: H * 0.06, z });
+        case 'column': {
+          const c = D.column;
+          b.box(c.w, H + c.extraH, c.d, S.frame, { base: true, x: side * (hb + c.out), z });
           break;
+        }
+        case 'rib': {
+          const r = D.rib;
+          b.cylinder(r.rTop, r.rBottom, H, r.segments, S.hullDark, { x: side * (hb + r.out), y: H / 2, z });
+          break;
+        }
+        case 'fin': {
+          const f = D.fin;
+          b.box(f.w, H * f.hShare, f.t, S.frame, { base: true, x: side * (hb + f.out), z });
+          neonStrip(b, kit, f.neonW, H * f.neonShare, f.neonD, { base: true, x: side * (hb + f.neonOut), y: H * f.neonY, z });
+          break;
+        }
         default: { // buttress
-          const bh = H * 0.8;
-          onWall(side, bh / 2, z, 0.9, bh, 0.7, S.hullDark);
-          b.box(1.2, 0.5, 1.1, S.frame, { base: true, x: side * (hb + 0.45), z });
+          const t = D.buttress;
+          const bh = H * t.hShare;
+          onWall(side, bh / 2, z, t.w, bh, t.d, S.hullDark);
+          b.box(t.footW, t.footH, t.footD, S.frame, { base: true, x: side * (hb + t.footOut), z });
         }
       }
-      if (kit.rich && shape.pilaster !== 'fin') neonStrip(b, kit, 0.06, H * 0.7, 0.1, { x: side * (hb + 0.45), y: H * 0.45, z });
+      if (kit.rich && shape.pilaster !== 'fin') {
+        const v = D.vein;
+        neonStrip(b, kit, v.w, H * v.hShare, v.d, { x: side * (hb + v.out), y: H * v.yShare, z });
+      }
     }
-    onWall(side, H - 1.6, hallCz, hallD - 0.4, 0.6, 0.06, S.team);
-    if (neonBands) onWall(side, H - 0.95, hallCz, hallD - 0.4, 0.1, 0.05, S.neon);
-    if (shape.pilaster === 'buttress') onWall(side, 1.6, hallCz, hallD - 0.4, 1.1, 0.05, S.lower);
-    const winY = H - (shape.pilaster === 'buttress' ? 3.2 : 2.6);
+    onWall(side, H - D.band.below, hallCz, hallD - D.band.inset, D.band.h, D.band.t, S.team);
+    if (neonBands) onWall(side, H - D.neonBand.below, hallCz, hallD - D.band.inset, D.neonBand.h, D.neonBand.t, S.neon);
+    if (shape.pilaster === 'buttress') onWall(side, D.lower.y, hallCz, hallD - D.band.inset, D.lower.h, D.lower.t, S.lower);
+    const winY = H - (shape.pilaster === 'buttress' ? Wn.belowButtress : Wn.below);
     for (let i = 0; i < L.pilasterZ.length - 1; i++) {
       if (i === L.emblemBay) continue;
       const z = (L.pilasterZ[i] + L.pilasterZ[i + 1]) / 2;
-      onWall(side, winY, z, 2.5, 0.85, 0.05, S.frame);
-      onWall(side, winY, z, 2.2, 0.55, 0.05, S.window, 0.02);
+      onWall(side, winY, z, Wn.frameW, Wn.frameH, Wn.t, S.frame);
+      onWall(side, winY, z, Wn.glassW, Wn.glassH, Wn.t, S.window, Wn.glassOut);
     }
     const ey = shape.emblemY;
     emblems.push({ position: [side * wallXAt(ey), ey, L.emblemSideZ], normal: [side * Math.cos(tilt), Math.sin(tilt), 0], size: L.emblemSide });
   }
   // rear colour band
-  b.box(ht * 2 - 0.4, 0.6, 0.06, S.team, { y: H - 1.6, z: L.hallZ0 - 0.03 });
+  b.box(ht * 2 - D.band.inset, D.band.h, D.band.t, S.team, { y: H - D.band.below, z: L.hallZ0 - D.band.t / 2 });
 
   // left wall: louvres (industrial) / diamond lens plates (fins) / plasma slots; personnel door
-  for (const z of [-6.5, -2.5, 1.5]) {
+  for (const z of D.slotZ) {
+    const sy = D.slotY;
     if (st.industrial) {
-      onWall(-1, 2.6, z, 2.6, 1.6, 0.12, S.frame);
-      for (let k = 0; k < 4; k++) onWall(-1, 2.0 + k * 0.38, z, 2.3, 0.12, 0.1, S.dark, 0.08);
+      const l = D.louvre;
+      onWall(-1, sy, z, l.w, l.h, l.t, S.frame);
+      for (let k = 0; k < l.slats; k++) onWall(-1, l.slatY0 + k * l.slatStep, z, l.slatW, l.slatH, l.slatT, S.dark, l.slatOut);
     } else if (shape.pilaster === 'fin') {
-      b.box(0.12, 1.4, 1.4, S.hullDark, { x: -(hb + 0.06), y: 2.6, z, rx: Math.PI / 4 });
-      b.box(0.04, 0.6, 0.6, S.neon, { x: -(hb + 0.14), y: 2.6, z, rx: Math.PI / 4 });
+      const p = D.lensPlate;
+      b.box(p.t, p.s, p.s, S.hullDark, { x: -(hb + p.out), y: sy, z, rx: Math.PI / 4 });
+      b.box(p.neonT, p.neonS, p.neonS, S.neon, { x: -(hb + p.neonOut), y: sy, z, rx: Math.PI / 4 });
     } else {
-      b.cylinder(0.32, 0.32, 1.8, 12, S.hullDark, { x: -(hb + 0.05), y: 2.6, z });
-      b.box(0.06, 1.4, 0.12, S.neon, { x: -(hb + 0.38), y: 2.6, z });
+      const s = D.slot;
+      b.cylinder(s.r, s.r, s.h, s.segments, S.hullDark, { x: -(hb + s.out), y: sy, z });
+      b.box(s.neonT, s.neonH, s.neonD, S.neon, { x: -(hb + s.neonOut), y: sy, z });
     }
   }
-  onWall(-1, 1.25, 9.2, 1.2, 2.2, 0.08, S.hullDark);
-  onWall(-1, 2.6, 9.2, 0.3, 0.15, 0.1, st.lights === 'lamp' ? S.lamp : S.window, 0.04);
-  marking(b, kit, 1.6, 0.4, { ry: -Math.PI / 2, x: -(wallXAt(0.45) + 0.2), y: 0.45, z: 9.2 });
+  const cd = D.crewDoor;
+  onWall(-1, cd.y, cd.z, cd.w, cd.h, cd.t, S.hullDark);
+  onWall(-1, cd.lightY, cd.z, cd.lightW, cd.lightH, cd.lightT, st.lights === 'lamp' ? S.lamp : S.window, cd.lightOut);
+  marking(b, kit, cd.markLen, cd.markH, { ry: -Math.PI / 2, x: -(wallXAt(cd.markY) + cd.markOut), y: cd.markY, z: cd.z });
 
   // front: interior glow behind the door, jambs with markings, header with the emblem, beacons
+  const F = D.front;
   const zf = L.hallZ1;
-  b.box(L.doorHalfW * 2, L.doorH - 0.1, 0.05, S.interior, { base: true, y: L.padH, z: zf + 0.03 });
+  b.box(L.doorHalfW * 2, L.doorH - F.interiorGap, F.interiorT, S.interior, { base: true, y: L.padH, z: zf + F.interiorOut });
   for (const side of [-1, 1]) {
-    b.box(0.9, L.doorH + 0.7, 0.6, S.frame, { base: true, x: side * L.jambX, z: zf + 0.3 });
-    marking(b, kit, L.doorH, 0.5, { rz: Math.PI / 2, x: side * L.jambX, y: L.doorH / 2 + 0.3, z: zf + 0.61 });
-    marking(b, kit, 1.3, 0.5, { x: side * (L.jambX + 1.15), y: 0.35, z: zf + 0.02 });
-    beacon(b, glows.get('beaconA'), kit, [side * L.jambX, L.doorH + 1.1, zf + 0.3]);
+    b.box(F.jambW, L.doorH + F.jambExtra, F.jambD, S.frame, { base: true, x: side * L.jambX, z: zf + F.jambZ });
+    marking(b, kit, L.doorH, F.jambMarkH, { rz: Math.PI / 2, x: side * L.jambX, y: L.doorH / 2 + F.jambMarkY, z: zf + F.jambMarkZ });
+    marking(b, kit, F.footMarkLen, F.jambMarkH, { x: side * (L.jambX + F.footMarkX), y: F.footMarkY, z: zf + F.footMarkZ });
+    beacon(b, glows.get('beaconA'), kit, [side * L.jambX, L.doorH + F.headerH, zf + F.jambZ]);
   }
-  b.box(L.jambX * 2 + 0.9, 1.1, 0.7, S.frame, { base: true, y: L.doorH, z: zf + 0.3 });
-  if (neonBands) neonStrip(b, kit, L.jambX * 2 + 0.9, 0.08, 0.04, { y: L.doorH + 0.08, z: zf + 0.67 });
-  emblems.push({ position: [0, L.doorH + 0.6, zf + 0.65], normal: [0, 0, 1], size: L.emblemFront });
+  b.box(L.jambX * 2 + F.jambW, F.headerH, F.headerD, S.frame, { base: true, y: L.doorH, z: zf + F.jambZ });
+  if (neonBands) neonStrip(b, kit, L.jambX * 2 + F.jambW, F.neonH, F.neonT, { y: L.doorH + F.neonY, z: zf + F.neonZ });
+  emblems.push({ position: [0, L.doorH + F.emblemY, zf + F.emblemZ], normal: [0, 0, 1], size: L.emblemFront });
 
   // roof
   if (shape.roof === 'clerestory') {
-    b.box(hb * 2 + 0.4, L.roofSlab, hallD + 0.4, S.frame, { base: true, y: H, z: hallCz });
-    styledBox(b, kit, 5, 1.3, 18, S.hull, { base: true, y: roofY, z: hallCz });
-    for (const side of [-1, 1]) b.box(0.05, 0.5, 16, S.window, { x: side * 2.52, y: roofY + 0.75, z: hallCz });
-    b.box(2.4, 0.05, 3.0, S.hole, { y: roofY + 1.31, z: hallCz });
-    for (const e of [-1, 1]) marking(b, kit, 2.4, 0.3, { rx: -Math.PI / 2, y: roofY + 1.32, z: hallCz + e * 1.65 });
+    const c = D.clerestory;
+    b.box(hb * 2 + c.slabOver, L.roofSlab, hallD + c.slabOver, S.frame, { base: true, y: H, z: hallCz });
+    styledBox(b, kit, c.w, c.h, c.d, S.hull, { base: true, y: roofY, z: hallCz });
+    for (const side of [-1, 1]) b.box(c.winT, c.winH, c.winD, S.window, { x: side * c.winX, y: roofY + c.winY, z: hallCz });
+    b.box(c.holeW, c.holeT, c.holeD, S.hole, { y: roofY + c.holeY, z: hallCz });
+    for (const e of [-1, 1]) marking(b, kit, c.markLen, c.markH, { rx: -Math.PI / 2, y: roofY + c.markY, z: hallCz + e * c.markZ });
   } else if (shape.roof === 'armored') {
-    b.box(ht * 2 + 0.5, L.roofSlab, hallD + 0.5, S.frame, { base: true, y: H, z: hallCz });
+    const A = D.armored;
+    b.box(ht * 2 + A.slabOver, L.roofSlab, hallD + A.slabOver, S.frame, { base: true, y: H, z: hallCz });
     for (const side of [-1, 1]) {
-      b.box(0.35, 0.5, hallD + 0.5, S.hullDark, { base: true, x: side * (ht + 0.07), y: roofY, z: hallCz });
-      b.box(ht * 2 + 0.5, 0.5, 0.35, S.hullDark, { base: true, y: roofY, z: hallCz + side * (hallD / 2 + 0.07) });
+      b.box(A.parapetT, A.parapetH, hallD + A.slabOver, S.hullDark, { base: true, x: side * (ht + A.parapetOut), y: roofY, z: hallCz });
+      b.box(ht * 2 + A.slabOver, A.parapetH, A.parapetT, S.hullDark, { base: true, y: roofY, z: hallCz + side * (hallD / 2 + A.parapetOut) });
       for (const e of [-1, 1]) {
-        spike(b, kit, { x: side * (ht + 0.07), y: roofY + 0.5, z: hallCz + e * (hallD / 2 + 0.07), h: L.spikeH, r: L.spikeR });
+        spike(b, kit, { x: side * (ht + A.parapetOut), y: roofY + A.parapetH, z: hallCz + e * (hallD / 2 + A.parapetOut), h: L.spikeH, r: L.spikeR });
       }
     }
-    b.taperedBox(6.0, 4.4, 0.9, 18, S.hull, { y: roofY, z: hallCz });
-    const a = Math.atan2(0.8, 0.9);
-    for (const side of [-1, 1]) b.box(0.04, 0.14, 14, S.window, { x: side * 2.62, y: roofY + 0.45, z: hallCz, rz: side * a });
-    b.box(2.2, 0.05, 2.8, S.hole, { y: roofY + 0.91, z: hallCz });
+    b.taperedBox(A.humpW, A.humpTopW, A.humpH, A.humpD, S.hull, { y: roofY, z: hallCz });
+    const a = Math.atan2(A.slopeRun, A.humpH);
+    for (const side of [-1, 1]) b.box(A.winT, A.winH, A.winD, S.window, { x: side * A.winX, y: roofY + A.winY, z: hallCz, rz: side * a });
+    b.box(A.holeW, A.holeT, A.holeD, S.hole, { y: roofY + A.holeY, z: hallCz });
   } else if (shape.roof === 'vault') {
+    const V = D.vault;
     const r = hb;
     const k = shape.vaultRise / r;
-    b.cylinder(r, r, hallD, 20, S.hull, { rx: Math.PI / 2, sz: k, y: H, z: hallCz }, false, Math.PI / 2, Math.PI);
-    for (const z of L.pilasterZ) b.torus(r + 0.04, 0.14, 4, 16, Math.PI, S.hullDark, { sy: k, y: H, z });
-    neonStrip(b, kit, 1.2, 0.08, hallD - 4, { y: H + shape.vaultRise, z: hallCz });
-    b.box(2.2, 0.08, 2.6, S.hole, { y: H + shape.vaultRise + 0.02, z: hallCz });
+    b.cylinder(r, r, hallD, V.segments, S.hull, { rx: Math.PI / 2, sz: k, y: H, z: hallCz }, false, Math.PI / 2, Math.PI);
+    for (const z of L.pilasterZ) b.torus(r + V.ribOut, V.ribT, 4, 16, Math.PI, S.hullDark, { sy: k, y: H, z });
+    neonStrip(b, kit, V.neonW, V.neonH, hallD - V.neonInset, { y: H + shape.vaultRise, z: hallCz });
+    b.box(V.holeW, V.holeT, V.holeD, S.hole, { y: H + shape.vaultRise + V.holeLift, z: hallCz });
   } else { // ridge: diamond prism along the hall, light lines on the deck edges, spikes at the ridge ends
-    b.box(hb * 2 + 0.3, L.roofSlab, hallD + 0.3, S.frame, { base: true, y: H, z: hallCz });
-    const ridgeLen = hallD - 2;
+    const R = D.ridge;
+    b.box(hb * 2 + R.slabOver, L.roofSlab, hallD + R.slabOver, S.frame, { base: true, y: H, z: hallCz });
+    const ridgeLen = hallD - R.inset;
     const g = new THREE.BoxGeometry(1, 1, ridgeLen);
     g.rotateZ(Math.PI / 4);
     g.scale(shape.ridgeW / Math.SQRT2, shape.ridgeRise * Math.SQRT2, 1);
     b.add(g, S.hull, { y: roofY, z: hallCz });
-    neonStrip(b, kit, 0.08, 0.06, ridgeLen - 0.4, { y: roofY + shape.ridgeRise + 0.01, z: hallCz });
+    neonStrip(b, kit, R.neonW, R.neonH, ridgeLen - R.neonInset, { y: roofY + shape.ridgeRise + R.neonLift, z: hallCz });
     for (const e of [-1, 1]) {
-      spike(b, kit, { x: 0, y: roofY + shape.ridgeRise * 0.5, z: hallCz + e * (ridgeLen / 2 - 0.4), h: shape.ridgeRise * 0.9, r: L.spikeR * 1.6, s: S.trim });
-      neonStrip(b, kit, 0.05, 0.05, hallD - 0.4, { x: e * (hb + 0.1), y: roofY + 0.025, z: hallCz });
+      spike(b, kit, {
+        x: 0, y: roofY + shape.ridgeRise * R.spikeY, z: hallCz + e * (ridgeLen / 2 - R.spikeEnd), h: shape.ridgeRise * R.spikeH, r: L.spikeR * R.spikeR, s: S.trim,
+      });
+      neonStrip(b, kit, R.edgeT, R.edgeT, hallD - R.edgeInset, { x: e * (hb + R.edgeOut), y: roofY + R.edgeT / 2, z: hallCz });
     }
   }
   const rails = railsOf(kit, shape);
@@ -236,43 +345,48 @@ function buildStatic(kit, shape) {
   let head = null;
   let towerBeaconY = null;
   if (shape.tower === 'round') {
-    b.cylinder(1.7, 1.8, tH, 16, S.hull, { x: tx, y: tH / 2, z: tz });
-    b.cylinder(1.73, 1.73, 0.5, 16, S.neon, { x: tx, y: tH - 0.9, z: tz }, true);
-    b.sphere(1.75, 16, 8, S.hull, { x: tx, y: tH, z: tz, sy: 0.4 });
-    const top = plasmaCoil(b, glows.get('pulse'), kit, { x: tx, y: tH + 0.5, z: tz, h: 1.6, r: 0.5 });
-    arcPairs.push([top, [tx + 1.3, tH + 0.35, tz]], [top, [tx - 0.9, tH + 0.4, tz + 1.0]]);
-    towerBeaconY = tH + 0.2;
+    const T = D.roundTower;
+    b.cylinder(T.rTop, T.rBottom, tH, T.segments, S.hull, { x: tx, y: tH / 2, z: tz });
+    b.cylinder(T.neonR, T.neonR, T.neonH, T.segments, S.neon, { x: tx, y: tH - T.neonBelow, z: tz }, true);
+    b.sphere(T.domeR, T.segments, 8, S.hull, { x: tx, y: tH, z: tz, sy: T.domeFlat });
+    const top = plasmaCoil(b, glows.get('pulse'), kit, { x: tx, y: tH + T.coilLift, z: tz, h: T.coilH, r: T.coilR });
+    arcPairs.push([top, [tx + T.arcA[0], tH + T.arcA[1], tz + T.arcA[2]]], [top, [tx + T.arcB[0], tH + T.arcB[1], tz + T.arcB[2]]]);
+    towerBeaconY = tH + T.beaconLift;
   } else if (shape.tower === 'pylon') {
+    const Y = D.pylon;
     const colTop = roofY + L.pylonColH;
-    styledBox(b, kit, 1.4, L.pylonColH, 1.4, S.hullDark, { base: true, x: tx, y: roofY, z: tz, ry: Math.PI / 4 });
-    b.box(1.5, 0.08, 1.5, S.neon, { x: tx, y: colTop - 0.3, z: tz, ry: Math.PI / 4 });
-    for (let k = 0; k < 4; k++) {
+    styledBox(b, kit, Y.w, L.pylonColH, Y.w, S.hullDark, { base: true, x: tx, y: roofY, z: tz, ry: Math.PI / 4 });
+    b.box(Y.neonW, Y.neonH, Y.neonW, S.neon, { x: tx, y: colTop - Y.neonBelow, z: tz, ry: Math.PI / 4 });
+    for (let k = 0; k < Y.lasers; k++) {
       const a = (k * Math.PI) / 2;
-      laserLink(b, glows.get('laser'), kit, [tx + Math.cos(a) * 0.5, colTop, tz + Math.sin(a) * 0.5],
-        [tx + Math.cos(a) * 0.22, tH - 0.55, tz + Math.sin(a) * 0.22]);
+      laserLink(b, glows.get('laser'), kit, [tx + Math.cos(a) * Y.laserR, colTop, tz + Math.sin(a) * Y.laserR],
+        [tx + Math.cos(a) * Y.laserTopR, tH - Y.laserBelow, tz + Math.sin(a) * Y.laserTopR]);
     }
     head = { kind: 'scanner', x: tx, y: tH, z: tz };
   } else {
+    const T = D.boxTower;
     const tapered = shape.tower === 'tapered';
-    const bw = tapered ? 3.6 : 3.2;
-    const tw = tapered ? 2.8 : 3.2;
+    const bw = tapered ? T.taperW : T.w;
+    const tw = tapered ? T.taperTopW : T.w;
     if (tapered) b.taperedBox(bw, tw, tH, bw, S.hull, { x: tx, z: tz }, tw);
     else styledBox(b, kit, bw, tH, bw, S.hull, { base: true, x: tx, z: tz });
-    const wy = tH - 0.9;
-    const half = bw / 2 - ((bw - tw) / 2) * (wy / tH) + 0.02;
+    const wy = tH - T.winBelow;
+    const half = bw / 2 - ((bw - tw) / 2) * (wy / tH) + T.winOut;
     for (const side of [-1, 1]) {
-      b.box(tw - 0.4, 0.45, 0.05, S.window, { x: tx, y: wy, z: tz + side * half });
-      b.box(0.05, 0.45, tw - 0.4, S.window, { x: tx + side * half, y: wy, z: tz });
+      b.box(tw - T.winInset, T.winH, T.winT, S.window, { x: tx, y: wy, z: tz + side * half });
+      b.box(T.winT, T.winH, tw - T.winInset, S.window, { x: tx + side * half, y: wy, z: tz });
     }
-    b.box(tw + 0.3, 0.3, tw + 0.3, S.frame, { base: true, x: tx, y: tH, z: tz });
-    b.cylinder(0.12, 0.16, 0.8, 8, S.frame, { x: tx, y: tH + 0.55, z: tz });
-    if (st.industrial) head = { kind: 'radar', x: tx, y: tH + 0.95, z: tz };
-    towerBeaconY = tH + 0.3;
+    b.box(tw + T.capOver, T.capH, tw + T.capOver, S.frame, { base: true, x: tx, y: tH, z: tz });
+    b.cylinder(T.mastRTop, T.mastRBottom, T.mastH, 8, S.frame, { x: tx, y: tH + T.mastLift, z: tz });
+    if (st.industrial) head = { kind: 'radar', x: tx, y: tH + T.radarLift, z: tz };
+    towerBeaconY = tH + T.beaconLift;
   }
-  if (towerBeaconY !== null) beacon(b, glows.get('beaconA'), kit, [tx + 1.2, towerBeaconY, tz + 1.2]);
+  if (towerBeaconY !== null) beacon(b, glows.get('beaconA'), kit, [tx + D.towerBeacon, towerBeaconY, tz + D.towerBeacon]);
   // rear right roof corner beacon (vault: on the rear corner rib; armoured: on the parapet)
-  const rb = shape.roof === 'vault' ? [hb + 0.15, H, L.pilasterZ[0]]
-    : shape.roof === 'armored' ? [ht + 0.07, roofY + 0.5, L.hallZ0 + 0.8] : [ht - 0.6, roofY, L.hallZ0 + 0.6];
+  const cb = D.cornerBeacon;
+  const rb = shape.roof === 'vault' ? [hb + cb.vaultOut, H, L.pilasterZ[0]]
+    : shape.roof === 'armored' ? [ht + D.armored.parapetOut, roofY + D.armored.parapetH, L.hallZ0 + cb.parapetZ]
+      : [ht - cb.inset, roofY, L.hallZ0 + cb.inset];
   beacon(b, glows.get('beaconA'), kit, rb);
 
   // roof vents: fans / radiators / plasma orbs (vault: on a pedestal following the vault)
@@ -280,12 +394,13 @@ function buildStatic(kit, shape) {
   for (const [fx, fz] of shape.vents) {
     let y = roofY;
     if (shape.roof === 'vault') {
+      const Vt = D.vent;
       const r = hb;
-      const R = shape.ventR + 0.15;
+      const R = shape.ventR + Vt.pedestalOut;
       const vh = (x) => H + shape.vaultRise * Math.sqrt(Math.max(0, 1 - (x / r) ** 2));
-      const base = vh(fx + R) - 0.1;
-      const top = vh(fx - R) + 0.15;
-      b.cylinder(R, R, top - base, 16, S.hullDark, { x: fx, y: (base + top) / 2, z: fz });
+      const base = vh(fx + R) - Vt.pedestalSink;
+      const top = vh(fx - R) + Vt.pedestalLift;
+      b.cylinder(R, R, top - base, Vt.segments, S.hullDark, { x: fx, y: (base + top) / 2, z: fz });
       y = top;
     }
     vents.push(ventUnit(b, glows, kit, { x: fx, y, z: fz, r: shape.ventR }));
@@ -293,54 +408,60 @@ function buildStatic(kit, shape) {
 
   // right wall equipment: pipes on brackets (industrial) / plasma conduit / laser-linked emitter blocks
   const px = shape.sideX;
-  if (shape.side === 'pipes' && pipeRun(b, kit, [[px, 1.7, 10.0], [px, 1.7, -12.3], [px, H - 0.5, -12.3]], 0.2)) {
-    pipeRun(b, kit, [[px, L.padH, 8.5], [px, 2.4, 8.5], [px, 2.4, -11.6], [px, L.padH, -11.6]], 0.16);
-    for (let z = -10; z <= 7; z += 3.4) {
-      const wx = wallXAt(2.05);
-      b.box(px - wx + 0.2, 1.2, 0.15, S.frame, { x: (px + wx) / 2, y: 2.05, z });
+  const Pp = D.pipes;
+  if (shape.side === 'pipes' && pipeRun(b, kit, [[px, Pp.y, Pp.front], [px, Pp.y, Pp.back], [px, H - Pp.riseBelow, Pp.back]], Pp.r)) {
+    pipeRun(b, kit, [[px, L.padH, Pp.lowFront], [px, Pp.lowY, Pp.lowFront], [px, Pp.lowY, Pp.lowBack], [px, L.padH, Pp.lowBack]], Pp.lowR);
+    for (let z = Pp.bracketZ0; z <= Pp.bracketZ1; z += Pp.bracketStep) {
+      const wx = wallXAt(Pp.bracketY);
+      b.box(px - wx + Pp.bracketOver, Pp.bracketH, Pp.bracketD, S.frame, { x: (px + wx) / 2, y: Pp.bracketY, z });
     }
-    b.cylinder(0.3, 0.3, 0.5, 8, S.hullDark, { x: px, y: 2.4, z: -3 });   // valve housing
-    b.cylinder(0.25, 0.25, 0.06, 10, S.accent, { rz: Math.PI / 2, x: px + 0.35, y: 2.4, z: -3 });
+    b.cylinder(Pp.valveR, Pp.valveR, Pp.valveH, 8, S.hullDark, { x: px, y: Pp.lowY, z: Pp.valveZ });   // valve housing
+    b.cylinder(Pp.wheelR, Pp.wheelR, Pp.wheelT, 10, S.accent, { rz: Math.PI / 2, x: px + Pp.wheelOut, y: Pp.lowY, z: Pp.valveZ });
   } else if (shape.side === 'conduit') {
-    b.box(0.25, 0.25, hallD - 2, S.hullDark, { x: hb + 0.12, y: 1.2, z: hallCz });
-    neonStrip(b, kit, 0.06, 0.08, hallD - 2.2, { x: hb + 0.27, y: 1.2, z: hallCz });
-    for (const z of [-10, -4, 2, 8]) {
-      b.sphere(0.45, 12, 8, S.trim, { x: hb + 0.2, y: 1.2, z, sx: 0.6 });
-      glows.get('pulse').point([hb + 0.35, 1.2, z], PROC_MODULES.glow.radius);
+    const C = D.conduit;
+    b.box(C.s, C.s, hallD - C.inset, S.hullDark, { x: hb + C.out, y: C.y, z: hallCz });
+    neonStrip(b, kit, C.neonW, C.neonH, hallD - C.neonInset, { x: hb + C.neonOut, y: C.y, z: hallCz });
+    for (const z of C.podZ) {
+      b.sphere(C.podR, 12, 8, S.trim, { x: hb + C.podOut, y: C.y, z, sx: C.podFlat });
+      glows.get('pulse').point([hb + C.glowOut, C.y, z], PROC_MODULES.glow.radius);
     }
   } else if (shape.side === 'lasers') {
-    const zs = [-9, -2, 5];
+    const E = D.emitters;
+    const zs = E.z;
     for (const z of zs) {
-      styledBox(b, kit, 0.6, 2.6, 1.2, S.hullDark, { base: true, x: px, y: L.padH, z });
-      b.cylinder(0.16, 0.2, 0.18, 10, S.lens, { x: px, y: L.padH + 2.69, z });
+      styledBox(b, kit, E.w, E.h, E.d, S.hullDark, { base: true, x: px, y: L.padH, z });
+      b.cylinder(E.lensRTop, E.lensRBottom, E.lensH, 10, S.lens, { x: px, y: L.padH + E.lensY, z });
     }
     for (let i = 0; i < zs.length - 1; i++) {
-      for (const y of [1.0, 2.2]) laserLink(b, glows.get('laser'), kit, [px, y, zs[i] + 0.7], [px, y, zs[i + 1] - 0.7]);
+      for (const y of E.linkY) laserLink(b, glows.get('laser'), kit, [px, y, zs[i] + E.linkInset], [px, y, zs[i + 1] - E.linkInset]);
     }
   }
 
   // rear equipment
-  const rz = L.hallZ0 - 0.65;
+  const rz = L.hallZ0 - D.rearZ;
   if (shape.rear === 'tanks') {
-    for (const [cx, len] of [[2.6, 3.4], [-1.2, 2.6]]) tank(b, kit, { x: cx, y: 0.95, z: rz, r: 0.55, len, floorY: L.padH });
+    for (const [cx, len] of D.tanks) tank(b, kit, { x: cx, y: D.tankY, z: rz, r: D.tankR, len, floorY: L.padH });
   } else if (shape.rear === 'generator') {
-    b.box(5.0, 2.2, 1.0, S.hullDark, { base: true, x: 1.5, z: rz });
-    for (let k = 0; k < 3; k++) b.box(4.4, 0.12, 0.06, S.lower, { x: 1.5, y: 0.8 + k * 0.45, z: rz - 0.52 });
-    for (const sx of [3.4, 4.0]) chimney(b, kit, { x: sx, y: 0, z: rz, h: 3.8, r: 0.26 });
+    const G = D.generator;
+    b.box(G.w, G.h, G.d, S.hullDark, { base: true, x: G.x, z: rz });
+    for (let k = 0; k < G.slats; k++) b.box(G.slatW, G.slatH, G.slatT, S.lower, { x: G.x, y: G.slatY0 + k * G.slatStep, z: rz - G.slatZ });
+    for (const sx of G.chimneyX) chimney(b, kit, { x: sx, y: 0, z: rz, h: G.chimneyH, r: G.chimneyR });
   } else if (shape.rear === 'coils') {
-    const tops = [0.5, 3.0].map((cx) => plasmaCoil(b, glows.get('pulse'), kit, { x: cx, y: L.padH, z: rz, h: 2.2, r: 0.45 }));
+    const C = D.coils;
+    const tops = C.x.map((cx) => plasmaCoil(b, glows.get('pulse'), kit, { x: cx, y: L.padH, z: rz, h: C.h, r: C.r }));
     arcPairs.push([tops[0], tops[1]]);
   } else if (shape.rear === 'lens') {
-    const bz = L.hallZ0 - 0.6;
-    for (const cx of [-0.5, 3.0]) {
-      styledBox(b, kit, 1.3, 2.4, 0.8, S.hullDark, { base: true, x: cx, y: L.padH, z: bz });
-      b.cylinder(0.22, 0.28, 0.2, 10, S.lens, { x: cx, y: L.padH + 2.5, z: bz });
-      laserLink(b, glows.get('laser'), kit, [cx, L.padH + 2.7, bz], [cx, roofY + 0.1, L.hallZ0 + 0.15]);
+    const Lb = D.lensBlocks;
+    const bz = L.hallZ0 - Lb.back;
+    for (const cx of Lb.x) {
+      styledBox(b, kit, Lb.w, Lb.h, Lb.d, S.hullDark, { base: true, x: cx, y: L.padH, z: bz });
+      b.cylinder(Lb.lensRTop, Lb.lensRBottom, Lb.lensH, 10, S.lens, { x: cx, y: L.padH + Lb.lensY, z: bz });
+      laserLink(b, glows.get('laser'), kit, [cx, L.padH + Lb.laserY, bz], [cx, roofY + Lb.roofLift, L.hallZ0 + Lb.roofIn]);
     }
-    laserLink(b, glows.get('laser'), kit, [0.25, 1.4, bz], [2.25, 1.4, bz]);
+    laserLink(b, glows.get('laser'), kit, [Lb.linkA[0], Lb.linkA[1], bz], [Lb.linkB[0], Lb.linkB[1], bz]);
   }
 
-  return { geometry: b.build(), glows: glows.build(), vents, head, arcPairs, emblems };
+  return { geometry: b.buildLods(), glows: glows.build(), vents, head, arcPairs, emblems };
 }
 
 // ---------------------------------------------------------------- animated parts
@@ -422,6 +543,15 @@ export class VehicleFactoryProc extends ProcModel {
    */
   constructor({ race, teamColor } = {}) {
     super({ race, teamColor, cache: FACTORY_CACHE, name: 'VehicleFactoryProc' });
+    try {
+      this.#build();
+    } catch (err) {
+      this.dispose();   // give back the references super() took
+      throw err;
+    }
+  }
+
+  #build() {
     const sh = this.shared;
     const kit = this.kit;
     const an = kit.style.anim;
@@ -429,7 +559,7 @@ export class VehicleFactoryProc extends ProcModel {
     const gc = kit.glowColors;
     const seq = instanceCounter++;
 
-    this.paintMesh(sh.static);
+    this.staticMesh(sh.static);
     this.emblem(sh.emblem);
     const layer = (name, color, visible) => (sh.glow[name] ? this.glowLayer(sh.glow[name], color, { visible }) : null);
     this.beacons = layer('beaconA', gc.beacon, false);

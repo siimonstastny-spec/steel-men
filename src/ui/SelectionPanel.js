@@ -6,6 +6,7 @@
 import { t } from '../i18n/i18n.js';
 import { RobotPanel } from './RobotPanel.js';
 import { CenterPanel } from './CenterPanel.js';
+import { setHtmlKeepScroll } from './scrollKeep.js';
 export { mechState } from './hudUtil.js'; // kept for old importers
 
 export class SelectionPanel {
@@ -41,7 +42,7 @@ export class SelectionPanel {
     this.active = panel;
     if (html === this.html) return;
     this.html = html;
-    this.el.innerHTML = html;
+    setHtmlKeepScroll(this.el, html); // the centre panel's scroller (.cp-inner) is rebuilt: keep its position
     this.el.hidden = !html;
     this.el.classList.toggle('sp-empty', !html);
     this.el.classList.toggle('sp-robot', panel === this.robot);

@@ -19,6 +19,7 @@
 //   { a: { [team]: lastContiguousTurn }, t: [[n, cmds?, part?, parts?], …], p: sentAtMs, e: { [team]: [theirP, heldMs] },
 //     h: [[n, hash], …] }
 // topic 'hash': { n, h }
+// topic 'ready' [W6]: { r: 1 } – start barrier, see waitForPlayers() (docs/notes/w6-loading.md)
 //
 // Pause [R5] (docs/notes/r5-pause.md): a pause request is a control entry { type: PAUSE.commandType, team, name }
 // inside the requester's next open turn n – it travels, is acknowledged and resent like any command, so every client
@@ -140,6 +141,11 @@ export class Lockstep {
     this.announced = new Set();     // teams whose leaving was reported to onPlayerLeft listeners
     this.leftListeners = new Set();
     this.pendingDesync = null;      // [MP-LEAVE QA] { n, at } first hash mismatch waiting for confirmation
+    // [W6] start barrier: topic 'ready' { r: 1 } – "my match is loaded"; a 'turn' message from a team also proves it
+    this.readyTeams = new Set();    // remote teams known to be loaded
+    this.selfReady = false;
+    this.barrier = null;            // { resolve, onProgress, timer, startedAt } while waitForPlayers() runs
+    this.lastReadyAt = -Infinity;
     /**
      * Read by main.js every frame (same object for the whole match).
      * paused: null | { turn, team, name } – the match stands before the first tick of `turn` ([R5])
@@ -154,6 +160,7 @@ export class Lockstep {
     this.unsubs = [
       channel.on('turn', (m) => this.#onTurnMessage(m)),
       channel.on('hash', (m) => this.#onHashMessage(m)),
+      channel.on('ready', (m) => this.#onReadyMessage(m)), // [W6]
       channel.onPeers?.(() => this.#updateLeft()) ?? (() => {}),
     ];
   }
@@ -186,6 +193,7 @@ export class Lockstep {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.#endBarrier({ ok: false, cancelled: true, timedOut: false, missing: [], left: [] }); // [W6]
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     for (const u of this.unsubs) { try { u(); } catch { /* gone */ } }
@@ -197,6 +205,83 @@ export class Lockstep {
       this.world.waitForSpawns = false;
     }
     this.started = false;
+  }
+
+  // ---------- start barrier [W6] ----------
+
+  /**
+   * Call when this client has finished loading the match (before start()). Tells the others "ready" and resolves
+   * once every other player is ready too (their 'ready' or any turn message), repeating our 'ready' meanwhile.
+   * Players that vanished from the room do not block (result.left; the drop rules handle them after start()).
+   * Resolves { ok, timedOut, cancelled, missing: teams still not ready, left: teams gone } – never rejects.
+   * Timeout: cfg.readyTimeoutMs (NET.readyTimeoutMs); the caller decides (recommended: go on, the "waiting for
+   * players" overlay and the drop rules take over). onProgress({ ready, total, missing }) on every change.
+   * Touches no simulation state: only the moment of start() differs, never the order of commands.
+   * @param {{onProgress?: Function}} [o]
+   * @returns {Promise<{ok: boolean, timedOut: boolean, cancelled?: boolean, missing: number[], left: number[]}>}
+   */
+  waitForPlayers({ onProgress = null } = {}) {
+    if (this.stopped) return Promise.resolve({ ok: false, cancelled: true, timedOut: false, missing: [], left: [] });
+    if (this.barrier) return Promise.reject(new Error('waitForPlayers already running'));
+    this.selfReady = true;
+    return new Promise((resolve) => {
+      const resend = this.cfg.readyResendMs;
+      this.barrier = { resolve, onProgress, startedAt: this.now(), timer: null };
+      this.barrier.timer = setInterval(() => this.#tickBarrier(), Math.max(NET.minPumpMs, resend));
+      this.#sendReady(true);
+      this.#tickBarrier();
+    });
+  }
+
+  /** Remote teams that are not ready yet and still in the room */
+  get notReady() {
+    return this.remoteTeams.filter((team) => !this.readyTeams.has(team) && !this.status.left.includes(team));
+  }
+
+  #sendReady(force = false) {
+    if (!this.selfReady || !this.isPlayer || this.stopped) return;
+    const now = this.now();
+    if (!force && now - this.lastReadyAt < (this.cfg.readyResendMs)) return;
+    this.lastReadyAt = now;
+    this.channel.send('ready', { r: 1 });
+  }
+
+  #tickBarrier() {
+    const b = this.barrier;
+    if (!b) return;
+    this.#updateLeft();
+    this.#sendReady();
+    const missing = this.notReady;
+    const total = this.remoteTeams.length;
+    try { b.onProgress?.({ ready: total - missing.length - this.status.left.filter((tm) => !this.readyTeams.has(tm)).length, total, missing }); } catch (err) { console.error(err); }
+    if (!missing.length) {
+      this.#endBarrier({ ok: true, timedOut: false, missing: [], left: [...this.status.left] });
+    } else if (this.now() - b.startedAt >= (this.cfg.readyTimeoutMs)) {
+      this.#endBarrier({ ok: false, timedOut: true, missing, left: [...this.status.left] });
+    }
+  }
+
+  #endBarrier(result) {
+    const b = this.barrier;
+    if (!b) return;
+    this.barrier = null;
+    clearInterval(b.timer);
+    b.resolve(result);
+  }
+
+  #onReadyMessage({ from }) {
+    if (this.stopped) return;
+    const team = this.teamByPeer.get(from);
+    if (team === undefined || team === this.localTeam) return;
+    this.#markReady(team);
+    // a late client asks again until it hears us: answer even when our barrier is over (rate limited)
+    if (this.selfReady) this.#sendReady();
+  }
+
+  #markReady(team) {
+    if (this.readyTeams.has(team)) return;
+    this.readyTeams.add(team);
+    if (this.barrier) this.#tickBarrier();
   }
 
   /**
@@ -706,6 +791,7 @@ export class Lockstep {
     const team = this.teamByPeer.get(from);
     if (team === undefined || team === this.localTeam) return; // spectator / stranger / ourselves
     const now = this.now();
+    this.#markReady(team); // [W6] it only sends turns after its own barrier: it is loaded
     // their acknowledgement of our turns
     const ack = data.a?.[this.localTeam];
     if (Number.isInteger(ack) && ack > this.ackFrom.get(team)) { this.ackFrom.set(team, ack); this.#pruneLocal(); }

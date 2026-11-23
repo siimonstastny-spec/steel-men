@@ -364,6 +364,8 @@ export class CommandInput {
     // Idle crew / builder hotkeys (empty by default; the Hud supplies the callbacks, same as its buttons)
     if (!e.repeat && matches(kb.idleCrew ?? [], e.code)) this.onIdleCrew?.();
     if (!e.repeat && matches(kb.idleBuilder ?? [], e.code)) this.onIdleBuilder?.();
+    if (!e.repeat && matches(kb.idleDrill ?? [], e.code)) this.onIdleDrill?.(); // [R6]
+    if (!e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey && matches(kb.stockWindow ?? [], e.code)) this.onStockWindow?.(); // [F1]
     if (matches(kb.debugXp, e.code)) {
       const own = this.selection.filter((u) => isLocal(u) && !u.isStructure);
       if (own.length) this.#submit('debugXp', { units: ids(own) }); // crews, armed vehicles (own XP), crews inside mechs

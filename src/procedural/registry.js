@@ -3,12 +3,18 @@
 // PROCEDURAL_STRUCTURES (id = stats.json → structures key). Visual only.
 import { PROC_BUILDINGS } from '../config.js';
 import { VehicleFactoryProc } from './VehicleFactoryProc.js';
+import { MatterConverterProc } from './MatterConverterProc.js';
+import { ResearchFacilityProc } from './ResearchFacilityProc.js';
+import { SolarPanelProc } from './SolarPanelProc.js';
 
 export { loadBuildingStyles } from './BuildingStyle.js';
 
 /** structure id → (race, teamColor) => ProcModel */
 const PROCEDURAL_STRUCTURES = {
   vehicleFactory: (race, teamColor) => new VehicleFactoryProc({ race, teamColor }),
+  matterConverter: (race, teamColor) => new MatterConverterProc({ race, teamColor }),
+  researchFacility: (race, teamColor) => new ResearchFacilityProc({ race, teamColor }),
+  solarPanel: (race, teamColor) => new SolarPanelProc({ race, teamColor }),
 };
 
 /** Structure ids that have a procedural model */

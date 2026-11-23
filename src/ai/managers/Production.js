@@ -200,9 +200,16 @@ export class ProductionManager {
     const rank = (v) => (v === '@harvester' ? 0 : v === '@combatVehicle' ? 3 : v === '@aircraft' ? 2 : 1);
     const entries = Object.entries(wants).sort(([a], [b]) => rank(a) - rank(b));
     const factories = this.#producers(PRODUCES.vehicle);
-    if (!factories.length) return;
+    // [R5] main building with a builder fallback (stats.builderFallback): offered by check() only while the team has no builder
+    const hqs = this.prod.world.structures
+      .filter((s) => s.team === this.team && s.complete && !s.destroyed && !s.removed && s.stats?.builderFallback
+        && this.prod.itemsOf(s.eid).length < MAX_AI_QUEUE)
+      .sort((a, b) => a.eid - b.eid);
+    if (!factories.length && !hqs.length) return;
     for (const [value, want] of entries) {
       if (!want) continue;
+      const candidates = value === '@builder' ? [...factories, ...hqs] : factories;
+      if (!candidates.length) continue;
       if (hold && value !== '@harvester' && !(value === '@builder' && !own.builders.length)) continue;
       if (value === '@aircraft' && this.energyShort()) continue; // R3: energy gate
       if (value === '@combatVehicle' && this.airWaitsForPopulation) continue; // [v20] the aircraft gets the population
@@ -211,7 +218,7 @@ export class ProductionManager {
       // R3: the first producer that can make this role (a hangar makes no trucks, a vehicle factory no aircraft)
       let factory = null;
       let id = null;
-      for (const f of factories) {
+      for (const f of candidates) {
         id = this.#vehicleFor(value, f);
         if (id) { factory = f; break; }
       }

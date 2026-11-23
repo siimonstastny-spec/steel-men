@@ -25,6 +25,7 @@ import { commandBus } from './game/commands/CommandBus.js';
 import { localTeam, setLocalTeam, isLocal } from './core/LocalPlayer.js';
 import { randomSeed } from './core/Rng.js';
 import { preloadModels } from './core/AssetLoader.js';
+import { LoadingScreen } from './ui/LoadingScreen.js'; // [W6]
 import { Economy, validPopulationCap } from './game/Economy.js';
 import { loadVehicle } from './units/Aircraft.js'; // aircraft → Aircraft, other vehicles → CombatVehicle loader
 import { Structure } from './units/Structure.js';
@@ -55,6 +56,8 @@ import './game/commands/matchCommands.js';
 import './game/commands/diplomacyCommands.js'; // [B4] sendTribute
 import { PlayerStatsBar } from './ui/PlayerStatsBar.js';
 import { DiplomacyView } from './ui/DiplomacyView.js';
+import './game/commands/stockCommands.js'; // [F1] registers the sellPart command on every client
+import { StockWindow } from './ui/StockWindow.js'; // [F1] part stock window (key I, buttons in the part factory / assembly bay)
 import { oreMultiplierFromSettings } from './game/OreMultiplier.js';
 import { startMultiplierFromSettings } from './game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings, applyStartResearch } from './game/StartResearch.js';
@@ -63,6 +66,10 @@ import { spawnProceduralPreview } from './procedural/ProcPreview.js'; // [N3] pr
 import { loadBuildingStyles } from './procedural/BuildingStyle.js'; // [18A] faction building styles (data/buildingStyles.json)
 
 const { renderer, scene, camera, controls, ground } = createScene(document.getElementById('app'));
+// [W6] nothing is drawn behind the main menu: the canvas stays hidden and unrendered until startSimulation()
+let worldVisible = false;
+renderer.domElement.style.visibility = 'hidden';
+const loading = new LoadingScreen();
 
 const world = new World(scene, ground);
 const hqBeams = new HqBeams(world); // src/game/HqBeams.js – team-coloured beam above each HQ
@@ -119,12 +126,14 @@ const nameOf = (team) => playerLabel(team) || (isLocal(team) ? (getSettings().ni
   : window.steelMans?.net?.nameOf?.(team) || t('ping.player', { n: team + 1 }));
 const statsBar = new PlayerStatsBar({ nameOf });
 const diplomacy = new DiplomacyView({ nameOf });
+const stockWindow = new StockWindow(); // [F1]
+input.onStockWindow = () => stockWindow.toggle();
 let econAlerts = null; // [D2] no main building / low energy; created at the first match (needs loaded stats)
 
 // Debug handle for the browser console, e.g. steelMans.input.selection, steelMans.game.playerRace
 // commandBus: steelMans.commandBus.submit({...}); world.stateHash() / world.rng / world.tick for determinism checks
 // startGame(settings): console tests of N players, e.g. steelMans.startGame({ playerCount: 4, alliances: [0, 0, 1, 1], … })
-window.steelMans = { world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy };
+window.steelMans = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow };
 installAiConsole(); // steelMans.ai.start / fastForward / report / log / stop (AI vs AI test)
 // [N3] procedural factory preview: p = await steelMans.spawnProceduralPreview('Y', '#c8302c', {x, y, z}); p.dispose()
 window.steelMans.spawnProceduralPreview = (race = 'X', color = '#3a5ccc', pos = { x: 0, y: 0, z: 0 }, opts) =>
@@ -325,6 +334,7 @@ function enemyJobs(race, loadouts) {
  */
 async function startGame(settings) {
   stopSimulation();
+  loading.begin(settings.multiplayer ? 6 : 5); // [W6] steps: data, map, base, units, models (+ players in multiplayer)
   clearAis();
   if (!settings.multiplayer) stopNet(); // a single-player start ends any previous lockstep match
   setLocalTeam(settings.localTeam ?? PLAYER_TEAM); // single player sits at seat 0; multiplayer: the seat this client took
@@ -360,6 +370,7 @@ async function startGame(settings) {
   // Seed first: map start assignment and deposit placement depend on it (multiplayer: the host's seed, same everywhere)
   const urlSeed = new URLSearchParams(window.location.search).get('seed');
   const seed = settings.seed ?? (urlSeed !== null ? Number(urlSeed) : randomSeed());
+  loading.step('map');
   const map = await world.loadMap(validMapId(settings.map)); // terrain, obstacles, super node, fog of war
   // Start positions: picks from the menu / host first; 2 players on their own = start 0 and the opposite one (as before)
   const order = assignStarts({ map, count: playerCount, alliances: game.alliances, picks: settings.startPicks, seed });
@@ -374,6 +385,7 @@ async function startGame(settings) {
     oreMultiplier: oreMultiplierFromSettings(settings), // [B1] 0.5 | 1 | 2 | 4 | 'infinite'
     startMultiplier: startMultiplierFromSettings(settings), // [D4] starting resources 0.5 | 1 | 2 | 4 | 'infinite'
   };
+  loading.step('data');
   await Promise.all([loadStats(), loadBuildingStyles()]); // [18A] styles before any procedural building is created
   world.economy = new Economy(world, { races: game.races, ...world.settings.economy });
   map.placeDeposits?.(seed); // ASCII maps: deposits on random field cells from the match seed
@@ -389,6 +401,7 @@ async function startGame(settings) {
   world.production.onSpawnBlocked?.((item) => { if (isLocal(item.team)) hud.message(t('prod.spawnBlocked')); });
   hqBeams.dispose?.(); // beams of the previous match
   // Building footprints must be cached before any build command runs (validation reads them synchronously)
+  loading.step('base');
   await Promise.all([...new Set(game.races)].map((race) => preloadFootprints(race)));
   cameraKeys.focus(game.bases[localTeam()] ?? spawnBase);
   try {
@@ -399,9 +412,11 @@ async function startGame(settings) {
       ...testStructureJobs(PLAYER_TEAM, playerRace, spawnBase),
     ]);
   } catch (err) { console.error(err); }
+  loading.step('units');
   await init(playerRace, enemyRace);
-  // Everything that later productions may need goes into the model cache in the background
-  preloadModels(matchModelPaths(game.races)).catch((err) => console.warn(err));
+  // [W6] the models of later productions are cached before the match starts: nothing pops in during play
+  loading.step('models');
+  try { await preloadModels(matchModelPaths(game.races)); } catch (err) { console.warn(err); }
   // ?seed=123 in the URL fixes the seed (determinism checks: same seed + same commands = same world.stateHash())
   startSimulation(seed);
   // Idle HoverTrucks repair / finish nearby work if this player wants it (profile; a command, so every client agrees).
@@ -461,6 +476,8 @@ async function init(RACE, enemyRace) {
     });
     game.robotProduction = new RobotProduction({ buildMenu: game.buildMenu, catalog });
     game.buildMenu.robotProduction = game.robotProduction;
+    game.robotProduction.onOpenStock = () => stockWindow.open(); // [F1] button in the part factory / assembly bay panels
+    stockWindow.setMatch(world);
     game.buildMenu.researchView = new ResearchView({ buildMenu: game.buildMenu, research: world.research });
     hud.start({ race: raceOf(me), buildMenu: game.buildMenu });
     // Match end: victory condition from the menu; checking starts now that the starting units exist
@@ -486,6 +503,7 @@ async function init(RACE, enemyRace) {
 // ---------- start menu ----------
 
 async function showMenu() {
+  loading.show(); // [W6] covers the page start (stats / map previews load) – hidden below once the menu stands
   try {
     await loadStats();
     const races = raceList();
@@ -494,9 +512,11 @@ async function showMenu() {
       races, teams: TEAMS, onStart: (s) => { lastSoloSettings = s; return startGame(s); },
       multiplayer: { createTransport: mp.createTransport, Lobby: mp.Lobby },
       onMultiplayerStart: (info) => startMultiplayer(info).catch((err) => { console.error(err); hud.message(t('menu.errorLoading')); }),
+      loading,
     });
   } catch (err) {
     console.error(err);
+    loading.hide();
     hud.message(t('menu.errorLoading'));
     return;
   }
@@ -508,9 +528,9 @@ async function showMenu() {
       const s = JSON.parse(raw);
       lastSoloSettings = s;
       game.menu.show(false);
-      await startGame(s);
-    }
-  } catch (err) { console.error(err); }
+      try { await startGame(s); } finally { loading.hide(); } // the loading screen stays up from the page start
+    } else loading.hide();
+  } catch (err) { console.error(err); loading.hide(); }
 }
 
 // ---------- multiplayer: lockstep over src/net (docs/MULTIPLAYER.md) ----------
@@ -567,6 +587,25 @@ async function startMultiplayer(info) {
     seed: info.seed,
     localTeam: info.localTeam ?? PLAYER_TEAM, // spectators are not supported yet
   });
+  // [W6] barrier: every human finishes loading before tick 0 (timeout / disconnect: the match goes on, the drop rules apply)
+  const lock = net;
+  if (lock) {
+    loading.step('players');
+    const names = (teams) => teams.map((tm) => lock.nameOf(tm) || t('lobby.seat', { n: tm + 1 })).join(', ');
+    simRunning = false; // no tick runs while we wait (the first empty turns must not be played before net.start())
+    let res;
+    try {
+      res = await lock.waitForPlayers({
+        onProgress: ({ ready, total }) => loading.setStatus(t('loading.waitingPlayers', { ready, total })),
+      });
+    } finally {
+      simAccumulator = 0;
+      simRunning = true; // never leave the simulation frozen, even when the barrier throws
+    }
+    if (res.cancelled || net !== lock) { simRunning = false; return; } // stopNet() in the meantime
+    if (res.left.length) hud.message(t('loading.playerLeft', { players: names(res.left) }));
+    else if (res.timedOut) hud.message(t('loading.timeout', { players: names(res.missing) }));
+  }
   net?.start(); // after startSimulation: tick 0, empty bus; switches commandBus.schedule to the network
   if (net && info.localTeam != null) submitAutoAssist(); // through the lockstep: runs on every client at the same tick
 }
@@ -615,6 +654,8 @@ function startSimulation(seed) {
   commandBus.reset();
   simAccumulator = 0;
   simRunning = true;
+  worldVisible = true; // [W6] from now on the world is drawn
+  renderer.domElement.style.visibility = '';
 }
 
 function stopSimulation() { simRunning = false; }
@@ -752,9 +793,11 @@ renderer.setAnimationLoop(() => {
   cameraKeys.update(dt);
   edgeScroll.update(dt);
   controls.update();
-  applyInterpolation(alpha);
-  renderer.render(scene, camera);
-  restoreInterpolation();
+  if (worldVisible) { // [W6] nothing behind the main menu
+    applyInterpolation(alpha);
+    renderer.render(scene, camera);
+    restoreInterpolation();
+  }
   hud.update(dt);
   updatePrebuildBanner(); // [N8] pre-build countdown
   econAlerts?.update();   // [D2] below the pre-build banner

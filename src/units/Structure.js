@@ -160,7 +160,23 @@ export class Structure extends THREE.Group {
       ? createProceduralStructure(this.unitId, this.race, TEAMS[this.team].color)
       : await loadModel(this.stats.model);
     this.procModel = proc ? model : null;
+    try {
+      this.#attachModel(model, fp, proc ? null : (await loadGltf(this.stats.model)).animations[STRUCTURE.animClipIndex]);
+    } catch (err) {
+      this.#dropProcModel();
+      throw err;
+    }
+    // Removed while loading (World already ran its removal without this model): release the procedural model
+    if (this.removed) this.#dropProcModel();
+    return this;
+  }
 
+  #dropProcModel() {
+    this.procModel?.dispose();
+    this.procModel = null;
+  }
+
+  #attachModel(model, fp, clip) {
     model.scale.setScalar(structureScale(this.stats));
     model.position.set(-fp.offsetX, 0, -fp.offsetZ);
     model.traverse((o) => {
@@ -173,7 +189,6 @@ export class Structure extends THREE.Group {
     this.holder = new THREE.Group(); // scaled vertically while the building goes up
     this.holder.add(model);
     this.add(this.holder);
-    const clip = proc ? null : (await loadGltf(this.stats.model)).animations[STRUCTURE.animClipIndex];
     if (clip) {
       this.mixer = new THREE.AnimationMixer(model);
       this.idleAction = this.mixer.clipAction(clip);
@@ -182,8 +197,10 @@ export class Structure extends THREE.Group {
     this.#createOutline();
     this.refreshTeamColor();
     this.#refreshVisual();
-    if (this.complete) this.idleAction?.play();
-    return this;
+    if (this.complete) {
+      this.idleAction?.play();
+      this.procModel?.enableBatching();   // finished: static body goes to the instanced groups (BuildingBatcher)
+    }
   }
 
   // ---------- state ----------
@@ -243,6 +260,7 @@ export class Structure extends THREE.Group {
     this.builders = new Set();
     this.#refreshVisual();
     this.idleAction?.play();
+    this.procModel?.enableBatching();
   }
 
   // ---------- damage ----------
@@ -405,8 +423,11 @@ export class Structure extends THREE.Group {
     if (this.dead || !this.holder) return; // not loaded yet (build commands add the building before its model)
     if (this.stats?.sunTracking && this.idleAction) this.#trackSun();
     else this.mixer?.update(dt);
-    // Visual only (does not change state): crane / door / beacons while the building produces
-    this.procModel?.update(dt, this.complete && this.powered && (this.world?.production?.itemsOf(this.eid).length ?? 0) > 0);
+    // Visual only (does not change state): crane / door / beacons while the building produces. tick() = batching
+    // bookkeeping (fog of war, LOD) + update(); a far or hidden building is not animated.
+    // (sunClock: the shared real-time sun clock – visual only, same as #trackSun – for a procedural solar panel)
+    this.procModel?.tick(dt, this.complete && this.powered && (this.world?.production?.itemsOf(this.eid).length ?? 0) > 0,
+      this.stats?.sunTracking ? (performance.now() / 1000) * STRUCTURE.sunTrackingSpeed : 0);
     // Swap the two builder sets instead of allocating a new one every tick
     const last = this.builders;
     this.builders = this._working;

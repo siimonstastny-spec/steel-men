@@ -17,7 +17,7 @@
     "surface": "metalness / roughness of the main hull",
     "reactorGlow": "glow colour of the advanced generator (tier 3)",
     "anim": "tempo (speed multiplier of cranes), jerk (0..1 stepped piston-like travel), spin (fans / rings / radar), pulse (Hz of glow pulses), blink (s beacon period), glowRamp (1/s radiator heat-up), levitate (amplitude multiplier)",
-    "emblem": "{ render: neon | paint, color (sRGB), backlight (paint only, 0..1), paths: SVG path strings, viewBox 0 0 100 100, y down, closed subpaths, fill-rule evenodd (a subpath inside another is a hole) }"
+    "emblem": "{ render: neon | paint, color (sRGB logo colour for UI – on buildings the emblem takes the team colour), backlight (paint only, 0..1), paths: SVG path strings, viewBox 0 0 100 100, y down, closed subpaths, fill-rule evenodd (a subpath inside another is a hole) }"
   },
   "_defaults": {
     "edges": { "radius": 0, "segments": 0 },
@@ -94,7 +94,7 @@
     "emblem": {
       "render": "paint",
       "color": "#d8261c",
-      "backlight": 0.25,
+      "backlight": 0.45,
       "paths": [
         "M12 4 L17 22 L46 40 L46 49 L14 30 L6 35 L6 27 L11 24 Z",
         "M22 42 L32 48 L32 70 L22 60 Z",

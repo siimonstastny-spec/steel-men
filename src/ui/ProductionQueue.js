@@ -76,5 +76,14 @@ export class ProductionQueue {
   }
 }
 
+/**
+ * [W3] The head item of a queue is not running yet because its deferred cost (energy) is not paid (Production.update):
+ * `item.due` still holds an amount. Only the first item of a queue can wait; the others wait for their turn anyway.
+ */
+export function isWaitingEnergy(item, economy) {
+  const sim = item.sim ?? item;
+  return Boolean(sim.due) && Boolean(economy?.hasDue(sim.due));
+}
+
 /** Progress 0..1 of a queue item (sim item or view item) */
 export const progressOf = (item) => (item.total > 0 ? Math.min(1, item.elapsed / item.total) : 1);

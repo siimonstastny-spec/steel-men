@@ -10,7 +10,7 @@
 //   • service page while a mech is inside: 'serviceRepair' / 'serviceSwap' / 'serviceCancel' / 'serviceRelease'
 //   • 3D hologram in every own bay (MechHologram): the mech being assembled (Frame for parts not installed yet,
 //     the parts appear one by one with the progress) or, while the bay is selected, the preview of the choice.
-import { HUD, ROBOT_PRODUCTION, HOLOGRAM, ARMS, BAY_CREW, SHIFT_BATCH } from '../config.js';
+import { HUD, ROBOT_PRODUCTION, HOLOGRAM, ARMS, BAY_CREW, SHIFT_BATCH, PART_SALE } from '../config.js';
 import { bayCrewCount } from '../game/BayCrew.js';
 import { partStats, mechStatsFromLoadout, mechAssemblyStats } from '../data/Stats.js';
 import { t } from '../i18n/i18n.js';
@@ -65,6 +65,7 @@ export class RobotProduction {
     this.leftEmpty = new Set();  // optional slots the player chose to leave empty (no arm)
     this.holograms = new Map();  // assembly bay structure -> MechHologram
     this.partHolograms = new Map(); // assembly bay structure -> PartHologram (part being mounted on a serviced mech)
+    this.onOpenStock = null;     // [F1] set by main.js: () => stockWindow.open() (button "Part stock" in both panels)
     // Short notices of orders (e.g. a mech cannot drive into a bay that is assembling) go to the HUD message line
     buildMenu.input.notify = (text) => buildMenu.notify(text);
   }
@@ -94,6 +95,11 @@ export class RobotProduction {
       t('parts.inStock', { n: this.stock.count(this.team, p.path) })].filter(Boolean).join('\n');
   }
 
+  /** [F1] Grid button that opens the part stock window (where parts are sold) */
+  #stockItem() {
+    return { icon: PART_SALE.windowIcon, label: t('stock.open'), tip: t('stock.open.tip'), onClick: () => this.onOpenStock?.() };
+  }
+
   #fullTip(producer) {
     return this.queue.isFull(producer) ? t('hud.queue.full', { max: HUD.production.maxQueue }) : '';
   }
@@ -109,9 +115,10 @@ export class RobotProduction {
       tip: [this.#partTip(p, slot), t('grid.shiftBatch', { n: SHIFT_BATCH.count }), this.#fullTip(producer)].filter(Boolean).join('\n'),
       onClick: (e) => this.#queuePart(structure, slot, p, e?.shift),
     }));
+    items.push(this.#stockItem());
     return {
       title, items,
-      tabs: this.#tabs(slot, (s) => { this.factorySlot = s; this.buildMenu.hud.refresh?.(); }, PART_SLOTS),
+      tabs: this.#tabs(slot, (s) => { this.factorySlot = s;this.buildMenu.hud.refresh?.(); }, PART_SLOTS),
       summary: [
         { label: t('hud.queue.title'), value: `${this.queue.itemsOf(producer).length} / ${HUD.production.maxQueue}` },
         { label: t('parts.stock'), value: this.stock.total(this.team) },
@@ -204,6 +211,7 @@ export class RobotProduction {
     }
     items.push(...this.buildMenu.gatherItems(structure)); // [R4] stance of new mechs, clear rally
     items.push(this.#releaseCrewItem(structure)); // [N2]
+    items.push(this.#stockItem()); // [F1]
     const full = this.queue.isFull(producer);
     const complete = this.#complete;
     return {

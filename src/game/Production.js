@@ -89,6 +89,8 @@ export class Production {
     this.pendingGather = [];
     /** [N2] crewless mechs from a bay that remember their rally chain: { mech, rally } – applied once they are active */
     this.heldRally = [];
+    /** [R5] builders finished but not in the world yet: { team, eid } – still count as the team's builder (hasBuilder) */
+    this.pendingBuilders = [];
   }
 
   /** Registers a listener for "no free space around the building" (must not change the simulation) */
@@ -178,7 +180,48 @@ export class Production {
         out.push({ kind: 'vehicle', unitId: id, stats: unitStats('vehicles', id, race, team) });
       }
     }
+    // [R5] the main building makes a builder (same cost / time as in the factory) only while the team has none
+    const fallback = this.#fallbackBuilder(structure);
+    if (fallback && !out.some((o) => o.unitId === fallback) && !this.hasBuilder(team, null)) {
+      out.push({ kind: 'vehicle', unitId: fallback, stats: unitStats('vehicles', fallback, race, team) });
+    }
     return out;
+  }
+
+  /** [R5] Builder vehicle id a finished building may make when the team has no builder (stats.builderFallback), or null */
+  #fallbackBuilder(structure) {
+    const id = structure.stats?.builderFallback;
+    if (!id || !structure.complete || structure.destroyed || structure.removed) return null;
+    const raw = getStats().vehicles?.[id];
+    if (!raw || raw.buildable === false || !this.#isBuilderId(id)) return null;
+    return canProduce(this.raceOf(structure.team), 'vehicles', id, this.unlocksOf(structure.team)) ? id : null;
+  }
+
+  #isBuilderId(unitId) {
+    return Boolean(getStats().vehicles?.[unitId]?.abilities?.some((a) => a.type === 'construct'));
+  }
+
+  /**
+   * [R5] Does the team have a builder: a living vehicle with the construct ability, one queued in any producer, or one
+   * finished and still entering the world. `except` (a queue item) and queued items that start after it are ignored
+   * (start check of an item: it must not cancel itself or the item of another building that is older).
+   */
+  hasBuilder(team, except = null) {
+    for (const v of this.world.vehicles ?? []) {
+      if (v.team === team && !v.dead && !v.removed && !v.destroyed && v.canConstruct) return true;
+    }
+    for (const items of this.queues.values()) {
+      for (const i of items) {
+        if (i.team !== team || i.kind !== 'vehicle' || !this.#isBuilderId(i.unitId)) continue;
+        if (except && (i === except || (i.elapsed <= 0 && i.id > except.id))) continue;
+        return true;
+      }
+    }
+    const pending = this.world.pendingSpawns ?? [];
+    for (const b of this.pendingBuilders) {
+      if (b.team === team && pending.some((e) => e.eid === b.eid)) return true;
+    }
+    return false;
   }
 
   #vehicleAllowed(structure, id) {
@@ -268,7 +311,11 @@ export class Production {
 
   #planUnit(cmd) {
     const crew = cmd.kind === 'crew';
-    const s = this.#producer(cmd, crew ? PRODUCES.crew : PRODUCES.vehicle);
+    let s = this.#producer(cmd, crew ? PRODUCES.crew : PRODUCES.vehicle);
+    if (!s && !crew) { // [R5] main building: only the builder fallback (unitOptions decides if it is offered now)
+      const h = this.world.entityById?.(cmd.producer) ?? null;
+      if (h?.isStructure && !h.removed && !h.destroyed && h.team === cmd.team && this.#fallbackBuilder(h)) s = h;
+    }
     if (!s) return no(REASON.producer);
     const option = this.unitOptions(s).find((o) => o.kind === cmd.kind && (crew || o.unitId === cmd.unitId));
     if (!option) return no(REASON.locked);
@@ -570,6 +617,9 @@ export class Production {
     this.#tickGather(); // [R4] produced units that entered the world since the last tick
     this.#tickHeld(); // [N2] crewless mechs whose crew got in: off to the rally chain
     this.#releaseLostBays(); // [N2] crews in a lost bay come out
+    if (this.pendingBuilders.length) { // [R5] builders that entered the world (or failed to load) no longer count as pending
+      this.pendingBuilders = this.pendingBuilders.filter((b) => this.world.pendingSpawns?.some((e) => e.eid === b.eid));
+    }
     // Assembly bays of every team: busy while a draft or a queued mech holds them (Repair.bayAssembling)
     for (const s of this.world.structures) {
       if (s.isStructure && !s.destroyed && s.produces.includes(PRODUCES.mech)) s.assemblyBusy = this.isAssembling(s);
@@ -580,6 +630,13 @@ export class Production {
       const items = this.itemsOf(eid);
       const item = items[0];
       if (!item) { this.queues.delete(eid); continue; }
+      // [R5] a fallback builder of the main building that has not started: a builder came from elsewhere meanwhile –
+      // the item is cancelled (refund by the usual rules); factory builders are never affected
+      if (item.kind === 'vehicle' && item.elapsed <= 0 && structure.stats?.builderFallback === item.unitId
+        && !this.#vehicleAllowed(structure, item.unitId) && this.hasBuilder(item.team, item)) {
+        this.cancel(item.id);
+        continue;
+      }
       // One place in the bay: an assembly does not start while a mech is serviced there
       if (item.kind === 'mech' && item.elapsed <= 0 && structure.service) continue;
       // [W5b] the real start: the deferred part of the cost (energy); without it the item waits, drawing nothing
@@ -617,6 +674,7 @@ export class Production {
       try {
         const result = fn(team, race, ...args, at, structure);
         if (result?.eid != null) this.world.holdSupply?.(result.eid, team, item.supply ?? 0);
+        if (result?.eid != null && item.kind === 'vehicle' && this.#isBuilderId(item.unitId)) this.pendingBuilders.push({ team, eid: result.eid });
         // [R4] the reserved entity id: stance and rally chain are applied once the unit exists (#tickGather)
         // [N2] a mech always waits there too: it takes a crew from the bay queue when it appears
         const mech = item.kind === 'mech';

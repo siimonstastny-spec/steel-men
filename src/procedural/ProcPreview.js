@@ -5,6 +5,7 @@
 //   p.producing = false;  p.model.stats();  p.dispose();
 import * as THREE from 'three';
 import { createProceduralStructure, loadBuildingStyles } from './registry.js';
+import { styleKeys } from './BuildingStyle.js';
 import { loadModel, loadGltf } from '../core/AssetLoader.js';
 import { applyTeamColor } from '../core/TeamColor.js';
 import { loadStats, unitStats } from '../data/Stats.js';
@@ -14,6 +15,7 @@ import { structureScale } from '../units/Structure.js';
 export const PROC_PREVIEW = {
   gap: 26,          // model units between the procedural model and the GLB (along +X, before structure scale)
   maxDelta: 0.1,    // s – frame delta clamp (tab in background)
+  teamColor: '#3a5ccc',   // default team colour of the preview
 };
 
 /**
@@ -21,13 +23,14 @@ export const PROC_PREVIEW = {
  * the current GLB model beside it (+X). Returns a handle { model, original, producing, dispose() }.
  * @param {THREE.Object3D} scene
  * @param {{x:number, y:number, z:number}} position
- * @param {string} race
+ * @param {string} [raceKey]  style / race key (default: the first style of data/buildingStyles.json)
  * @param {THREE.ColorRepresentation} teamColor
  * @param {object} [opts] { id = 'vehicleFactory', withOriginal = true, producing = true, yaw = 0 }
  */
-export async function spawnProceduralPreview(scene, position = { x: 0, y: 0, z: 0 }, race = 'X', teamColor = '#3a5ccc',
+export async function spawnProceduralPreview(scene, position = { x: 0, y: 0, z: 0 }, raceKey = undefined, teamColor = PROC_PREVIEW.teamColor,
   { id = 'vehicleFactory', withOriginal = true, producing = true, yaw = 0 } = {}) {
   await Promise.all([loadStats(), loadBuildingStyles()]);
+  const race = raceKey ?? styleKeys()[0];
   const stats = unitStats('structures', id, race);
   const scale = structureScale(stats);
   const model = createProceduralStructure(id, race, teamColor);
@@ -40,19 +43,24 @@ export async function spawnProceduralPreview(scene, position = { x: 0, y: 0, z: 
   const handle = { model, original: null, mixer: null, producing, disposed: false, dispose: null };
 
   if (withOriginal) {
-    const original = await loadModel(stats.model);
-    original.scale.setScalar(scale);
-    original.position.set(position.x + PROC_PREVIEW.gap * scale, position.y ?? 0, position.z);
-    original.rotation.y = yaw;
-    original.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    applyTeamColor(original, teamColor);
-    const clip = (await loadGltf(stats.model)).animations[0];
-    if (clip) {
-      handle.mixer = new THREE.AnimationMixer(original);
-      handle.mixer.clipAction(clip).play();
+    try {
+      const original = await loadModel(stats.model);
+      original.scale.setScalar(scale);
+      original.position.set(position.x + PROC_PREVIEW.gap * scale, position.y ?? 0, position.z);
+      original.rotation.y = yaw;
+      original.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      applyTeamColor(original, teamColor);
+      const clip = (await loadGltf(stats.model)).animations[0];
+      if (clip) {
+        handle.mixer = new THREE.AnimationMixer(original);
+        handle.mixer.clipAction(clip).play();
+      }
+      scene.add(original);
+      handle.original = original;
+    } catch (err) {
+      model.dispose();   // no handle reaches the caller: release the procedural model here
+      throw err;
     }
-    if (!handle.disposed) scene.add(original);
-    handle.original = original;
   }
 
   let last = performance.now();

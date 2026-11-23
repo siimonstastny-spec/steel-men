@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v23';
+export const GAME_VERSION = 'v24';
 export const BASE64_MODEL_SUFFIX = '.txt';
 // Model folders (path prefixes) whose textures were exported upside down (V flipped – round floor pads came out
 // inside out): the loader mirrors the texture transform once per model (src/core/AssetLoader.js), team colour copies
@@ -21,6 +21,14 @@ export const MODEL_TEXTURE_FIX = { flipV: ['3DStructures', '3DVehicles/DrillTruc
 export const MODEL_GEOMETRY_FIX = {
   capFront: { paths: ['3DVehicles/DrillTruck'], tolerance: 0.5 },
 };
+
+// --- [F2] weapon accuracy (src/game/Combat.js; balance numbers are in data/stats.json rules.combat.accuracy) ---
+export const ACCURACY = {
+  enabled: true,            // false = old rule (accuracy − evasion, no range / movement / melee factor, miss lands beside the target)
+  testShots: 1000,          // default sample size of Combat.accuracyReport (console test)
+  testRangeSteps: [0, 0.25, 0.5, 0.75, 1], // shares of the weapon range probed by the report
+};
+// --- [F2] end ---
 
 // Aktivní rasa (poslední písmeno v názvu modelu: X / Y / Z)
 export const RACE = 'X';
@@ -221,6 +229,14 @@ export const RADAR = {
 };
 
 // ===== Phase 0 sections: each parallel agent adds its constants ONLY inside its own section (Edit tool) =====
+// --- [W9] map edge fade (src/game/MapEdgeFade.js) ---
+/** The terrain darkens into a colour along the map border (vertex colours, visual only) */
+export const MAP_EDGE_FADE = {
+  width: 24,                // units from the border over which the fade runs (≈ 5 terrain cells)
+  color: [0, 0, 0],         // r, g, b (0..1) the terrain fades into – black
+  exponent: 1.6,            // >1 = stays bright longer and drops steeper at the very edge, 1 = linear
+};
+
 // --- [DET] simulation / determinism ---
 /**
  * Fixed-step simulation (main.js loop, World.update). The simulation always advances in ticks of 1 / tickRate s,
@@ -281,6 +297,13 @@ export const ARMS = {
  * One turn = turnTicks simulation ticks; commands given during turn T run at the start of turn T + inputDelayTurns.
  * The room capability drops messages, does not keep order and allows ~40 messages/s (emit + presence) of ≤ 4 KiB.
  */
+// [W6] Loading screen (src/ui/LoadingScreen.js, css --loading-fade must equal fadeMs)
+export const LOADING = {
+  backgroundImage: '',   // path of the loading picture, e.g. 'data/image/loading.jpg' ('' = none, plain dark background)
+  fadeMs: 250,           // fade-out time
+  paintTimeoutMs: 100,   // show(): paint is awaited at most this long (hidden tabs run no animation frames)
+};
+
 export const NET = {
   minPumpMs: 16,             // [MP-POLISH] lower bound of the Lockstep pump() timer interval (ms)
   turnTicks: 3,              // ticks per turn (3 ticks at SIM.tickRate 30 = 100 ms); one turn message per turn
@@ -296,7 +319,9 @@ export const NET = {
   resendMs: 200,             // nothing sent for this long (stalled / waiting): resend the unacknowledged turns + acks
   maxTurnsAhead: 64,         // a received turn this far beyond the executed one is ignored (garbage / old match)
   pingSmoothing: 0.2,        // exponential smoothing of the measured round trip (0..1, higher = faster reaction)
-  hiddenPumpMs: 100,         // hidden tab (no animation frames): main.js runs due ticks on this timer (browsers may slow it to 1 s)
+  readyResendMs: 250,        // [W6] loading barrier: how often an unfinished client repeats its `ready` message (ms)
+  readyTimeoutMs: 120000,    // [W6] loading barrier: longest wait for the other humans before the match goes on (ms)
+  hiddenPumpMs: 100,        // hidden tab (no animation frames): main.js runs due ticks on this timer (browsers may slow it to 1 s)
   hiddenMaxFrameTime: 1.5,   // s – real-time gap one hidden-tab pump may catch up…
   hiddenMaxSteps: 45,        // …in at most this many ticks
   waitOverlayMs: 400,       // status.stalledMs above this = main.js shows "waiting for players"
@@ -355,7 +380,7 @@ export const NET = {
       'stun:stun.cloudflare.com:3478',
     ],
     turnServers: [],             // optional TURN relays {urls, username, credential} for strict NAT (none yet)
-    topics: ['lobby', 'turn', 'hash', 'start'], // receivers registered as soon as a room is joined
+    topics: ['lobby', 'turn', 'hash', 'start', 'ready'],// receivers registered as soon as a room is joined
     relayCheckTimeoutMs: 5000,   // relayCheck.js: a relay not answering a subscription (EOSE) by then counts as dead
     relayCheckKind: 20078,       // relayCheck.js: ephemeral event kind in the test subscription (any valid kind works)
   },
@@ -738,8 +763,10 @@ export const KEYBINDINGS = {
   rotateBuilding: ['KeyT'],      // while placing a building: turn it by PLACEMENT.rotateStep (Shift = the other way)
   idleCrew: [],                  // select the next idle crew + centre the camera (no default key – set in Settings → Controls)
   idleBuilder: [],               // same for idle builder vehicles
+  idleDrill: [],                 // same for idle drill trucks (harvest ability, no order)
   fullscreen: [],                // toggle browser fullscreen (no default key – set in Settings → Controls)
   diplomacy: ['KeyU'],           // [B4] open / close the diplomacy menu (src/ui/DiplomacyView.js)
+  stockWindow: ['KeyI'],         // [F1] open / close the part stock window (src/ui/StockWindow.js)
   groupModifier: 'ctrl',      // 'ctrl' | 'shift' | 'alt'
   controlGroups: [
     ['Digit1', 'Numpad1'], ['Digit2', 'Numpad2'], ['Digit3', 'Numpad3'],
@@ -1059,7 +1086,10 @@ export const I18N = {
 };
 
 /** Advanced graphics options of the Full preset (the shipped default of settings.graphics.advanced; see GRAPHICS) */
-const GRAPHICS_FULL = { pixelRatioCap: 2, pixelRatioScale: 1, shadows: true, shadowMapSize: 2048, shadowType: 'PCFSoftShadowMap' };
+const GRAPHICS_FULL = {
+  pixelRatioCap: 2, pixelRatioScale: 1, shadows: true, shadowMapSize: 2048, shadowType: 'PCFSoftShadowMap',
+  buildingDetail: 'high', buildingShadows: true, buildingAnimations: 'full',
+};
 
 /** Defaults of the player settings saved in the profile (see Settings screen) */
 export const SETTINGS_DEFAULTS = {
@@ -1082,11 +1112,19 @@ export const MOUSE = {
 
 /** Graphics quality presets (src/core/Graphics.js) */
 export const GRAPHICS = {
-  qualities: ['full', 'reduced'],
+  qualities: ['full', 'medium', 'reduced'],
   presets: {
-    full: { pixelRatioCap: 2, pixelRatioScale: 1, shadows: true, shadowMapSize: 2048, shadowType: 'PCFSoftShadowMap', antialiasHint: true },
-    // reduced = render at a lower resolution (downscale) and cheaper, smaller shadows
-    reduced: { pixelRatioCap: 1, pixelRatioScale: 0.6, shadows: true, shadowMapSize: 512, shadowType: 'BasicShadowMap', antialiasHint: false },
+    full: { ...GRAPHICS_FULL, antialiasHint: true },
+    // medium = slightly lower resolution, smaller shadows, buildings animated only near the camera
+    medium: {
+      pixelRatioCap: 1.5, pixelRatioScale: 0.8, shadows: true, shadowMapSize: 1024, shadowType: 'PCFShadowMap',
+      buildingDetail: 'medium', buildingShadows: true, buildingAnimations: 'near', antialiasHint: true,
+    },
+    // reduced = render at a lower resolution (downscale) and cheaper, smaller shadows, simple buildings without shadows
+    reduced: {
+      pixelRatioCap: 1, pixelRatioScale: 0.6, shadows: true, shadowMapSize: 512, shadowType: 'BasicShadowMap',
+      buildingDetail: 'low', buildingShadows: false, buildingAnimations: 'off', antialiasHint: false,
+    },
   },
   minPixelRatio: 0.4,
   customQuality: 'custom',  // quality id shown when the advanced options match no preset (not selectable)
@@ -1098,6 +1136,10 @@ export const GRAPHICS = {
     shadows: { type: 'boolean' },
     shadowMapSize: { values: [2048, 1024, 512] },
     shadowType: { values: ['PCFSoftShadowMap', 'PCFShadowMap', 'BasicShadowMap'] },
+    // procedural buildings (see BUILDING_LOD): detail level by camera distance; auto = follows the frame time
+    buildingDetail: { values: ['high', 'medium', 'low', 'auto'] },
+    buildingShadows: { type: 'boolean' },                                  // buildings cast shadows
+    buildingAnimations: { values: ['full', 'near', 'off'] },               // animated parts + glow meshes: LOD0 range full / reduced / none
   },
 };
 
@@ -1108,7 +1150,7 @@ export const KEY_CATEGORIES = [
   { id: 'camera', actions: ['cameraForward', 'cameraBack', 'cameraLeft', 'cameraRight'] },
   { id: 'commands', actions: ['eject', 'dropLeft', 'dropRight', 'attackMove', 'guard', 'patrol', 'cancel', 'move', 'stop', 'deleteUnit', 'stanceRanged', 'stanceMelee',
     'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair'] },
-  { id: 'general', actions: ['rotateBuilding', 'idleCrew', 'idleBuilder', 'fullscreen', 'diplomacy'] },
+  { id: 'general', actions: ['rotateBuilding', 'idleCrew', 'idleBuilder', 'idleDrill', 'fullscreen', 'diplomacy', 'stockWindow'] },
 ];
 export const KEY_ACTIONS = {
   camera: KEY_CATEGORIES.find((c) => c.id === 'camera').actions,
@@ -1269,7 +1311,9 @@ export const HUD_V2 = {
   // W / (baseWidth − left − right), H / (baseHeight − top − bottom).
   frameBleed: { left: 13, right: 13, top: 11, bottom: 20 }, // [css] --hud-ml / -mr / -mt / -mb
   frameBackdrop: 14,         // [css] black strip under the frame along the 4 screen edges: this much (base px) beyond the bleed (rounded corners, gaps)
-  idleButtonScale: 0.8,      // [css] size of the idle crew / idle builder buttons relative to their frame slot (--hud-idle-scale)
+  // [css] idle crew / builder / drill truck buttons (--hud-idle-left / -size / -gap): three squares side by side in the slot
+  // x 42…178 above the command grid (3 × 40 + 2 × 8 = 136); their bottom edge stays at idleTopFromBottom − 60
+  idleButton: { left: 42, size: 40, gap: 8 },
   scalePrecision: 1000,      // --hud-scale is rounded to 1 / scalePrecision (no noisy values on every resize pixel)
   // Production panel (production_top + mid strip + production_bottom, panel top-left at panelTop). The numbers marked [css]
   // are published by Hud.js as CSS variables (--hud-prod-*, --hud-idle-from-bottom) – hud.css has no copy of them.
@@ -1745,6 +1789,11 @@ export const IDLE_BUILDER = {
   minIdleTime: 1.5,          // s without an order before a builder vehicle (construct ability) counts as idle
   icon: '🔧',                // button face (the idle crew button uses 👷)
 };
+// Idle drill truck (harvest ability, no order – a mining truck keeps its harvest order, so it is not counted)
+export const IDLE_DRILL = {
+  minIdleTime: 1.5,          // s without an order before a drill truck counts as idle
+  icon: '⛏',                 // button face
+};
 // --- [HOLOIDLE] end ---
 
 // --- [SELSET] double-click select, prefer combat units on drag, settings Save (docs/notes/select-settings.md) ---
@@ -1766,9 +1815,15 @@ export const MAPS = {
     { id: 'gen_01AI', file: 'basic' },
     { id: 'Map02', file: 'map02' },
     { id: 'Map03', file: 'map03' },
+    { id: 'Map04', file: 'map04' },   // 6 players, destroyed city (Venus)
+    { id: 'Map05', file: 'map05' },   // 8 players, city (Earth)
+    { id: 'Map06', file: 'map06' },   // 6 players, ruined wasteland (Mars)
   ],
   aliases: { basic: 'gen_01AI' },
   defaultMap: 'gen_01AI',
+  // Per-map ore richness (map file key "oreMultiplier"): scales the starting amount of every deposit of the map
+  // (incl. the super node); multiplies with the lobby ORE_MULTIPLIER. 1 = unchanged, <1 poorer, >1 richer map
+  oreMultiplier: { default: 1, min: 0.25, max: 4 },
   ascii: {
     cellSize: 7,               // units per character (current map 900 units ≈ 130 characters)
     chars: { wall: '#', grass: '?', concrete: '.', start: 'S', field: 'o', fieldCore: '+', rift: '-' },
@@ -1807,6 +1862,50 @@ export const MAPS = {
     selectedStroke: '#ffd166',
     fieldColor: 'rgba(214, 160, 70, 0.55)', // ore fields of non-ASCII maps (deposit circles)
     depositRadius: 3,          // px – deposit dot on non-ASCII maps
+    planetLabelFont: 'bold 12px sans-serif', // planet name in the corner of the preview (maps with a planet)
+    planetLabelColor: '#ffffff',
+    planetLabelShadow: 'rgba(0, 0, 0, 0.8)',
+    planetLabelPad: 8,         // px from the corner
+  },
+};
+
+/**
+ * Planet looks. A map file may name one in "planet" (key of MAP_PLANETS); maps without it look as before.
+ * colors  – ground tint per cell type (replace MAPS.ascii.colors, also used by the minimap / preview); wall = tint under '#'
+ * ridge   – colour of the wall blocks (replaces MAP.ridge.color)
+ * sky     – scene background + fog colour and fog distance (units; none = no fog, far distance used for the background only)
+ * sun     – directional light colour + intensity;  hemi – ambient (sky colour, ground colour, intensity)
+ * i18n key of the planet name: `${MAP_PLANET_I18N_PREFIX}<planet>` (shown in map selection)
+ */
+export const MAP_PLANET_I18N_PREFIX = 'planet.';
+export const MAP_PLANETS = {
+  earth: {
+    colors: { grass: 0x5d7a3e, concrete: 0x8d8e8c, field: 0x6f6447, fieldCore: 0x7d613c, rift: 0x1d1b19, wall: 0x56585a },
+    ridge: 0x6b6d70,
+    sky: { color: 0x9fb8c9, fogNear: 700, fogFar: 2200 },
+    sun: { color: 0xfff4e0, intensity: 2.2 },
+    hemi: { sky: 0xdde8ff, ground: 0x3a3326, intensity: 0.9 },
+  },
+  mars: {
+    colors: { grass: 0xa8552f, concrete: 0xb67a52, field: 0x7a4a33, fieldCore: 0x8a4a2b, rift: 0x2a1410, wall: 0x6b3426 },
+    ridge: 0x7d3b28,
+    sky: { color: 0xc98b66, fogNear: 450, fogFar: 1500 },
+    sun: { color: 0xffc99a, intensity: 2.0 },
+    hemi: { sky: 0xf0b890, ground: 0x4a2a1e, intensity: 0.85 },
+  },
+  venus: {
+    colors: { grass: 0x8d9a35, concrete: 0xa89d55, field: 0x7c6a2e, fieldCore: 0x8f6f26, rift: 0x2a2610, wall: 0x6b6228 },
+    ridge: 0x7a7030,
+    sky: { color: 0xb9ae52, fogNear: 180, fogFar: 950 },
+    sun: { color: 0xf2e08a, intensity: 1.3 },
+    hemi: { sky: 0xd8cf7a, ground: 0x4a4420, intensity: 0.8 },
+  },
+  mercury: {
+    colors: { grass: 0x7b7a78, concrete: 0xa09e9a, field: 0x6a625a, fieldCore: 0x7a6a56, rift: 0x151515, wall: 0x4a4947 },
+    ridge: 0x5c5b59,
+    sky: { color: 0x050506, fogNear: null, fogFar: null }, // black sky, no fog
+    sun: { color: 0xffffff, intensity: 3.2 },
+    hemi: { sky: 0xb8b8c0, ground: 0x2a2826, intensity: 0.35 },
   },
 };
 // --- [MAPS] end ---
@@ -1840,6 +1939,19 @@ export const PLAYER_STATS_BAR = {
   compactDecimals: 1,
   fallbackColor: '#808080',          // swatch of a team without a valid #rrggbb colour
 };
+// --- [W3] queue frame above the player statistics (src/ui/QueueFrame.js, queue.css) ---
+export const QUEUE_FRAME = {
+  right: 25,                         // [css] base px from the right edge (same as #player-stats-bar)
+  width: 255,                        // [css] base px (same as #player-stats-bar)
+  gapAboveStats: 6,                  // base px between the frame and the top of the statistics bar
+  statsBottom: 305,                  // base px from the bottom edge to the bottom of the statistics bar (hud.css #player-stats-bar)
+  maxHeight: 360,                    // [css] base px; more groups scroll inside the frame
+  cell: 38,                          // [css] base px: one queue item icon
+  maxBuildsShown: 12,                // constructions of the builders listed (the rest is counted)
+  progressDecimals: 0,               // seconds left in a tooltip
+  percent: 100,
+};
+// --- [W3] end ---
 // --- [B4] end ---
 
 // --- [D2] economy alerts (src/ui/EconomyAlerts.js) ---
@@ -1910,4 +2022,45 @@ export const MECH_COLLISION = {
 export const PROC_BUILDINGS = {
   enabled: true,
 };
-// --- [18] end ---
+
+// --- [18P] procedural building performance (src/procedural/BuildingBatcher.js, docs/notes/proc-perf.md) ---
+// Finished buildings of the same type / style are drawn as InstancedMesh per LOD (draw calls grow with the number of
+// building types, not buildings). LOD0 = everything incl. animated parts and glow meshes (a few buildings near the
+// camera), LOD1 = no small parts / animations / glow meshes, LOD2 = coarse silhouette. Visual only.
+export const BUILDING_LOD = {
+  enabled: true,             // false = every building keeps its own meshes (window.steelMans.batching = false does the same)
+  levels: 3,                 // LOD0..LOD2 (geometry sets built by PartBuilder.buildLods)
+  // Part kept in LOD n when its largest side ≥ share × largest side of the whole building (explicit `detail` wins)
+  partMinShare: [0, 0.02, 0.08],
+  roundedSegments: [null, 1, 0],   // rounded boxes per LOD: as built / chamfer / plain box
+  hysteresis: 0.12,          // a building leaves its LOD only after the distance passed the limit by this share
+  maxFull: 8,                // at most this many buildings at LOD0 at once (the nearest ones)
+  fullRankSlack: 2,          // a building at LOD0 keeps it while its rank is below maxFull + slack
+  updateFrames: 10,          // LOD decision every N rendered frames (immediately after a quality change)
+  idleFrames: 240,           // an empty instance group is released after this many rendered frames
+  initialCapacity: 16,       // instances per group at first (doubles when full)
+  emblemMaxLod: 1,           // faction sign is drawn up to this LOD
+  // By effective level (high | medium | low): distance (camera → building, model units) up to which LOD0 / LOD1 is
+  // used (full 0 = never LOD0, no animated parts and no glow meshes), panel texture size (px)
+  quality: {
+    high: { full: 140, mid: 330, textureSize: 256 },
+    medium: { full: 140, mid: 220, textureSize: 256 },
+    low: { full: 140, mid: 150, textureSize: 128 },
+  },
+  animations: { full: 1, near: 0.5, off: 0 },   // buildingAnimations: share of the level's LOD0 range (off = no animated parts, no glow meshes)
+  order: ['high', 'medium', 'low'],   // best → worst (the auto mode walks along it)
+  // auto: frame time (ms) EMA; slower than degradeMs for degradeSeconds → one level down, faster than upgradeMs for
+  // upgradeSeconds → one level up; maxFrameMs clamps a single frame (hidden tab, loading)
+  auto: { degradeMs: 30, upgradeMs: 19, degradeSeconds: 3, upgradeSeconds: 12, maxFrameMs: 250, smoothing: 0.08 },
+};
+// --- [18P] end ---
+
+// --- [F1] part stock window and selling parts (src/ui/StockWindow.js, src/game/commands/stockCommands.js, docs/notes/f1-inventory.md) ---
+export const PART_SALE = {
+  commandType: 'sellPart',           // { type, team, path, count } – count 1..stock
+  requiredProducers: ['part', 'mech'], // selling needs an own finished building producing any of these (part factory / assembly bay)
+  refreshMs: 500,                    // live refresh of an open window (stock / resources change in the simulation)
+  percent: 100,
+  windowIcon: '▦',                   // button icon in the factory / assembly bay panel
+  maxCountClamp: 9999,               // upper bound accepted for `count` of a command (sanity)
+};

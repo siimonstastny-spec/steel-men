@@ -14,8 +14,10 @@
 // rifts, ore fields and the super node come from the grid. Map ids go through MAPS.list / MAPS.aliases
 // (old id 'basic' = 'gen_01AI').
 import * as THREE from 'three';
-import { MAP, MAPS } from '../config.js';
+import { MAP, MAPS, MAP_PLANETS } from '../config.js';
+import { applyPlanetLook } from '../core/SceneSetup.js';
 import { parseAsciiMap, cellAt, CELL } from './AsciiMap.js';
+import { applyMapEdgeFade } from './MapEdgeFade.js'; // [W9]
 
 /** Canonical map id for an id or alias (unknown ids are returned unchanged and loaded as data/maps/<id>.json) */
 export function resolveMapId(name) {
@@ -67,6 +69,13 @@ export class GameMap {
     this.def = def;
     this.name = def.name ?? id;
     this.description = def.description ?? '';
+    // [MAPS] planet look (MAP_PLANETS key in the file's "planet"); null = default look
+    this.planetId = MAP_PLANETS[def.planet] ? def.planet : null;
+    this.planet = this.planetId ? MAP_PLANETS[this.planetId] : null;
+    // [MAPS] ore richness of this map (file key "oreMultiplier", clamped to MAPS.oreMultiplier range); Economy.setupDeposits applies it
+    const om = Number(def.oreMultiplier);
+    this.oreMultiplier = Number.isFinite(om) && om > 0
+      ? Math.min(MAPS.oreMultiplier.max, Math.max(MAPS.oreMultiplier.min, om)) : MAPS.oreMultiplier.default;
     // [MAPS] how seats without a picked start are placed: 'fixed' = Alliances.startOrder as before (gen_01AI,
     // keeps old games identical), 'random' = from the match seed (src/game/MapStarts.js)
     this.startAssignment = def.startAssignment ?? 'random';
@@ -163,11 +172,14 @@ export class GameMap {
    */
   build(scene, heightAt) {
     this.dispose();
-    if (this.ascii) this.paintGround(scene.getObjectByName('ground')?.geometry); // before walls: rifts change heights
+    applyPlanetLook(scene, this.planet); // [MAPS] light / fog / background (null = default look)
+    const groundGeo = scene.getObjectByName('ground')?.geometry;
+    if (this.ascii) this.paintGround(groundGeo); // before walls: rifts change heights
+    applyMapEdgeFade(groundGeo, this.half);      // [W9] after all painting; colours only, heights untouched
     const group = new THREE.Group();
     group.name = 'map';
     const rockMat = this.#material(new THREE.MeshStandardMaterial({ color: MAP.rock.color, roughness: MAP.rock.roughness, flatShading: true }));
-    const ridgeMat = this.#material(new THREE.MeshStandardMaterial({ color: MAP.ridge.color, roughness: MAP.ridge.roughness, flatShading: true }));
+    const ridgeMat = this.#material(new THREE.MeshStandardMaterial({ color: this.planet?.ridge ?? MAP.ridge.color, roughness: MAP.ridge.roughness, flatShading: true }));
 
     this.obstacles.forEach((o, i) => {
       const mesh = o.type === 'ridge' || o.radius === undefined
@@ -206,7 +218,8 @@ export class GameMap {
     const col = geometry.attributes.color;
     const heights = geometry.userData.heightField?.heights;
     const names = Object.keys(CELL);
-    const tints = names.map((k) => new THREE.Color(cfg.colors[k] ?? cfg.colors.grass));
+    const palette = this.planet?.colors ?? cfg.colors;
+    const tints = names.map((k) => new THREE.Color(palette[k] ?? palette.grass));
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const type = cellAt(this.ascii, pos.getX(i), pos.getZ(i));

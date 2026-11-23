@@ -386,7 +386,8 @@ export class Economy {
   /** Creates the ore deposits of a map (GameMap.oreDeposits) and registers them for pathfinding */
   setupDeposits(map) {
     for (const d of this.deposits) d.dispose();
-    this.deposits = map.oreDeposits.map((def) => new OreDeposit(def, this.world, this));
+    const richness = map.oreMultiplier ?? 1; // [MAPS] per-map ore richness (map file "oreMultiplier"; × lobby multiplier in OreDeposit)
+    this.deposits = map.oreDeposits.map((def) => new OreDeposit(richness === 1 ? def : { ...def, amount: (def.amount ?? 0) * richness }, this.world, this));
     for (const d of this.deposits) this.world.register?.(d); // commands target deposits by eid
     if (map.superNode && map.group) {
       const node = this.deposits.find((d) => d.superNode);

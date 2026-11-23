@@ -9,6 +9,7 @@ const ORIGINAL = 'highlightOriginal';
 /** Sets the hover glow of a whole unit. Safe to call repeatedly and with null. */
 export function setUnitHighlight(unit, on) {
   if (!unit) return;
+  unit.procModel?.setHighlighted?.(on); // [18P] batched procedural body: instance attribute (other meshes continue below)
   if (unit.parts) { // mech
     for (const part of Object.values(unit.parts)) part?.setHighlighted(on);
     return;

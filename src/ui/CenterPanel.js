@@ -7,6 +7,7 @@ import { t } from '../i18n/i18n.js';
 import { canGather } from '../game/Production.js';
 import { unitName, incomeText, storageText } from './BuildMenu.js';
 import { serviceState } from './RobotProduction.js';
+import { ITEM_ICONS, itemLabel, isWaitingEnergy, progressOf } from './ProductionQueue.js';
 import {
   esc, unitHp, unitIcon, hpColorOf, slimBar, pct, bonusText, VEHICLE_BONUS_KEYS, weaponDps, weaponState, maxRange,
   damageOf, teamTag, wreckInfo,
@@ -31,7 +32,7 @@ const GEOMETRY = `--cp-h:${C.height};--cp-left:${C.left};--cp-mid:${C.mid};--cp-
   + `--cp-head:${C.headerHeight};--cp-rows:${GROUP_ROWS};--cp-min-font:${HUD_PANELS.robot.minFontPx}px;`;
 
 const frame = (inner, style = '') => `<div class="cp" style="${GEOMETRY}${style}">`
-  + `<i class="cp-l"></i><i class="cp-m"></i><i class="cp-r"></i><div class="cp-inner">${inner}</div></div>`;
+  + `<i class="cp-l"></i><i class="cp-m"></i><i class="cp-r"></i><div class="cp-inner" data-scroll-key="cp-inner">${inner}</div></div>`;
 
 const hpValue = (hp, max) => `${Math.ceil(hp)}/${max}${SEP}${pct(max ? hp / max : 0)} % ${slimBar(hp, max)}`;
 const xpValue = (u) => {
@@ -174,12 +175,28 @@ export class CenterPanel {
       if (st.storage) rows.push([t('structure.storageLabel'), esc(storageText(st.storage))]);
       const prod = this.world?.production;
       if (prod?.unitOptions(u).length) {
-        rows.push([t('hud.queue.title'), `${prod.itemsOf(u.eid).length} / ${HUD.production.maxQueue}`]);
+        rows.push([t('hud.queue.title'), this.#queueRow(prod.itemsOf(u.eid))]);
         if (canGather(u)) rows.push([t('rally.title'), esc(u.rally?.length ? t('rally.points', { n: u.rally.length }) : t('rally.hint'))]);
       }
       this.#weaponRows(u.weapons, rows);
     }
     return [state, rows];
+  }
+
+  /** [W3] Production of a building: only the running item (name, progress, energy wait), the rest as small icons in a row */
+  #queueRow(items) {
+    if (!items.length) return esc(`0 / ${HUD.production.maxQueue}`);
+    const head = items[0];
+    const waiting = isWaitingEnergy(head, this.world?.economy);
+    let html = `<span class="cp-qhead">${esc(ITEM_ICONS[head.kind] ?? '')} ${esc(itemLabel(head, this.world))} `
+      + `${slimBar(head.elapsed, head.total, 'var(--hud-accent)')} ${pct(progressOf(head))} %</span>`;
+    if (waiting) html += ` <span class="warn">${esc(t('econ.waitingEnergy'))}</span>`;
+    if (items.length > 1) {
+      html += '<span class="cp-qrest">';
+      for (let i = 1; i < items.length; i++) html += `<i title="${esc(itemLabel(items[i], this.world))}">${esc(ITEM_ICONS[items[i].kind] ?? '')}</i>`;
+      html += '</span>';
+    }
+    return html;
   }
 
   #wreck(wreck) {
