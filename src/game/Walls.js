@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { getStats, unitStats } from '../data/Stats.js';
 import { loadModel } from '../core/AssetLoader.js';
-import { PLACEMENT, WALL, WALL_DRAG, STRUCTURE, CMD_WALL, UI_SMALL } from '../config.js';
+import { PLACEMENT, WALL, WALL_DRAG, STRUCTURE, CMD_WALL, UI_SMALL, LOS } from '../config.js';
 import { Structure, modelFootprint, cachedFootprint, footprintAt, snapYaw, structureScale } from '../units/Structure.js';
 import { DefenseStructure } from '../units/DefenseStructure.js';
 import { registerStructureClass } from '../units/structureClasses.js';
@@ -83,6 +83,12 @@ export class WallSegment extends Structure {
 
   async load() {
     await super.load();
+    if (this.procModel) { // procedural segment: squeezed to its real length, never cut (its static body is batched)
+      this.holder.scale.x = this.length / segmentModelLength(this.fp);
+      // (a segment created complete: enableBatching() ran in super.load(), but the batcher takes the matrix only in the
+      // first tick(), which runs from the game loop after this microtask chain – so the stretch above is already in it)
+      return this;
+    }
     this.holder.scale.x = this.lengthFactor;
     if (this.trim) setCrop(this.holder, segmentCrop(this.fp, this.lengthFactor, this.length));
     return this;
@@ -97,6 +103,37 @@ export class WallSegment extends Structure {
 
 /** Length of the (scaled) segment model – the footprint carries STRUCTURE.footprintPadding on both ends */
 const segmentModelLength = (fp) => Math.max((fp.halfX - STRUCTURE.footprintPadding) * 2, Number.EPSILON);
+
+/**
+ * Wall gate (stats.gate): a segment whose procedural model opens while an own ground unit is near (stats.gateOpenRange
+ * from the gate's ends). The open state is derived from the simulation state every tick and only drives the model
+ * (visual); nothing reads it back. Navigation is NOT changed yet (the gate blocks like a segment, see proc-walls-wire.md).
+ */
+export class WallGate extends WallSegment {
+  isOpen = false;
+
+  update(dt) {
+    this.#refreshOpen();
+    super.update(dt);
+  }
+
+  #refreshOpen() {
+    let open = false;
+    const world = this.world;
+    if (world && this.complete && !this.dead && this.stats) {
+      const reach = this.length / 2 + (this.stats.gateOpenRange ?? 0);
+      const reach2 = reach * reach;
+      for (const u of world.units) {
+        if (u.team !== this.team || u.isStructure || u.airborne || u.dead) continue;
+        const dx = u.position.x - this.position.x;
+        const dz = u.position.z - this.position.z;
+        if (dx * dx + dz * dz <= reach2) { open = true; break; }
+      }
+    }
+    this.isOpen = open;
+    this.procModel?.setOpen?.(open);
+  }
+}
 
 // ---------- cutting a segment model (trimmed wall ends) ----------
 
@@ -195,6 +232,7 @@ function segmentShapes(centre, yaw, length, halfThick, postHalf, owner) {
 }
 
 registerStructureClass((stats) => (isPostStats(stats) ? WallPost : null));
+registerStructureClass((stats) => (stats.gate ? WallGate : null));
 
 // ---------- wall line plan ----------
 
@@ -224,6 +262,52 @@ function edgeReach(world, box, sx, sz, ux, uz) {
     return ((u > 0 ? lim - half : half - lim) - s) / u;
   };
   return Math.max(0, Math.min(along(sx, ux, box.halfX), along(sz, uz, box.halfZ)) - CMD_WALL.edgeEpsilon);
+}
+
+// Scratch of the slab test in obstacleReach (module state, written by slabAxis)
+let _slabLo = 0;
+let _slabHi = 0;
+let _slabHit = true;
+function slabAxis(d, u, h) {
+  if (Math.abs(u) < Number.EPSILON) { if (Math.abs(d) >= h) _slabHit = false; return; }
+  const a = (d - h) / u;
+  const b = (d + h) / u;
+  _slabLo = Math.max(_slabLo, Math.min(a, b));
+  _slabHi = Math.min(_slabHi, Math.max(a, b));
+}
+
+/**
+ * [N7-walls] Distance along the line from (sx, sz) in direction (ux, uz) to the first tall map obstacle / rift, grown
+ * by `margin` (post half size + LOS.wallGap), so a wall ends flush with it like at the map edge. Start already inside
+ * a grown shape: that shape is ignored (the start may be next to it). Infinity = nothing in the way.
+ */
+function obstacleReach(world, margin, sx, sz, ux, uz) {
+  const map = world.map;
+  if (!LOS.enabled || !map?.wallStops) return Infinity;
+  let best = Infinity;
+  for (const o of map.wallStops(LOS.minHeight)) {
+    const dx = o.x - sx;
+    const dz = o.z - sz;
+    let t0;
+    if (o.radius !== undefined) {
+      const r = o.radius + margin;
+      const proj = dx * ux + dz * uz;
+      const perp2 = dx * dx + dz * dz - proj * proj;
+      if (perp2 >= r * r || dx * dx + dz * dz < r * r) continue;
+      t0 = proj - Math.sqrt(r * r - perp2);
+    } else {
+      // slab test against the box grown by the margin (two axes, no temporary arrays)
+      _slabLo = -Infinity;
+      _slabHi = Infinity;
+      _slabHit = true;
+      slabAxis(dx, ux, o.halfX + margin);
+      slabAxis(dz, uz, o.halfZ + margin);
+      if (!_slabHit || _slabLo > _slabHi || _slabHi <= 0 || _slabLo <= 0) continue; // behind, missed, or the start is inside
+      t0 = _slabLo;
+    }
+    if (t0 > 0 && t0 < best) best = t0;
+  }
+  return best;
 }
 
 /** A segment shorter than a normal one by more than the tolerance is a cut one */
@@ -258,7 +342,10 @@ function planLine(world, team, start, cursor, postFp) {
   } else {
     for (let i = 0; i < n; i++) lengths.push(spacing);
     // Does the last post still fit on the map? If not, the wall ends at the edge with a cut segment
-    const reach = edgeReach(world, footprintAt(postFp, 0, 0, snapYaw(yaw)), start.x, start.z, ux, uz);
+    const fp0 = footprintAt(postFp, 0, 0, snapYaw(yaw));
+    // [N7-walls] the line also ends flush at tall map obstacles and rifts, not only at the map edge
+    const reach = Math.min(edgeReach(world, fp0, start.x, start.z, ux, uz),
+      Math.max(0, obstacleReach(world, Math.max(fp0.halfX, fp0.halfZ) + LOS.wallGap, start.x, start.z, ux, uz)));
     if (n * spacing > reach) {
       const full = Math.min(WALL.maxSegments, Math.floor(reach / spacing));
       const rest = reach - full * spacing;

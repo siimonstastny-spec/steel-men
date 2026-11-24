@@ -1,8 +1,18 @@
 /* Steel Mans – [B1] New game + multiplayer lobby layout (modern RTS style): player seats as a grid on the left,
    game settings as comboboxes on the right, Back bottom left, Start bottom right. Uses the --menu-* variables. */
+/* Breakpoints. @media / @container cannot read var(), so the values below are repeated in the rules (marked "= var(...)");
+   change both together. --setup-side-width is used directly. */
+:root {
+  --bp-stack: 900px;          /* settings column below the seats */
+  --bp-small: 700px;          /* smaller type / gaps */
+  --seat-compact-below: 640px; /* seat list width: two-line rows */
+  --seat-tiny-below: 380px;    /* seat list width: single column */
+  --bp-narrow-pad: 12px;       /* side padding of the screen when stacked */
+  --setup-side-width: 300px;
+}
 .menu-card.setup, .menu-card.lobby.wide { max-width: 1120px; width: 100%; box-sizing: border-box; }
 
-.setup-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+.setup-layout { display: grid; grid-template-columns: minmax(0, 1fr) var(--setup-side-width); gap: 18px; align-items: start; }
 .setup-main { min-width: 0; }
 .setup-side {
   display: flex; flex-direction: column; gap: 8px; padding: 12px; min-width: 0;
@@ -58,8 +68,34 @@
 /* Back left, Start / continue right (rule of all screens) */
 .menu-actions.split { justify-content: space-between; }
 
-@media (max-width: 900px) {
-  .setup-layout { grid-template-columns: 1fr; }
-  .setup-seat { grid-template-columns: 1fr 1fr; }
+/* [N1] Compact seat rows. The seat list is a size container, so the switch depends on the width the list really
+   has (with or without the settings column beside it), not on the window. Rows: player | faction+colour | alliance+state | buttons. */
+.setup-seats { container-type: inline-size; }
+.seat-cell[hidden] { display: none; }
+@container (max-width: 640px) { /* = var(--seat-compact-below) */
+  .setup-seat, .setup-seat.with-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 8px; padding: 6px 8px; }
   .setup-seat.head { display: none; }
+  .setup-seat > .seat-player, .setup-seat > .seat-actions { grid-column: 1 / -1; }
+  .seat-actions { justify-content: flex-start; }
+  .seat-cell { flex-wrap: wrap; }
+  .setup-seat .swatches { flex-wrap: wrap; }
+}
+@container (max-width: 380px) { /* = var(--seat-tiny-below): everything under each other */
+  .setup-seat, .setup-seat.with-actions { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 900px) { /* = var(--bp-stack): settings column goes below the seats */
+  .setup-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  /* the page padding (8vw) would leave a card of ~630px at 800px: use the width for the content */
+  .menu-content:has(.menu-card.setup, .menu-card.lobby) { padding-left: var(--bp-narrow-pad); padding-right: var(--bp-narrow-pad); }
+  .menu-card.setup, .menu-card.lobby { padding: 14px 12px; }
+  .setup-side { padding: 10px; }
+  .setup-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 12px; }
+}
+@media (max-width: 700px) { /* = var(--bp-small): smaller type and gaps, buttons shrink instead of overflowing */
+  .seat-player, .seat-cell { font-size: 12px; }
+  .seat-actions .menu-btn { padding: 4px 8px; font-size: 11px; letter-spacing: 0.06em; clip-path: none; }
+  .menu-card.setup .menu-actions .menu-btn, .menu-card.lobby .menu-actions .menu-btn { min-width: 0; flex: 1 1 120px; }
+  .setup-tools { gap: 6px 10px; }
+  .setup-map .map-preview { max-width: 100%; height: auto; }
 }

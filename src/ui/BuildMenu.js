@@ -8,7 +8,8 @@
 // (src/game/Production.js); buttons only submit commands (src/game/commands/productionCommands.js) after
 // world.production.check(cmd) – a refusal is shown as a message. Hud.js asks view() first and falls back to its
 // own pages when it returns null.
-import { HUD, ECONOMY, ECONOMY_ALERTS, KEYBINDINGS, BUILD_GRID, RALLY, BEHAVIOUR, SHIFT_BATCH } from '../config.js';
+import { getBuildingIconUrl } from './IconRenderer.js';
+import { TEAMS, HUD, ECONOMY,ECONOMY_ALERTS, KEYBINDINGS, BUILD_GRID, RALLY, BEHAVIOUR, SHIFT_BATCH } from '../config.js';
 import { keyLabel } from '../input/CommandInput.js';
 import { getStats, unitStats, canProduce } from '../data/Stats.js';
 import { t } from '../i18n/i18n.js';
@@ -281,7 +282,8 @@ export class BuildMenu {
         req, afford ? '' : this.#missingText(s.cost),
       ];
       return {
-        icon: name.slice(0, ICON_LETTERS), label: name, disabled: Boolean(req) || !afford,
+        icon: name.slice(0, ICON_LETTERS), iconUrl: getBuildingIconUrl(id, this.race, TEAMS[localTeam()]?.color) ?? undefined,
+        label: name, disabled: Boolean(req) || !afford,
         tip: [name, ...this.#costTip(s), ...extra].filter(Boolean).join('\n'),
         onClick: () => this.startPlacement(id, builders),
       };

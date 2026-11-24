@@ -7,6 +7,7 @@ import { VFX } from '../config.js';
 const DATA_URL = './data/explosions.json';
 const DEFAULT_RACE = 'default';
 const POOL_NAMES = ['glow', 'smoke', 'debris'];
+const ALL_POOLS = [...POOL_NAMES, 'damage']; // + persistent damage smoke (own pool so explosions never starve it)
 const MODE = { glow: 0, smoke: 1, debris: 2 };
 
 let data = null;
@@ -18,7 +19,7 @@ const _color = new THREE.Color();
 export function loadExplosionData(url = DATA_URL) {
   promise ??= fetch(url)
     .then((res) => { if (!res.ok) throw new Error(`Explosions ${url}: HTTP ${res.status}`); return res.json(); })
-    .then((d) => { data = d; plans.clear(); return d; });
+    .then((d) => { data = d; plans.clear(); damagePlans.clear(); return d; });
   return promise;
 }
 
@@ -41,6 +42,26 @@ export function explosionPlan(unit) {
   const key = `${kind}|${race}`;
   if (!plans.has(key)) plans.set(key, buildPlan(data.kinds[kind], data.races[race], kind));
   return plans.get(key);
+}
+
+const damagePlans = new Map(); // target kind ('unit' | 'building') -> resolved damage smoke spec
+
+/**
+ * Damage smoke spec for 'unit' | 'building' (data.damage) or null when the data / section is missing.
+ * { threshold, rateMin, rateMax, sizeFrom, sizeTo, sizeGain, lifeMin, lifeMax, rise, drift, height, spread, c: Float32Array[light rgb, dark rgb] }
+ */
+export function damagePlan(kind) {
+  const d = data?.damage;
+  const s = d?.[kind];
+  if (!s) return null;
+  if (!damagePlans.has(kind)) {
+    damagePlans.set(kind, {
+      threshold: s.threshold, rateMin: s.rateMin, rateMax: s.rateMax, sizeFrom: s.sizeFrom, sizeTo: s.sizeTo, sizeGain: s.sizeGain,
+      lifeMin: s.life[0], lifeMax: s.life[1], rise: s.rise, drift: s.drift, height: s.height, spread: s.spread,
+      c: new Float32Array([...colorOf({}, d.lightColor), ...colorOf({}, d.darkColor)]),
+    });
+  }
+  return damagePlans.get(kind);
 }
 
 function colorOf(palette, name) {
@@ -178,6 +199,21 @@ export class ParticleField {
       smoke: new Pool(scene, this.geo, new THREE.MeshBasicMaterial({ ...base, transparent: true, opacity: e.smokeOpacity, depthWrite: false }), e.smokeMax, MODE.smoke, e),
       debris: new Pool(scene, this.geo, new THREE.MeshBasicMaterial({ ...base }), e.debrisMax, MODE.debris, e),
     };
+    const dmg = data.damage;
+    if (dmg) this.pools.damage = new Pool(scene, this.geo, new THREE.MeshBasicMaterial({ ...base, transparent: true, opacity: dmg.opacity, depthWrite: false }), dmg.max, MODE.smoke, e);
+  }
+
+  /** One damage smoke puff; severity 0..1 (more = bigger and darker), spec = damagePlan(kind), sizeScale = per-target multiplier */
+  damagePuff(spec, severity, sizeScale, x, y, z) {
+    const pool = this.pools.damage;
+    if (!pool) return;
+    const a = this.rand() * Math.PI * 2;
+    const m = Math.min(1, Math.max(0, severity + (this.rand() - 0.5) * 0.3)); // light -> dark with a little per-puff variation
+    const c = spec.c;
+    const grow = (1 + (spec.sizeGain - 1) * severity) * sizeScale;
+    pool.add(x, y, z, Math.cos(a) * spec.drift, spec.rise * (0.7 + this.rand() * 0.6), Math.sin(a) * spec.drift,
+      spec.lifeMin + this.rand() * (spec.lifeMax - spec.lifeMin), spec.sizeFrom * grow, spec.sizeTo * grow,
+      c[0] + (c[3] - c[0]) * m, c[1] + (c[4] - c[1]) * m, c[2] + (c[5] - c[2]) * m, 0, 0.5, y);
   }
 
   /** Own mulberry32 – visual randomness must never touch world.rng */
@@ -220,11 +256,11 @@ export class ParticleField {
   }
 
   update(dt) {
-    for (const name of POOL_NAMES) this.pools[name].update(dt);
+    for (const name of ALL_POOLS) this.pools[name]?.update(dt);
   }
 
   dispose() {
-    for (const name of POOL_NAMES) this.pools[name].dispose();
+    for (const name of ALL_POOLS) this.pools[name]?.dispose();
     this.geo.dispose();
   }
 }

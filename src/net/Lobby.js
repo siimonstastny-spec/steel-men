@@ -22,7 +22,8 @@
 //                             startResearch: one of START_RESEARCH.options (0 = none, 1..3 = tier), else dropped,
 //                             oreMultiplier [B1]: one of ORE_MULTIPLIER.options (number or 'infinite'), anything else is dropped,
 //                             speed [N4]: one of GAME_SPEED.options, anything else is dropped,
-//                             prebuild [N8]: minutes, one of PREBUILD.options (0 = off), anything else is dropped)
+//                             prebuild [N8]: minutes, one of PREBUILD.options (0 = off), anything else is dropped,
+//                             startSet [N15]: start set id of stats.json (unknown = the default set))
 //   lobby.addAi(team, {difficulty, race, color}) / removeAi(team) / setAi(team, {difficulty?, race?, color?})  host only
 //   lobby.start()             host only, all human seats ready (AI seats count as ready) → 'start' to everyone
 //   onStart payload: { settings, seats, seed, localTeam, startAtMs, hostId, code, players: [{team, playerId, name}],
@@ -40,6 +41,9 @@ import { cleanAvatarImage } from '../core/PlayerLabels.js'; // [UISMALL] picture
 // host's presence, so pictures are NOT part of the state: everybody publishes a tiny thumbnail (UI_SMALL.humanAvatar.netMaxLength)
 // in the own presence field `img`, and the others read it from the peer list (lobby.avatarOf).
 const netImage = (value) => cleanAvatarImage(value, UI_SMALL.humanAvatar.netMaxLength);
+import { validStartSet } from '../game/StartSets.js'; // [N15]
+import { getStats } from '../data/Stats.js';
+import { validConditionForSet } from '../game/Victory.js';
 import { t } from '../i18n/i18n.js';
 
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
@@ -231,6 +235,7 @@ export class Lobby {
     const next = { ...(patch ?? {}) };
     if ('speed' in next && !GAME_SPEED.options.includes(next.speed)) delete next.speed; // [N4] only listed game speeds
     if ('prebuild' in next && !PREBUILD.options.includes(next.prebuild)) delete next.prebuild; // [N8] only listed minutes
+    if ('startSet' in next) next.startSet = validStartSet(next.startSet, getStats()); // [N15] a listed set id, else the default
     if ('oreMultiplier' in next && !ORE_MULTIPLIER.options.includes(next.oreMultiplier)) delete next.oreMultiplier; // [B1]
     if ('startMultiplier' in next && !START_MULTIPLIER.options.includes(next.startMultiplier)) delete next.startMultiplier; // [D4]
     if ('startResearch' in next && !START_RESEARCH.options.includes(next.startResearch)) delete next.startResearch;
@@ -240,6 +245,8 @@ export class Lobby {
     if ('infiniteDeposits' in next) delete next.infiniteDeposits; // [B1] replaced by oreMultiplier
     this.state.settings = clone({ ...this.state.settings, ...next });
     delete this.state.settings.infiniteDeposits;
+    // A victory condition the start set cannot play (main building without one) falls back to the default condition
+    this.state.settings.victory = validConditionForSet(this.state.settings.victory, this.state.settings.startSet, getStats());
     this.#recompute(true);
   }
 

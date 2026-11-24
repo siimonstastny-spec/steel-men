@@ -5,6 +5,8 @@
 import { HUD, HUD_PANELS } from '../config.js';
 import { t } from '../i18n/i18n.js';
 import { canGather } from '../game/Production.js';
+import { accuracyProfile } from '../data/Stats.js';
+import { buildingIconHtml } from './IconRenderer.js';
 import { unitName, incomeText, storageText } from './BuildMenu.js';
 import { serviceState } from './RobotProduction.js';
 import { ITEM_ICONS, itemLabel, isWaitingEnergy, progressOf } from './ProductionQueue.js';
@@ -15,6 +17,20 @@ import {
 
 const C = HUD_PANELS.center;
 const SEP = ' · ';
+const PERCENT = 100;
+
+/** [F2] Accuracy description of a weapon ({ stats | def }) for tooltips – from rules.combat.accuracy and the weapon data */
+export function accuracyText(w) {
+  const s = w.stats ?? w.def;
+  if (!s) return '';
+  const p = accuracyProfile(s);
+  const near = Math.round(p.near * PERCENT);
+  if (p.melee) return t('acc.melee', { near });
+  let text = t('acc.ranged', { near, far: Math.round(p.far * PERCENT) });
+  if (p.homing) text += SEP + t('acc.homing');
+  else if (p.movingPenalty > 0) text += SEP + t('acc.moving', { penalty: Math.round(p.movingPenalty * PERCENT) });
+  return text;
+}
 const GROUP_ROWS = Math.max(1, Math.floor((C.height - C.margins.top - C.margins.bottom - C.headerHeight) / (C.memberHeight + C.memberGap)));
 const DECIMALS = 1;
 const RATE_DECIMALS = 2;
@@ -78,7 +94,7 @@ export class CenterPanel {
       const u = units[i];
       const [hp, max] = unitHp(u);
       const ratio = max ? hp / max : 0;
-      return `<button class="cp-unit" data-unit="${u.eid}" title="${esc(unitLabel(u))}"><span class="ico">${unitIcon(u)}</span>`
+      return `<button class="cp-unit" data-unit="${u.eid}" title="${esc(unitLabel(u))}"><span class="ico">${(u.isStructure && buildingIconHtml(u.unitId, u.race, u.team)) || unitIcon(u)}</span>`
         + `<span class="pct" style="color:${hpColorOf(hp, max)}">${pct(ratio)}%</span></button>`;
     }).join('');
     const vars = `--cp-cw:${C.memberWidth};--cp-ch:${C.memberHeight};--cp-gap:${C.memberGap}`;
@@ -89,7 +105,8 @@ export class CenterPanel {
 
   #single(u) {
     const [state, rows] = u.isStructure ? this.#structure(u) : u.isVehicle ? this.#vehicle(u) : this.#crew(u);
-    return this.#sheet(`${esc(unitLabel(u))}${teamTag(u)} – ${esc(state)}`, rows);
+    const icon = u.isStructure ? buildingIconHtml(u.unitId, u.race, u.team) : '';
+    return this.#sheet(`${icon ? `<span class="ico">${icon}</span>` : ''}${esc(unitLabel(u))}${teamTag(u)} – ${esc(state)}`, rows);
   }
 
   #sheet(title, rows) {
@@ -103,7 +120,7 @@ export class CenterPanel {
     const damage = weapons.reduce((a, w) => a + damageOf((w.stats ?? w.def)?.damage), 0);
     const dps = weapons.reduce((a, w) => a + weaponDps(w), 0);
     rows.push([t('cp.damage'), String(Math.round(damage))], [t('cp.dps'), dps.toFixed(DECIMALS)],
-      [t('cp.range'), String(Math.round(maxRange(weapons)))], [t('cp.weapons'), esc(weapons.map(weaponState).join(SEP))]);
+      [t('cp.range'), String(Math.round(maxRange(weapons)))], [t('cp.weapons'), `<span title="${esc(weapons.map((w) => `${(w.stats ?? w.def)?.id ?? ''}: ${accuracyText(w)}`).join('\n'))}">${esc(weapons.map(weaponState).join(SEP))}</span>`]);
   }
 
   #armorRow(u, rows) {

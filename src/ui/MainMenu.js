@@ -5,6 +5,8 @@ import { MENU, ECONOMY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, GAME_VERSION
 import { pickAiNames } from '../ai/AiProfiles.js'; // [N6] call signs of computer players
 import { avatarHtml, humanAvatarHtml } from './Avatar.js';
 import { validPrebuild } from '../game/PreBuild.js'; // [N8] pre-build phase option
+import { validStartSet } from '../game/StartSets.js'; // [N15] start set (units a team starts with)
+import { getStats } from '../data/Stats.js';
 import { oreMultiplierFromSettings } from '../game/OreMultiplier.js'; // [B1]
 import { startMultiplierFromSettings } from '../game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings } from '../game/StartResearch.js';
@@ -13,7 +15,7 @@ import { validPopulationCap } from '../game/Economy.js'; // [W5a]
 import {
   allianceLetter, ffaAlliances, presetAlliances, normalizeAlliances, hasEnoughAlliances, isAllianceId,
 } from '../core/AllianceSetup.js';
-import { validCondition } from '../game/Victory.js';
+import { validCondition, validConditionForSet } from '../game/Victory.js';
 import { colorsTooSimilar, firstDistinctColor } from '../core/ColorCheck.js';
 import { getNewGame, getSettings, saveNewGame, getAvatarImage } from '../core/Profile.js';
 import { onLanguageChange, t } from '../i18n/i18n.js';
@@ -88,7 +90,14 @@ export class MainMenu {
       const opt = readOptionChange(e.target); // [B1] game-setting comboboxes
       if (opt) {
         if (opt.key === 'map') this.#setMap(opt.value);
-        else { this.settings[opt.key] = opt.value; this.#refreshRules(); }
+        else {
+          this.settings[opt.key] = opt.value;
+          if (opt.key === 'startSet') { // a condition the new set cannot play is switched, and the select redrawn (disabled entry)
+            this.settings.victory = validConditionForSet(this.settings.victory, opt.value, getStats());
+            this.optionsMaps = null;
+          }
+          this.#refreshRules();
+        }
         return;
       }
       if (d.raceSelect !== undefined) { this.settings.races[Number(d.raceSelect)] = e.target.value; this.#refreshTeam(Number(d.raceSelect)); return; }
@@ -132,9 +141,10 @@ export class MainMenu {
       friendlyFire: Object.fromEntries(Object.entries(FRIENDLY_FIRE_DEFAULTS).map(([k, def]) =>
         [k, typeof saved.friendlyFire?.[k] === 'boolean' ? saved.friendlyFire[k] : def])),
       fogOfWar: MENU.fogModes.includes(saved.fogOfWar) ? saved.fogOfWar : MENU.defaultFogMode,
-      victory: validCondition(saved.victory), // VICTORY.conditions id
+      victory: validConditionForSet(saved.victory, saved.startSet, getStats()), // VICTORY.conditions id the start set can play
       speed: GAME_SPEED.options.includes(saved.speed) ? saved.speed : GAME_SPEED.default, // [N4] game speed multiplier
       prebuild: validPrebuild(saved.prebuild), // [N8] pre-build phase in minutes (PREBUILD.options, 0 = off)
+      startSet: validStartSet(saved.startSet, getStats()), // [N15] stats.json rules.economy.startSetOrder id (default set when unknown)
       // Economy: energy storage cap and deposits that never run out (Economy.js)
       energyCap: ECONOMY.energyCaps.includes(saved.energyCap) ? saved.energyCap : ECONOMY.defaultEnergyCap,
       populationCap: validPopulationCap(saved.populationCap), // [W5a] 100..500 | 'infinite'
@@ -586,6 +596,7 @@ export class MainMenu {
       victory: this.settings.victory,
       speed: this.settings.speed, // [N4] game speed multiplier (GAME_SPEED.options)
       prebuild: this.settings.prebuild, // [N8] pre-build minutes (PREBUILD.options, 0 = off)
+      startSet: this.settings.startSet, // [N15] start set id
       energyCap: this.settings.energyCap,
       populationCap: this.settings.populationCap, // [W5a]
       oreMultiplier: this.settings.oreMultiplier, // [B1] 0.5 | 1 | 2 | 4 | 'infinite'

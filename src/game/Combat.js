@@ -2,7 +2,7 @@
 // All numbers come from data/stats.json (weapon stats and rules.combat).
 import * as THREE from 'three';
 import { getStats, applyArmor, teamRule } from '../data/Stats.js';
-import { VFX, AUDIO, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY } from '../config.js';
+import { VFX, AUDIO, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY, LOS } from '../config.js';
 import { play } from '../audio/Sound.js';
 import { applyWeaponEffects } from './StatusEffects.js';
 import { areAllies } from './Alliances.js';
@@ -18,12 +18,91 @@ const ARM_SLOTS = ['leftArm', 'rightArm']; // same as ModularMech.ARM_SLOTS (not
 const UP = new THREE.Vector3(0, 1, 0);
 const RIGHT = new THREE.Vector3(1, 0, 0);
 const _v = new THREE.Vector3();
+const NO_WEAPONS = Object.freeze([]);  // shared empty list (threatOf: units without weapons)
+const FOOTPRINT_BOX = { dirX: 1, dirZ: 0, halfA: 0, halfB: 0 }; // scratch of footprintBox (read at once, never kept)
+const SWEEP_NEAR = new THREE.Vector3(); // scratch: nearest wreck point of a sweep
+const TRACE_FOUND = [];                 // scratch: candidates of traceUnits
+const TRACE_POOL = [];                  // pooled { unit, t, factor } entries of traceUnits
 
 // ---------- queries ----------
 
 /** A unit that can be shot at: alive, in the world, not hidden inside a mech */
 export function isTargetable(unit) {
   return !!unit && !!unit.world && !unit.destroyed && !unit.removed && !unit.inside;
+}
+
+// ---------- [N7-los] line of sight over tall map obstacles ----------
+
+const _losHit = new THREE.Vector3();
+
+/**
+ * Fraction (0..1) along from→to where the segment first enters a tall map obstacle (GameMap.losBlockers) below its top
+ * edge, or -1 when the way is clear. A segment that starts inside an obstacle is not blocked by it. Pure geometry.
+ */
+function losBlockT(world, from, to) {
+  const map = world.map;
+  if (!LOS.enabled || !map?.losBlockers) return -1;
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const dy = to.y - from.y;
+  let best = Infinity;
+  for (const o of map.losBlockers(world, LOS.minHeight)) {
+    const ox = o.x - from.x;
+    const oz = o.z - from.z;
+    let t0;
+    if (o.radius !== undefined) {
+      const a = dx * dx + dz * dz;
+      if (a < EPSILON) continue;
+      const proj = (ox * dx + oz * dz) / a;
+      const perp2 = ox * ox + oz * oz - proj * proj * a;
+      const r2 = o.radius * o.radius;
+      if (perp2 >= r2 || ox * ox + oz * oz < r2) continue;
+      t0 = proj - Math.sqrt((r2 - perp2) / a);
+    } else {
+      let lo = 0;
+      let hi = 1;
+      let hit = true;
+      // x slab, then z slab (inline: no temporary arrays)
+      if (Math.abs(dx) < EPSILON) { if (Math.abs(ox) >= o.halfX) hit = false; } else {
+        const a = (ox - o.halfX) / dx; const b = (ox + o.halfX) / dx;
+        lo = Math.max(lo, Math.min(a, b)); hi = Math.min(hi, Math.max(a, b));
+      }
+      if (Math.abs(dz) < EPSILON) { if (Math.abs(oz) >= o.halfZ) hit = false; } else {
+        const a = (oz - o.halfZ) / dz; const b = (oz + o.halfZ) / dz;
+        lo = Math.max(lo, Math.min(a, b)); hi = Math.min(hi, Math.max(a, b));
+      }
+      if (!hit || lo > hi) continue;
+      // starting inside the box (lo stays 0 because the start is within both slabs): not blocked by it
+      if (Math.abs(ox) < o.halfX && Math.abs(oz) < o.halfZ) continue;
+      t0 = lo;
+    }
+    if (t0 < 0 || t0 > 1 || t0 >= best) continue;
+    if (from.y + dy * t0 <= o.top - LOS.clearance) best = t0; // the ray enters below the top edge
+  }
+  return best === Infinity ? -1 : best;
+}
+
+/** [N7-los] True when no tall map obstacle stands between two points (world coordinates, y = height of the ray) */
+export function hasLineOfSight(world, from, to) {
+  return losBlockT(world, from, to) < 0;
+}
+
+/**
+ * [N7-los] Where a shot from→to is stopped by a tall map obstacle: the entry point (written to `out`), or null when the
+ * way is clear. Used by releaseAttack; the shot then hits the obstacle and does nothing.
+ */
+export function losImpact(world, from, to, out = _losHit) {
+  const t = losBlockT(world, from, to);
+  return t < 0 ? null : out.lerpVectors(from, to, t);
+}
+
+const _losFrom = new THREE.Vector3();
+const _losTo = new THREE.Vector3();
+
+/** [N7-los] Centre-to-centre line of sight between two units (aircraft fly over: always clear) */
+export function clearShot(world, unit, other) {
+  if (!LOS.enabled || other.airborne || unit.airborne || !world) return true;
+  return hasLineOfSight(world, aimPoint(unit, _losFrom), aimPoint(other, _losTo));
 }
 
 /** Different teams that are not allied (src/game/Alliances.js; without alliances = different teams) */
@@ -53,11 +132,14 @@ function circleEdgeDistance(from, target) {
  */
 function footprintBox(target) {
   if (!target.isStructure || !target.footprint) return null;
+  const box = FOOTPRINT_BOX; // reused: callers read it at once
   if (typeof target.length === 'number' && typeof target.halfThick === 'number') {
     const yaw = target.rotation.y;
-    return { dirX: Math.cos(yaw), dirZ: -Math.sin(yaw), halfA: target.length / 2, halfB: target.halfThick };
+    box.dirX = Math.cos(yaw); box.dirZ = -Math.sin(yaw); box.halfA = target.length / 2; box.halfB = target.halfThick;
+    return box;
   }
-  return { dirX: 1, dirZ: 0, halfA: target.footprint.halfX, halfB: target.footprint.halfZ };
+  box.dirX = 1; box.dirZ = 0; box.halfA = target.footprint.halfX; box.halfB = target.footprint.halfZ;
+  return box;
 }
 
 // Distance from a point to a box (0 inside)
@@ -147,7 +229,8 @@ export function canFireAt(unit, weapon, target) {
 export function weaponDps(s) {
   if (!s) return 0;
   let dmg = 0;
-  for (const v of Object.values(s.damage ?? {})) dmg += v || 0;
+  const damage = s.damage;
+  if (damage) for (const k in damage) dmg += damage[k] || 0;
   const cycle = (s.attackTime ?? 0) + (s.cooldown ?? 0);
   return cycle > 0 ? (dmg * (s.burst ?? 1)) / cycle : 0;
 }
@@ -156,7 +239,8 @@ export function weaponDps(s) {
 export function threatOf(unit) {
   if (unit.isMech && !unit.crew) return 0;
   let dps = 0;
-  for (const w of unit.weapons ?? []) dps += weaponDps(w.stats);
+  const ws = unit.weapons ?? NO_WEAPONS; // (a mech's getter builds the list once per call)
+  for (let i = 0; i < ws.length; i++) dps += weaponDps(ws[i].stats);
   return dps;
 }
 
@@ -166,14 +250,13 @@ export function targetClass(unit) {
   return unit.isStructure ? 2 : 1;
 }
 
-const CLASS_PENALTY = () => [TARGET_PRIORITY.armedPenalty, TARGET_PRIORITY.unarmedPenalty, TARGET_PRIORITY.structurePenalty];
-
 /** Cost of attacking `other` (lower = better): edge distance + class penalty − threat bonus */
 export function targetCost(unit, other, dist = edgeDistance(unit, other)) {
   const threat = threatOf(other);
-  const cls = threat > 0 ? 0 : other.isStructure ? 2 : 1;
+  const penalty = threat > 0 ? TARGET_PRIORITY.armedPenalty
+    : other.isStructure ? TARGET_PRIORITY.structurePenalty : TARGET_PRIORITY.unarmedPenalty;
   const bonus = Math.min(threat * TARGET_PRIORITY.dpsWeight, TARGET_PRIORITY.dpsBonusMax);
-  return dist + CLASS_PENALTY()[cls] - bonus;
+  return dist + penalty - bonus;
 }
 
 /**
@@ -193,6 +276,7 @@ export function pickTarget(unit, range, filter = () => true, world = unit.world)
     // (world.canSee reads only viewer.team – a plain { position, team } works as the viewer)
     const d = edgeDistance(unit, other);
     if (d > range) continue;
+    if (!clearShot(world, unit, other)) continue; // [N7-los] not behind a tall map obstacle
     const cost = targetCost(unit, other, d);
     if (cost < bestCost) { best = other; bestCost = cost; }
   }
@@ -217,13 +301,17 @@ export function betterAutoTarget(unit, order, range) {
  * Falls back to the other group when the mech has no weapon of the preferred kind; null = no weapons.
  */
 export function engagementRange(mech, stance) {
-  const ws = mech.weapons.map((w) => w.stats);
-  const melee = ws.filter((w) => w.class === 'melee').map((w) => w.range);
-  const ranged = ws.filter((w) => w.class !== 'melee').map((w) => w.range);
+  const ws = mech.weapons;
+  let minMelee = Infinity;
+  let maxRanged = -Infinity;
+  for (let i = 0; i < ws.length; i++) {
+    const w = ws[i].stats;
+    if (w.class === 'melee') { if (w.range < minMelee) minMelee = w.range; } else if (w.range > maxRanged) maxRanged = w.range;
+  }
   const factor = getStats().rules.combat.approachRangeFactor;
-  if (stance === 'melee' && melee.length) return Math.min(...melee) * factor;
-  if (ranged.length) return Math.max(...ranged) * factor;
-  if (melee.length) return Math.min(...melee) * factor;
+  if (stance === 'melee' && minMelee !== Infinity) return minMelee * factor;
+  if (maxRanged !== -Infinity) return maxRanged * factor;
+  if (minMelee !== Infinity) return minMelee * factor;
   return null;
 }
 
@@ -267,6 +355,13 @@ export function releaseAttack(world, attacker, weapon, target, { hit = 'single' 
       const aim = aimPoint(target);
       const from = weapon.part.muzzlePoint(i); // launch socket of the weapon part, not the part origin
       play(shotEvent(s), { position: from });
+      // [N7-los] a tall map obstacle in the way: the shot hits it and does nothing (no damage, no splash)
+      if (!attacker.airborne && !target.airborne && losImpact(world, from, aim)) { // aircraft fly over obstacles (as clearShot)
+        const stop = _losHit.clone(); // allocation only on a blocked shot
+        if (s.projectileSpeed > 0) world.effects.projectile(from, () => stop, s.projectileSpeed, color, () => {}, projectileLook(s));
+        else world.effects.tracer(from, stop, color);
+        return;
+      }
       if (s.spread > 0) { firePellet(world, attacker, s, from, aim, color); return; }
       // Hit roll when the shot leaves: a miss flies into the ground beside the target (and may splash there)
       noteAttacker(target, attacker); // lets idle units fight back (even when the shot misses)
@@ -305,7 +400,11 @@ function shotEvent(s) {
 // Size and shape of a weapon's projectile (weapon data; shape falls back to the dominant damage type)
 function projectileLook(s) {
   const energy = (s.damage.energy ?? 0) > (s.damage.physical ?? 0);
-  return { size: s.projectileSize ?? 0, shape: s.projectileShape || VFX.projectile.defaultShape[energy ? 'energy' : 'physical'] };
+  return {
+    size: s.projectileSize ?? 0,
+    shape: s.projectileShape || VFX.projectile.defaultShape[energy ? 'energy' : 'physical'],
+    color: s.projectileColor || null,
+  };
 }
 
 /**
@@ -369,6 +468,7 @@ function interceptMiss(world, attacker, s, target, from, miss) {
   const dir = MISS_DIR.copy(miss).sub(from).divideScalar(length);
   MISS_EXCLUDE[0] = attacker; MISS_EXCLUDE[1] = target;
   const [unit] = traceUnits(world, attacker, s, from, dir, length, MISS_EXCLUDE, 1);
+  MISS_EXCLUDE[0] = MISS_EXCLUDE[1] = null; // do not keep the units alive until the next miss
   const wreck = traceWreck(world, from, dir, unit ? unit.t : length);
   if (wreck) return { point: wreck.point, wreck: wreck.wreck };
   return unit ? { point: unit.point, unit: unit.unit, factor: unit.factor } : null;
@@ -503,7 +603,7 @@ function sweep(world, attacker, s, target, wide, score) {
     if (world.rng.next() < hitChance(s, attacker, unit)) applyHit(world, attacker, s, unit, factor * ff, attacker.position, effectFactor, score);
   }
   // Wrecks in the arc get hit for sure (pure geometry: nearest point of the wreck within radius and arc)
-  const near = new THREE.Vector3();
+  const near = SWEEP_NEAR;
   for (const wreck of world.damageableWrecks) {
     wreck.bounds().clampPoint(attacker.position, near);
     const d = Math.hypot(near.x - attacker.position.x, near.z - attacker.position.z);
@@ -558,17 +658,30 @@ function pierce(world, attacker, s, from, point, target, score) {
  * @returns {{ unit, point: THREE.Vector3, factor: number }[]}  factor = friendly-fire damage factor
  */
 function traceUnits(world, attacker, s, from, dir, length, exclude, max) {
-  const found = [];
+  const found = TRACE_FOUND; // scratch, entries pooled; only the (small) result escapes
+  found.length = 0;
   for (const unit of world.units) {
     if (exclude.includes(unit) || !hitsLayer(s, unit)) continue; // [NQ3] pellets / pierce only hit their layers
     const factor = sideFactor(world, attacker, unit, s);
     if (factor <= 0) continue;
     const t = rayHitsBody(unit, from, dir, length);
-    if (t !== null) found.push({ unit, t, factor });
+    if (t === null) continue;
+    const e = TRACE_POOL[found.length] ??= { unit: null, t: 0, factor: 0 };
+    e.unit = unit; e.t = t; e.factor = factor;
+    found.push(e);
   }
-  found.sort((a, b) => a.t - b.t);
-  return found.slice(0, max).map((f) => ({ ...f, point: from.clone().addScaledVector(dir, f.t) }));
+  found.sort(byT);
+  const n = Math.min(max, found.length);
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const f = found[i];
+    out[i] = { unit: f.unit, t: f.t, factor: f.factor, point: from.clone().addScaledVector(dir, f.t) };
+    f.unit = null; // do not keep units alive in the pool
+  }
+  for (let i = n; i < found.length; i++) found[i].unit = null;
+  return out;
 }
+const byT = (a, b) => a.t - b.t;
 
 /** Nearest wreck a ray enters within `length` (wreck shape = its bounding box), or null */
 function traceWreck(world, from, dir, length) {
@@ -672,7 +785,11 @@ function deviate(rng, dir, half) {
   return dir.clone().addScaledVector(u, Math.cos(a) * r).addScaledVector(v, Math.sin(a) * r).normalize();
 }
 
-const scaleDamage = (damage, k) => Object.fromEntries(Object.entries(damage).map(([t, v]) => [t, v * k]));
+function scaleDamage(damage, k) {
+  const out = {};
+  for (const t in damage) out[t] = damage[t] * k;
+  return out;
+}
 
 /**
  * Damage outside a weapon shot (burning, later abilities): hits a random part / the squad, gives XP.

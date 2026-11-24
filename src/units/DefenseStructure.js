@@ -103,7 +103,13 @@ export class DefenseStructure extends Structure {
       maxStep = cfg.speedDeg * DEG * dt;
     }
     this.idleOffset += THREE.MathUtils.clamp(want - this.idleOffset, -maxStep, maxStep);
-    this.holder.rotation.y = wrapAngle((this.turns ? this.aimYaw : 0) + this.idleOffset);
+    this.#applyYaw(wrapAngle((this.turns ? this.aimYaw : 0) + this.idleOffset));
+  }
+
+  // Procedural models turn only their head (setAim); GLB models turn the whole holder
+  #applyYaw(v) {
+    if (this.procModel?.setAim) this.procModel.setAim(v);
+    else this.holder.rotation.y = v;
   }
 
   // Keeps the current target while it stays in range and visible, else the nearest enemy (checked periodically)
@@ -136,7 +142,7 @@ export class DefenseStructure extends Structure {
     const diff = wrapAngle(this.#angleTo(target) - this.aimYaw);
     const max = this.stats.turnSpeed * DEG * dt;
     this.aimYaw = wrapAngle(this.aimYaw + THREE.MathUtils.clamp(diff, -max, max));
-    this.holder.rotation.y = this.aimYaw;
+    this.#applyYaw(this.aimYaw);
   }
 
   #inArc(w, target) {
@@ -152,6 +158,7 @@ export class DefenseStructure extends Structure {
     const s = w.stats;
     this.attackLock = s.attackTime;
     w.cooldown = s.attackTime + s.cooldown;
+    this.procModel?.fire?.(); // recoil + flash, visual only (sockets hang on a non-recoiling node, muzzle point unchanged)
     this.world.schedule(s.attackTime * s.hitAt, () => {
       if (!this.dead) releaseAttack(this.world, this, w, target);
     });

@@ -5,7 +5,7 @@
 // Units must belong to cmd.team; dead / unknown ids and dead targets are dropped silently.
 import * as THREE from 'three';
 import { registerCommand, resolve, resolveOwn } from './CommandBus.js';
-import { MECH, CMD_GROUPING } from '../../config.js';
+import { MECH, CMD_GROUPING, FORMATION } from '../../config.js';
 import { issueOrder, clearQueue, queueOf } from '../../units/OrderQueue.js';
 import { isTargetable, areEnemies, canEngage } from '../Combat.js';
 import { canRepairTarget, isServiceBay, repairInterruptible } from '../Repair.js';
@@ -19,6 +19,7 @@ const ARM_SLOT_KEYS = ['leftArm', 'rightArm'];
 // Crews do not die from damage that large – "delete unit" uses it to remove a crew through its normal death
 const DELETE_DAMAGE = { physical: Infinity };
 const FORMATION_ORDER = ['vehicle', 'mech', 'crew'];
+const SHAPED_ORDER = ['mech', 'vehicle', 'crew']; // front to back in a shaped formation
 const FORMATION_SPACING = { mech: MECH.groupSpacing, crew: CMD_GROUPING.crewSpacing, vehicle: CMD_GROUPING.vehicleSpacing };
 
 /** Orders where only the first unit that can take it does (one truck per wreck, one seat per mech…) */
@@ -121,6 +122,110 @@ function formation(units, spacing, point, apply) {
   });
 }
 
+// ---------- shaped formations (box / column / wedge) ----------
+
+const modeOf = (u) => (FORMATION.modes.includes(u.formation) ? u.formation : FORMATION.defaultMode);
+
+/** Mode of the majority of the units (a tie goes to the earlier mode in FORMATION.modes) */
+function groupMode(units) {
+  let best = FORMATION.defaultMode;
+  let bestCount = 0;
+  for (const mode of FORMATION.modes) {
+    let n = 0;
+    for (const u of units) if (modeOf(u) === mode) n++;
+    if (n > bestCount) { best = mode; bestCount = n; }
+  }
+  return best;
+}
+
+/** Slots of a formation of n units, front first, centred on (0, 0): lat = sideways, back = backwards, row = rank */
+function slotsFor(mode, n, spacing) {
+  const slots = [];
+  if (mode === 'column') {
+    for (let i = 0; i < n; i++) slots.push({ lat: 0, back: i * spacing, row: i });
+  } else if (mode === 'wedge') {
+    for (let i = 0; i < n; i++) {
+      const k = Math.ceil(i / 2); // rank 0 = the tip, then a pair per rank
+      const side = i % 2 ? -1 : 1;
+      slots.push({ lat: i ? side * k * spacing * FORMATION.wedgeLateral : 0, back: k * spacing * FORMATION.wedgeBack, row: k });
+    }
+  } else { // box
+    const cols = Math.ceil(Math.sqrt(n));
+    for (let i = 0; i < n; i++) {
+      const row = Math.floor(i / cols);
+      const inRow = Math.min(cols, n - row * cols);
+      slots.push({ lat: ((i % cols) - (inRow - 1) / 2) * spacing, back: row * spacing, row });
+    }
+  }
+  const depth = n ? slots[n - 1].back : 0;
+  for (const s of slots) s.back -= depth / 2;
+  return { slots, depth };
+}
+
+/** Unit vector (x, z) from the group centre to the point; FORMATION.defaultHeading when too close */
+function headingTo(units, point) {
+  let cx = 0;
+  let cz = 0;
+  for (const u of units) { cx += u.position.x; cz += u.position.z; }
+  cx /= units.length; cz /= units.length;
+  const dx = point.x - cx;
+  const dz = point.z - cz;
+  const len = Math.hypot(dx, dz);
+  return len < FORMATION.minHeadingDistance ? FORMATION.defaultHeading : { x: dx / len, z: dz / len };
+}
+
+/** Speed of the slowest unit (the group walks at it), undefined when unknown */
+function slowestSpeed(units) {
+  let min = Infinity;
+  for (const u of units) { const s = u.stats?.mobility?.moveSpeed; if (Number.isFinite(s) && s < min) min = s; }
+  return min === Infinity ? undefined : min;
+}
+
+/**
+ * Sends a group (all of one kind) to the slots of a shaped formation centred on `centre`, heading `dir`.
+ * Units are matched to slots front to back, then side to side by their current position (no crossing paths);
+ * ties break by eid (deterministic). apply(unit, {x, z}).
+ */
+function shapedFormation(units, mode, spacing, centre, dir, apply) {
+  if (!units.length) return;
+  const rx = -dir.z; // sideways axis
+  const rz = dir.x;
+  let cx = 0;
+  let cz = 0;
+  for (const u of units) { cx += u.position.x; cz += u.position.z; }
+  cx /= units.length; cz /= units.length;
+  const front = (u) => (u.position.x - cx) * dir.x + (u.position.z - cz) * dir.z;
+  const side = (u) => (u.position.x - cx) * rx + (u.position.z - cz) * rz;
+  const sorted = [...units].sort((a, b) => front(b) - front(a) || a.eid - b.eid);
+  const { slots } = slotsFor(mode, units.length, spacing);
+  let from = 0;
+  while (from < slots.length) {
+    let to = from;
+    while (to < slots.length && slots[to].row === slots[from].row) to++;
+    const rank = sorted.slice(from, to).sort((a, b) => side(a) - side(b) || a.eid - b.eid);
+    const rankSlots = slots.slice(from, to).sort((a, b) => a.lat - b.lat);
+    rank.forEach((u, i) => apply(u, {
+      x: centre.x + rx * rankSlots[i].lat - dir.x * rankSlots[i].back,
+      z: centre.z + rz * rankSlots[i].lat - dir.z * rankSlots[i].back,
+    }));
+    from = to;
+  }
+}
+
+/** Run closure of an order that also stores the group speed limit on the unit's new order (read by Movement.followPath) */
+const withCap = (unit, cap, start) => () => {
+  const result = start();
+  if (cap !== undefined && unit.order) unit.order.maxSpeed = cap;
+  return result;
+};
+
+registerCommand('setFormation', {
+  validate: (world, cmd) => FORMATION.modes.includes(cmd.mode) && hasUnits(world, cmd),
+  execute(world, cmd) {
+    for (const u of own(world, cmd)) u.formation = cmd.mode;
+  },
+});
+
 // ---------- move ----------
 
 registerCommand('move', {
@@ -135,6 +240,28 @@ registerCommand('move', {
         give(u, 'joinBay', { bay }, () => u.joinBay(bay), cmd.queued, canTake('joinBay', u, bay, true));
       }
       groups.crew = [];
+    }
+    const all = [...groups.mech, ...groups.vehicle, ...groups.crew];
+    const mode = all.length > 1 ? groupMode(all) : FORMATION.defaultMode;
+    if (mode !== FORMATION.defaultMode) {
+      // Shaped: blocks of mechs, vehicles, crews one behind the other (mechs in front), the whole centred on the point
+      const dir = headingTo(all, cmd.point);
+      const cap = slowestSpeed(all);
+      const blocks = SHAPED_ORDER.filter((kind) => groups[kind].length);
+      let total = (blocks.length - 1) * FORMATION.kindGap;
+      for (const kind of blocks) total += slotsFor(mode, groups[kind].length, FORMATION_SPACING[kind]).depth;
+      let cursor = -total / 2; // distance behind the point of the front edge of the next block
+      for (const kind of blocks) {
+        const depth = slotsFor(mode, groups[kind].length, FORMATION_SPACING[kind]).depth;
+        const back = cursor + depth / 2;
+        const centre = { x: cmd.point.x - dir.x * back, z: cmd.point.z - dir.z * back };
+        shapedFormation(groups[kind], mode, FORMATION_SPACING[kind], centre, dir, (u, p) => {
+          const target = toVec(world, p.x, p.z);
+          give(u, 'move', { target }, withCap(u, cap, () => u.moveTo(target)), cmd.queued);
+        });
+        cursor += depth + FORMATION.kindGap;
+      }
+      return;
     }
     for (const kind of FORMATION_ORDER) {
       // Crews sent together with mechs wait a bit behind them (camera side)
@@ -154,10 +281,15 @@ function registerPointOrder(type, method) {
   registerCommand(type, {
     validate: (world, cmd) => validPoint(cmd.point) && hasUnits(world, cmd),
     execute(world, cmd) {
-      formation(own(world, cmd).filter(isFighter), MECH.groupSpacing, cmd.point, (u, p) => {
+      const fighters = own(world, cmd).filter(isFighter);
+      const place = (u, p, cap) => {
         const target = toVec(world, p.x, p.z);
-        give(u, type, { target }, () => u[method](target), cmd.queued);
-      });
+        give(u, type, { target }, withCap(u, cap, () => u[method](target)), cmd.queued);
+      };
+      const mode = fighters.length > 1 ? groupMode(fighters) : FORMATION.defaultMode;
+      if (mode === FORMATION.defaultMode) { formation(fighters, MECH.groupSpacing, cmd.point, place); return; }
+      const cap = slowestSpeed(fighters);
+      shapedFormation(fighters, mode, MECH.groupSpacing, cmd.point, headingTo(fighters, cmd.point), (u, p) => place(u, p, cap));
     },
   });
 }
@@ -181,10 +313,14 @@ registerCommand('guard', {
       for (const u of units) give(u, 'guard', { unit: t }, () => u.guard(t), cmd.queued, canTake('guard', u, t, true));
       return;
     }
-    formation(units, MECH.groupSpacing, cmd.point, (u, p) => {
+    const place = (u, p, cap) => {
       const target = toVec(world, p.x, p.z);
-      give(u, 'guard', { point: target }, () => u.guard(target), cmd.queued);
-    });
+      give(u, 'guard', { point: target }, withCap(u, cap, () => u.guard(target)), cmd.queued);
+    };
+    const mode = units.length > 1 ? groupMode(units) : FORMATION.defaultMode;
+    if (mode === FORMATION.defaultMode) { formation(units, MECH.groupSpacing, cmd.point, place); return; }
+    const cap = slowestSpeed(units);
+    shapedFormation(units, mode, MECH.groupSpacing, cmd.point, headingTo(units, cmd.point), (u, p) => place(u, p, cap));
   },
 });
 

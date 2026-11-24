@@ -4,11 +4,12 @@
 //   ai.update(simTimeSeconds)   – call after each simulation tick (or less often); it thinks on its own intervals
 //
 // The AI runs OUTSIDE the simulation: it reads what its team may know (Perception) and acts only through
-// commandBus.submit({ ...cmd, team }) – the same commands as the UI. It needs no determinism (own Math.random, may
-// skip thinking); in multiplayer only the host runs it and its commands travel like a remote player's.
+// commandBus.submit({ ...cmd, team }) – the same commands as the UI. Its randomness comes from its own seeded
+// generator `ai.rng` (D1: reproducible AI-vs-AI; never world.rng); in multiplayer only the host runs it and its commands travel like a remote player's.
 // Managers (src/ai/managers/*) share a blackboard (`ai.bb`) and send commands through a rate limiter (`ai.issue`)
 // that enforces the difficulty's actions per minute.
 import { AI } from '../config.js';
+import { Rng } from '../core/Rng.js';
 import { Perception } from './Perception.js';
 import { PRIORITY, weaponDefsOf } from './util.js';
 import { loadAiData, difficultyOf, buildOrderOf, armiesOf, defensePlanOf, researchPlanOf, hitsAir } from './AiData.js';
@@ -25,6 +26,8 @@ import { clearIntent } from './allyBoard.js';
 
 /** Queued commands older than this (s) are dropped – the situation has changed */
 const COMMAND_STALE_SECONDS = 5;
+/** Spreads the per-team AI generator seeds (odd golden-ratio constant, same idea as seed + team * step elsewhere) */
+const RNG_TEAM_STEP = 0x9e3779b1;
 export { PRIORITY };
 
 export class AiPlayer {
@@ -41,6 +44,9 @@ export class AiPlayer {
   constructor({ world, commandBus, team, race, difficulty = 'normal', unlocks = null, allies = [] }) {
     Object.assign(this, { world, commandBus, team, race, unlocks, allies: [...allies] });
     this.difficultyId = difficulty;
+    // D1: own seeded generator (never world.rng – AI choices must not move the simulation stream). The AI is created
+    // right after world.startSimulation(seed), so the world generator still holds the match seed at this point.
+    this.rng = new Rng((world.rng.state ^ Math.imul(team + 1, RNG_TEAM_STEP)) >>> 0);
     this.diff = null;      // difficulty settings once the data is loaded
     this.data = null;
     this.enabled = true;

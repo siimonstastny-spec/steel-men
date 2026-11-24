@@ -11,6 +11,7 @@ import { QUEUE_FRAME } from '../config.js';
 import { t } from '../i18n/i18n.js';
 import { localTeam } from '../core/LocalPlayer.js';
 import { unitName } from './BuildMenu.js';
+import { buildingIconHtml, iconVersion } from './IconRenderer.js';
 import { progressOf, isWaitingEnergy } from './ProductionQueue.js';
 import { setHtmlKeepScroll } from './scrollKeep.js';
 import { esc } from './hudUtil.js';
@@ -86,7 +87,7 @@ export class QueueFrame {
       const name = unitName('structures', s.unitId);
       const pct = Math.floor((s.progress ?? 0) * Q.percent);
       cells += `<div class="qf-item ${i < current ? 'active' : ''}" data-s="${s.eid}" title="${esc(name)} – ${pct} %">`
-        + `<span class="ico">${esc(name.slice(0, ICON_LETTERS))}</span><span class="bar" style="width:${pct}%"></span></div>`;
+        + `<span class="ico">${buildingIconHtml(s.unitId, s.race, s.team) || esc(name.slice(0, ICON_LETTERS))}</span><span class="bar" style="width:${pct}%"></span></div>`;
     }
     const more = list.length > shown ? `<span class="qf-more">+${list.length - shown}</span>` : '';
     return `<div class="qf-group"><div class="qf-name">${esc(t('build.builders'))}</div><div class="qf-cells">${cells}${more}</div></div>`;
@@ -127,7 +128,7 @@ export class QueueFrame {
     const current = this.#collectBuilds();
     const list = this.builds;
     const shown = Math.min(list.length, Q.maxBuildsShown);
-    sig.push(shown, list.length, current);
+    sig.push(shown, list.length, current, iconVersion());
     for (let i = 0; i < shown; i++) sig.push(list[i].eid);
     const items = this.queue.items;
     const eco = this.world.economy;

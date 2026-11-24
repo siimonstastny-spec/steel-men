@@ -4,16 +4,145 @@ import * as THREE from 'three';
 import { loadModel } from '../core/AssetLoader.js';
 import { VFX, R2 } from '../config.js';
 import { play } from '../audio/Sound.js';
-import { loadExplosionData, explosionData, explosionPlan, ParticleField } from './ExplosionStyles.js';
+import { loadExplosionData, explosionData, explosionPlan, damagePlan, ParticleField } from './ExplosionStyles.js';
 
 const TRACER_LIFE = VFX.tracerLife;
+
+// Scratch objects of the projectile batch (recycled, nothing is allocated per frame)
+const _pDummy = new THREE.Object3D();
+const _pColor = new THREE.Color();
+const _pWhite = new THREE.Color(1, 1, 1);
+const _pDir = new THREE.Vector3();
+
+/**
+ * All travelling projectiles drawn as two instanced meshes (bright core + additive halo). Visual only: arrival
+ * callbacks into the simulation fire for every projectile in launch order, drawn or not (beyond maxInstances).
+ */
+class ProjectileBatch {
+  constructor(scene) {
+    const cfg = VFX.projectile;
+    this.scene = scene;
+    this.cap = cfg.maxInstances;
+    this.geo = new THREE.SphereGeometry(1, ...cfg.segments);
+    this.coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this.glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending });
+    this.core = this.#mesh(this.coreMat, 0);
+    this.glow = this.#mesh(this.glowMat, VFX.renderOrder);
+    this.live = [];      // records in launch order
+    this.arrived = [];   // recycled: records that arrived this frame
+    this.pool = [];      // recycled records
+  }
+
+  #mesh(mat, order) {
+    const m = new THREE.InstancedMesh(this.geo, mat, this.cap);
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    m.count = 0;
+    m.frustumCulled = false; // instances move; the initial bounding sphere would cull them
+    m.castShadow = false;
+    m.receiveShadow = false;
+    m.renderOrder = order;
+    m.raycast = () => {};
+    this.scene.add(m);
+    return m;
+  }
+
+  launch(from, aim, speed, color, onArrive, r, shape) {
+    const rec = this.pool.pop() ?? { pos: new THREE.Vector3(), hit: new THREE.Vector3(), core: new THREE.Color(), halo: new THREE.Color() };
+    rec.pos.copy(from);
+    rec.aim = aim;
+    rec.speed = speed;
+    rec.onArrive = onArrive;
+    rec.r = r;
+    rec.stretch = shape.stretch;
+    rec.glowR = r * shape.glow;
+    rec.glowOpacity = shape.glowOpacity;
+    rec.life = VFX.projectile.maxLife;
+    rec.halo.set(color);
+    rec.core.copy(rec.halo).lerp(_pWhite, VFX.projectile.coreWhite);
+    rec.done = false;
+    this.live.push(rec);
+  }
+
+  update(dt) {
+    const live = this.live;
+    if (!live.length) return;
+    let error = null; // first exception of an aim() / onArrive callback, rethrown after the batch is consistent
+    // 1) move; mark the ones that arrive (or time out)
+    for (let i = 0; i < live.length; i++) {
+      const rec = live[i];
+      rec.life -= dt;
+      let target;
+      try { target = rec.aim(); } catch (e) { rec.done = true; rec.timeout = true; error ??= e; continue; } // one bad aim must not drop the batch
+      _pDir.subVectors(target, rec.pos);
+      const dist = _pDir.length();
+      const step = rec.speed * dt;
+      if (dist <= step) { rec.pos.copy(target); rec.hit.copy(target); rec.done = true; rec.timeout = false; } else {
+        rec.pos.addScaledVector(_pDir, step / dist);
+        rec.dirX = _pDir.x; rec.dirY = _pDir.y; rec.dirZ = _pDir.z;
+        if (rec.life <= 0) { rec.done = true; rec.timeout = true; }
+      }
+    }
+    // 2) compact in launch order and write the instances of the survivors
+    let n = 0;
+    for (let i = 0; i < live.length; i++) {
+      const rec = live[i];
+      if (rec.done) { this.arrived.push(rec); continue; }
+      live[n++] = rec;
+    }
+    live.length = n;
+    const drawn = Math.min(n, this.cap);
+    for (let i = 0; i < drawn; i++) {
+      const rec = live[i];
+      _pDummy.position.copy(rec.pos);
+      if (rec.stretch !== 1) { _pDir.set(rec.dirX, rec.dirY, rec.dirZ).add(rec.pos); _pDummy.lookAt(_pDir); } else _pDummy.quaternion.identity();
+      _pDummy.scale.set(rec.r, rec.r, rec.r * rec.stretch); // long axis = local +Z, which lookAt points along the flight
+      _pDummy.updateMatrix();
+      this.core.setMatrixAt(i, _pDummy.matrix);
+      this.core.setColorAt(i, rec.core);
+      _pDummy.scale.set(rec.glowR, rec.glowR, rec.glowR * rec.stretch);
+      _pDummy.updateMatrix();
+      this.glow.setMatrixAt(i, _pDummy.matrix);
+      _pColor.copy(rec.halo).multiplyScalar(rec.glowOpacity); // additive blending: colour x strength = halo brightness
+      this.glow.setColorAt(i, _pColor);
+    }
+    this.core.count = this.glow.count = drawn;
+    this.core.instanceMatrix.needsUpdate = this.glow.instanceMatrix.needsUpdate = true;
+    if (this.core.instanceColor) this.core.instanceColor.needsUpdate = this.glow.instanceColor.needsUpdate = true;
+    // 3) arrivals last: the callbacks may launch new projectiles (appended to `live`)
+    const arrived = this.arrived;
+    try {
+      for (let i = 0; i < arrived.length; i++) {
+        const rec = arrived[i];
+        const cb = rec.onArrive;
+        const point = rec.timeout ? null : rec.hit.clone();
+        rec.aim = null; rec.onArrive = null;
+        this.pool.push(rec);
+        if (point) { try { cb(point); } catch (e) { error ??= e; } }
+      }
+    } finally {
+      arrived.length = 0; // a record must never be processed (and pooled) twice
+    }
+    if (error) throw error;
+  }
+
+  dispose() {
+    this.scene.remove(this.core, this.glow);
+    this.core.dispose();
+    this.glow.dispose();
+    this.geo.dispose();
+    this.coreMat.dispose();
+    this.glowMat.dispose();
+    this.live.length = 0;
+    this.arrived.length = 0;
+    this.pool.length = 0;
+  }
+}
 
 export class Effects {
   constructor(scene) {
     this.scene = scene;
     this.items = [];
-    // Unit sphere, scaled per projectile (size and stretch along the flight direction)
-    this.projectileGeo = new THREE.SphereGeometry(1, ...VFX.projectile.segments);
+    this.projectiles = new ProjectileBatch(scene); // every travelling projectile, drawn as two instanced meshes
     this.templates = {};    // VFX model key -> loaded scene (cloned per effect)
     this.time = 0;
     this.field = null;      // batched explosion particles (ExplosionStyles.ParticleField), created on first use
@@ -85,6 +214,43 @@ export class Effects {
     return { stop: () => { item.life = 0; } };
   }
 
+  /**
+   * Persistent damage smoke on a unit / building while its hp fraction is below the data threshold (light smoke when
+   * slightly hurt, thick dark smoke when nearly dead). Ends itself when the target is destroyed / dead / removed, or on
+   * dispose(). Purely visual: reads state, never writes it, own seeded generator (no world.rng).
+   * @param {object} target  unit or building (uses position, aimHeight | bodyHeight, radius, destroyed / dead / removed)
+   * @param {() => number} hpFraction  current hp / maxHp (0..1), evaluated every frame
+   * @param {object} [opts]  { kind = 'unit' ('unit' | 'building'), isShown = () => true (fog of war), sizeScale = 1 }
+   * @returns {{ dispose(): void }}
+   */
+  damageSmoke(target, hpFraction, { kind = 'unit', isShown = () => true, sizeScale = 1 } = {}) {
+    const spec = damagePlan(kind);
+    if (!spec || !explosionData()) return { dispose() {} };
+    const field = this.#field();
+    let puffs = 0;
+    const item = {
+      life: Infinity,
+      update: (dt) => {
+        if (target.destroyed || target.dead || target.removed) { item.life = 0; return; }
+        const hp = hpFraction();
+        if (hp >= spec.threshold || hp <= 0 || !isShown()) { puffs = 0; return; }
+        const sev = Math.min(1, (spec.threshold - hp) / spec.threshold);
+        puffs += (spec.rateMin + (spec.rateMax - spec.rateMin) * sev) * dt;
+        if (puffs < 1) return;
+        const spread = (target.radius ?? 1) * spec.spread;
+        const p = target.position;
+        const y = p.y + (kind === 'building' ? (target.bodyHeight ?? 1) : (target.aimHeight ?? 1)) * spec.height;
+        while (puffs >= 1) {
+          puffs -= 1;
+          field.damagePuff(spec, sev, sizeScale, p.x + (field.rand() - 0.5) * 2 * spread, y, p.z + (field.rand() - 0.5) * 2 * spread);
+        }
+      },
+      dispose: () => {},
+    };
+    this.items.push(item);
+    return { dispose: () => { item.life = 0; } };
+  }
+
   #field() {
     return (this.field ??= new ParticleField(this.scene));
   }
@@ -113,36 +279,14 @@ export class Effects {
   /**
    * Projectile flying towards a (possibly moving) target; onArrive(point) is called on impact.
    * @param {() => THREE.Vector3} aim  current aim point (homing), evaluated every frame
-   * @param {object} [look]  { size (radius, units), shape ('orb' | 'shell' | 'missile') } – see VFX.projectile
+   * @param {object} [look]  { size (radius, units), shape ('orb' | 'shell' | 'missile' | 'bolt'), color (optional
+   *   hex / CSS colour overriding the shape colour and `color`) } – see VFX.projectile
    */
-  projectile(from, aim, speed, color, onArrive, { size = 0, shape = '' } = {}) {
+  projectile(from, aim, speed, color, onArrive, { size = 0, shape = '', color: lookColor = null } = {}) {
     const cfg = VFX.projectile;
-    const r = size > 0 ? size : cfg.defaultSize;
-    const stretch = (cfg.shapes[shape] ?? cfg.shapes.orb).stretch;
-    const mat = new THREE.MeshBasicMaterial({ color });
-    const mesh = new THREE.Mesh(this.projectileGeo, mat);
-    mesh.scale.set(r, r, r * stretch); // long axis = local +Z, which lookAt points along the flight
-    mesh.position.copy(from);
-    this.scene.add(mesh);
-    const dir = new THREE.Vector3();
-    this.items.push({
-      life: cfg.maxLife,
-      update: (dt, item) => {
-        const target = aim();
-        dir.subVectors(target, mesh.position);
-        const dist = dir.length();
-        const step = speed * dt;
-        if (dist <= step) {
-          mesh.position.copy(target);
-          item.life = 0;
-          onArrive(target.clone());
-        } else {
-          if (stretch !== 1) mesh.lookAt(target);
-          mesh.position.addScaledVector(dir, step / dist);
-        }
-      },
-      dispose: () => { this.scene.remove(mesh); mat.dispose(); },
-    });
+    const r = (size > 0 ? size : cfg.defaultSize) * cfg.sizeScale;
+    const spec = cfg.shapes[shape] ?? cfg.shapes.orb;
+    this.projectiles.launch(from, aim, speed, lookColor ?? spec.color ?? color, onArrive, r, spec);
   }
 
   /**
@@ -273,6 +417,7 @@ export class Effects {
     }
     items.length = n;
     this.#drainExpired();
+    this.projectiles.update(dt);
     this.field?.update(dt);
   }
 
@@ -293,7 +438,7 @@ export class Effects {
     const items = this.items;
     this.items = [];
     for (const item of items) this.#expired.push(item);
-    try { this.#drainExpired(); } finally { this.projectileGeo.dispose(); this.field?.dispose(); this.field = null; }
+    try { this.#drainExpired(); } finally { this.projectiles.dispose(); this.field?.dispose(); this.field = null; }
   }
 
   #expired = []; // recycled list of items finished this frame

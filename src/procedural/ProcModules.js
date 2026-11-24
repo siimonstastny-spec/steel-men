@@ -403,7 +403,7 @@ export class ProcModel extends THREE.Group {
     if (this.batch || !this.staticLods || !on) return;
     this.batch = {
       registered: false, batcher: null, items: null,
-      lod: -1, visible: true, dist2: 0, rank: 0,
+      lod: -1, visible: true, dist2: 0, rank: 0, staticOnly: false,
       pos: new THREE.Vector3(), world: new THREE.Matrix4(),
       team: new THREE.Color(this.teamColor), highlight: 0,
     };
@@ -457,6 +457,9 @@ export class ProcModel extends THREE.Group {
       });
     }
     for (const mesh of this.farMeshes) items.push(paintItem([mesh.geometry], 1, last, mesh));
+    // nothing but the instanced body at LOD0 (no glow, no unbatched emblem, no other paint mesh): needs no LOD0 slot
+    b.staticOnly = this.paintMeshes.length === 1 && this.glowLayers.length === 0
+      && this.emblemSources.every((s) => s.parent === this);
     b.items = items;
     b.visible = visible;
     this.updateWorldMatrix(true, false);

@@ -20,7 +20,7 @@ import { EdgeScroll } from './ui/EdgeScroll.js';
 import { MAP, MENU, PLAYER_TEAM, TEAMS, basicLoadout, ECONOMY, START_LAYOUT, TEST_SCENE, SIM, NET, NET_LEAVE, SEATS, AIMENU } from './config.js';
 import { assignStarts } from './game/MapStarts.js';
 import { validMapId } from './game/MapCatalog.js';
-import { loadStats, raceList, raceName, createUnlocks, getStats, unitStats, crewStats } from './data/Stats.js';
+import { loadStats, raceList, raceName, createUnlocks, getStats, unitStats, crewStats, modelRaceOf } from './data/Stats.js';
 import { commandBus } from './game/commands/CommandBus.js';
 import { localTeam, setLocalTeam, isLocal } from './core/LocalPlayer.js';
 import { randomSeed } from './core/Rng.js';
@@ -30,17 +30,23 @@ import { Economy, validPopulationCap } from './game/Economy.js';
 import { loadVehicle } from './units/Aircraft.js'; // aircraft → Aircraft, other vehicles → CombatVehicle loader
 import { Structure } from './units/Structure.js';
 import { BuildMenu, unitName } from './ui/BuildMenu.js';
+import { disposeIconRenderer, initIconRenderer, onIconReady, prewarmBuildingIcons } from './ui/IconRenderer.js';
 import { Research } from './game/Research.js';
 import { ResearchView } from './ui/ResearchView.js';
 import { Match } from './game/Match.js';
+import { validConditionForSet } from './game/Victory.js';
 import { gameSpeed, formatGameTime } from './game/GameSpeed.js';
 import { validPrebuild, prebuildSecondsLeft, PREBUILD } from './game/PreBuild.js';
 import { MatchUi } from './ui/MatchUi.js';
 import { Production } from './game/Production.js';
 import { preloadFootprints } from './game/commands/buildCommands.js';
 import * as mp from './net/index.js';
+import { Chat } from './net/Chat.js'; // [N11]
+import { ChatBox } from './ui/ChatBox.js'; // [N11]
 import { startLoadouts } from './game/StartLoadouts.js';
+import { startSetPlan, validStartSet } from './game/StartSets.js'; // [N15] start sets (units a team starts with)
 import { HqBeams } from './game/HqBeams.js';
+import { DamageSmokeWiring } from './game/DamageSmokeWiring.js'; // damage smoke on hurt units / buildings (visual)
 import { RallyMarkers } from './ui/RallyMarkers.js';
 import { createAi, updateAis, clearAis } from './ai/index.js';
 import { setAlliances, normalizeAlliances, startOrder, alliesOf, areAllies, clampPlayerCount } from './game/Alliances.js';
@@ -243,7 +249,7 @@ function matchModelPaths(races) {
   const paths = [];
   for (const race of new Set(races)) {
     const crew = crewStats(race);
-    paths.push(crew.model, crew.animationSource, ...Object.values(basicLoadout(race)));
+    paths.push(crew.model, crew.animationSource, ...Object.values(basicLoadout(modelRaceOf(race) ?? race))); // [N17] stand-in models of W
     for (const group of ['vehicles', 'structures']) {
       for (const [id, raw] of Object.entries(s[group] ?? {})) {
         if (raw.buildable === false) continue; // never produced (starting units are loaded already)
@@ -276,27 +282,48 @@ function startOffset(base, { forward, side }) {
 // simulation starts – so their entity ids are the same on every client.
 
 /**
- * Starting units of a team (stats.json → rules.economy.startUnits) at its start position (START_LAYOUT):
- * finished buildings (Outpost) and vehicles (HoverTruck, DrillTruck).
+ * Starting units of a team: the chosen start set (game.startSet → StartSets.startSetPlan) at its start position
+ * (START_LAYOUT). Fixed creation order: buildings, vehicles, the set's mech, its crews (the first one boards the mech).
+ * The same for every team, AI included.
  * @returns {{load, add}[]} jobs for loadThenAdd
  */
-function startingBaseJobs(team, race, base) {
-  const start = getStats().rules.economy?.startUnits ?? {};
-  const spot = (id, i) => START_LAYOUT[id]
-    ?? { ...START_LAYOUT.fallback, side: START_LAYOUT.fallback.side + i * START_LAYOUT.fallback.step };
-  return [
-    ...(start.structures ?? []).map((id, i) => ({
+function startingBaseJobs(team, race, base, catalog) {
+  const plan = startSetPlan(game.startSet, race, getStats(), catalog);
+  const jobs = [
+    ...plan.structures.map(({ id, spot }) => ({
       load: () => new Structure(id, race, { team, complete: true, yaw: base.yaw, name: unitName('structures', id) }).load(),
-      add: (s) => { const { x, z } = startOffset(base, spot(id, i)); return world.addStructure(s, x, z); },
+      add: (s) => { const { x, z } = startOffset(base, spot); return world.addStructure(s, x, z); },
     })),
-    ...(start.vehicles ?? []).map((id, i) => ({
+    ...plan.vehicles.map(({ id, spot }) => ({
       load: () => loadVehicle(id, race, { team, name: unitName('vehicles', id) }), // armed ones are CombatVehicles
-      add: (v) => { const { x, z } = startOffset(base, spot(id, i)); return world.addVehicle(v, x, z, base.yaw); },
+      add: (v) => { const { x, z } = startOffset(base, spot); return world.addVehicle(v, x, z, base.yaw); },
     })),
   ];
+  let mech = null;
+  if (plan.mech) {
+    jobs.push({
+      load: () => new ModularMech(plan.mech.loadout, { race, team }).load(),
+      add: (m) => {
+        mech = m;
+        m.name = t('unit.mechName', { n: ++spawnCount, race: raceName(race) });
+        const { x, z } = startOffset(base, plan.mech.spot);
+        return world.addMech(m, x, z, base.yaw);
+      },
+    });
+  }
+  plan.crews.forEach(({ spot, boardMech }, i) => jobs.push({
+    load: () => new Crew(race, { team, name: t('unit.crewName', { n: i + 1, race: raceName(race) }) }).load(),
+    add: (crew) => {
+      const { x, z } = startOffset(base, spot);
+      world.addCrew(crew, x, z, base.yaw);
+      if (boardMech && mech) mech.boardCrew(crew);
+      return crew;
+    },
+  }));
+  return jobs;
 }
 
-/** Test scene: the player also gets the finished robot production buildings (TEST_SCENE.structures) */
+/** Test scene (?test=1 / steelMans.startTestScene()): the player also gets the finished robot production buildings (TEST_SCENE.structures) */
 function testStructureJobs(team, race, base) {
   return TEST_SCENE.structures.map((id) => ({
     load: () => new Structure(id, race, { team, complete: true, yaw: base.yaw, name: unitName('structures', id) }).load(),
@@ -342,6 +369,7 @@ async function startGame(settings) {
   commandBus.reset();
   gameSpeed.reset(settings.speed); // N4: invalid / missing = 1×
   game.prebuild = validPrebuild(settings.prebuild); // [N8] minutes, 0 = off
+  game.startSet = null; // [N15] validated below, once stats.json is loaded (menu / profile / host message value)
   // [N5] Seats of the match: the first playerCount teams (missing = PLAYERS.default = the old 1-on-1); every per-team
   // list from the settings is cut to that length. Alliances are set before anything is added (Combat / fog read them).
   const playerCount = clampPlayerCount(settings.playerCount);
@@ -387,6 +415,8 @@ async function startGame(settings) {
   };
   loading.step('data');
   await Promise.all([loadStats(), loadBuildingStyles()]); // [18A] styles before any procedural building is created
+  game.startSet = validStartSet(settings.startSet, getStats()); // [N15] multiplayer: the host's settings.startSet
+  game.victory = validConditionForSet(game.victory, game.startSet, getStats()); // a set without a main building cannot play 'mainBuilding'
   world.economy = new Economy(world, { races: game.races, ...world.settings.economy });
   map.placeDeposits?.(seed); // ASCII maps: deposits on random field cells from the match seed
   world.economy.setupDeposits(map);
@@ -405,15 +435,13 @@ async function startGame(settings) {
   await Promise.all([...new Set(game.races)].map((race) => preloadFootprints(race)));
   cameraKeys.focus(game.bases[localTeam()] ?? spawnBase);
   try {
-    // Starting base of every seat in seat order, then the test buildings of seat 0 (2 players: the order of before,
-    // so entity ids and state hashes are unchanged)
-    await loadThenAdd([
-      ...game.races.flatMap((race, team) => startingBaseJobs(team, race, game.bases[team])),
-      ...testStructureJobs(PLAYER_TEAM, playerRace, spawnBase),
-    ]);
+    // Starting base of every seat in seat order (the chosen start set; test scene only with ?test=1)
+    const catalog = await loadPartCatalog();
+    await loadThenAdd(game.races.flatMap((race, team) => startingBaseJobs(team, race, game.bases[team], catalog)));
   } catch (err) { console.error(err); }
   loading.step('units');
-  await init(playerRace, enemyRace);
+  if (!settings.multiplayer && new URLSearchParams(window.location.search).get('test') === '1') await startTestScene();
+  await initUi();
   // [W6] the models of later productions are cached before the match starts: nothing pops in during play
   loading.step('models');
   try { await preloadModels(matchModelPaths(game.races)); } catch (err) { console.warn(err); }
@@ -438,11 +466,18 @@ async function startGame(settings) {
   }
 }
 
-async function init(RACE, enemyRace) {
+/**
+ * Test scene (development only: ?test=1 or steelMans.startTestScene()): robot production buildings of seat 0, two
+ * crewed robots + a spare crew of seat 0 and a crewed enemy squad. Not part of a normal start (start sets).
+ */
+async function startTestScene() {
+  const RACE = game.playerRace;
+  const enemyRace = game.enemyRace;
   try {
     // Test units of seat 0 (PLAYER_TEAM) and the enemy seat; added in a fixed order (loadThenAdd)
     const catalog = await loadPartCatalog();
     await loadStats();
+    await loadThenAdd(testStructureJobs(PLAYER_TEAM, RACE, spawnBase));
     const myLoadouts = startLoadouts(RACE, catalog).player;
     const enemyLoadouts = startLoadouts(enemyRace, catalog).enemy;
     const [mechs] = await Promise.all([
@@ -465,6 +500,18 @@ async function init(RACE, enemyRace) {
     mechs[1].boardCrew(crews[1]);
     if (isLocal(mechs[1])) input.select(mechs[1]);
     await loadThenAdd(enemyJobs(enemyRace, enemyLoadouts));
+  } catch (err) {
+    console.error(err);
+    hud.message(t('menu.errorLoading'));
+  }
+}
+window.steelMans.startTestScene = startTestScene;
+
+/** In-game UI of a match: build / production / research menus, HUD, match end (the units exist already) */
+async function initUi() {
+  try {
+    const catalog = await loadPartCatalog();
+    await loadStats();
 
     // Construction, building production and paid production (cost / population) – src/ui/BuildMenu.js;
     // everything is produced in buildings, robots in the part factory + assembly bay (RobotProduction).
@@ -480,6 +527,10 @@ async function init(RACE, enemyRace) {
     stockWindow.setMatch(world);
     game.buildMenu.researchView = new ResearchView({ buildMenu: game.buildMenu, research: world.research });
     hud.start({ race: raceOf(me), buildMenu: game.buildMenu });
+    // Building icons (IconRenderer): started only now (world ready); the previous match's cache / renderer is freed first
+    initIconRenderer();
+    onIconReady(() => hud.refresh());
+    prewarmBuildingIcons(game.buildMenu.buildableStructures(),raceOf(me), TEAMS[me].color);
     // Match end: victory condition from the menu; checking starts now that the starting units exist
     game.match = new Match(world, { conditionId: game.victory, teamCount: game.playerCount, prebuild: game.prebuild }); // [N5] seats, [N8] pre-build
     world.match = game.match; // the surrender command reaches it (matchCommands.js)
@@ -491,6 +542,7 @@ async function init(RACE, enemyRace) {
     econAlerts.setEconomy(world.economy);
     econAlerts.setMatch(game.match);
     game.match.begin();
+    { const endUi = game.match.onEnd; game.match.onEnd = (r) => { stockWindow.setMatch(null); disposeIconRenderer(); endUi?.(r); }; } // [N4] the stock window closes with the match
     // [N8] start/end shown in the top banner (not as a long centre message)
     game.match.onPrebuildEnd = () => { prebuildEndedAt = performance.now(); };
     prebuildEndedAt = 0;
@@ -537,6 +589,8 @@ async function showMenu() {
 
 let net = null; // Lockstep during a multiplayer match, otherwise null
 let netChannel = null;
+let chat = null;    // [N11] Chat + ChatBox during a multiplayer match
+let chatBox = null;
 
 /** The local player's auto-assist wish (profile) as a simulation command */
 function submitAutoAssist() {
@@ -544,6 +598,7 @@ function submitAutoAssist() {
 }
 
 function stopNet() {
+  chatBox?.dispose(); chat?.dispose(); chatBox = null; chat = null; // [N11]
   net?.stop();
   netChannel?.leave();
   net = null;
@@ -571,6 +626,9 @@ async function startMultiplayer(info) {
   });
   netChannel = info.channel;
   window.steelMans.net = net;
+  // [N11] text chat next to the lockstep (same channel, topic 'chat', outside the simulation)
+  chat = new Chat({ channel: info.channel, players: info.players, localTeam: info.localTeam, isAlly: areAllies });
+  chatBox = new ChatBox({ chat, t, getColor: (team) => TEAMS[team]?.color });
   await startGame({
     multiplayer: true,
     map: s.map, startPicks: s.startPicks, // [MAPS] from the host's start message (startPicks keyed by packed team)
@@ -580,6 +638,7 @@ async function startMultiplayer(info) {
     seats: byTeam.map((seat) => (seat.playerId === info.selfId ? 'human' : seat.controller === 'human' ? 'remote' : seat.controller ?? 'ai')),
     friendlyFire: s.friendlyFire, fogOfWar: s.fogOfWar, victory: s.victory,
     energyCap: s.energyCap, populationCap: s.populationCap, oreMultiplier: s.oreMultiplier, startMultiplier: s.startMultiplier, startResearch: s.startResearch, speed: s.speed, prebuild: s.prebuild,
+    startSet: s.startSet, // [N15] the host's start set (validated in startGame)
     aiDifficulty: byTeam.map((seat) => (seat.controller === 'ai' ? seat.difficulty ?? null : null)),
     aiNames: byTeam.map((seat) => seat.aiName ?? null), avatars: byTeam.map((seat) => seat.avatar ?? null), // [N6] from the host
     avatarImgs: byTeam.map((_, team) => info.avatarImgs?.[team] ?? ''), // [UISMALL] thumbnails of the humans (lobby presence)
@@ -649,7 +708,10 @@ let simRunning = false;   // ticks run only during a match (after all starting u
 let simAccumulator = 0;   // real time not simulated yet (s)
 
 /** New match: seeds world.rng, restarts the tick counter and the command queue, starts ticking */
+const damageSmoke = new DamageSmokeWiring(world);
+
 function startSimulation(seed) {
+  damageSmoke.clear();
   world.startSimulation(seed);
   commandBus.reset();
   simAccumulator = 0;
@@ -665,6 +727,7 @@ function simTick() {
   commandBus.executeTick(world, world.tick + 1); // world.update raises world.tick to the same number
   world.update(SIM_DT);
   hqBeams.update(); // light beam above every main building (visual only)
+  damageSmoke.update(); // smoke on hurt units / buildings (visual only)
   game.match?.update(SIM_DT);
   updateAis(world.tick / SIM.tickRate);
 }

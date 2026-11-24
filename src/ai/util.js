@@ -150,12 +150,12 @@ export function affordsAbove(eco, team, cost, keepA = null, keepB = null) {
   return true;
 }
 
-/** Picks a key of a { key: weight } object at random (own randomness – the AI may be non-deterministic) */
-export function weightedPick(weights) {
+/** Picks a key of a { key: weight } object at random, drawing from the AI's seeded generator `rng` (ai.rng) */
+export function weightedPick(weights, rng) {
   const entries = Object.entries(weights ?? {}).filter(([, w]) => w > 0);
   const total = entries.reduce((s, [, w]) => s + w, 0);
   if (!total) return null;
-  let r = Math.random() * total;
+  let r = rng.next() * total;
   for (const [k, w] of entries) { if ((r -= w) <= 0) return k; }
   return entries.at(-1)[0];
 }

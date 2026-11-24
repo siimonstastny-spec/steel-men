@@ -179,7 +179,11 @@ export class Structure extends THREE.Group {
 
   #attachModel(model, fp, clip) {
     model.scale.setScalar(structureScale(this.stats));
-    model.position.set(-fp.offsetX, 0, -fp.offsetZ);
+    // GLB: centre the model box on the origin. Procedural models are built around the footprint origin already,
+    // unless they declare `glbCentre` (built in GLB coordinates, e.g. the aircraft hangar): centre that point instead.
+    const c = this.procModel?.glbCentre;
+    if (this.procModel) model.position.set(c ? -c.x * model.scale.x : 0, 0, c ? -c.z * model.scale.x : 0);
+    else model.position.set(-fp.offsetX, 0, -fp.offsetZ);
     model.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true;

@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v25';
+export const GAME_VERSION = 'v26';
 export const BASE64_MODEL_SUFFIX = '.txt';
 // Model folders (path prefixes) whose textures were exported upside down (V flipped – round floor pads came out
 // inside out): the loader mirrors the texture transform once per model (src/core/AssetLoader.js), team colour copies
@@ -263,6 +263,22 @@ export const CMD_GROUPING = {
   vehicleSpacing: 18,   // units between vehicles
 };
 
+/**
+ * Formations (unitCommands.js 'setFormation' + shaped 'move' / attackMove / patrol / guard-point; Movement.js speed cap).
+ * The mode is stored on the unit (unit.formation); a command uses the mode of the majority of its units (a tie goes
+ * to the mode earlier in `modes`). 'free' = the old square grid with no speed limit; the others also make the group
+ * walk at the speed of its slowest member.
+ */
+export const FORMATION = {
+  modes: ['free', 'box', 'column', 'wedge'],   // button cycles through these; i18n formation.<mode>
+  defaultMode: 'free',
+  minHeadingDistance: 10,   // units – closer than this from the group centre to the goal the heading is defaultHeading
+  defaultHeading: { x: 0, z: -1 },   // "away from the camera"
+  kindGap: 14,              // units between the blocks of mechs / vehicles / crews (one behind the other)
+  wedgeLateral: 0.75,       // wedge: sideways step per rank × spacing
+  wedgeBack: 0.75,          // wedge: backward step per rank × spacing
+};
+
 /** Building placement and deleting (Construction.js, Walls.js, buildCommands.js, CommandInput.js) */
 export const CMD_BUILD = {
   yawResolution: 1000,            // building rotation is sent / simulated in steps of 1 / this rad (deterministic, smooth)
@@ -380,12 +396,29 @@ export const NET = {
       'stun:stun.cloudflare.com:3478',
     ],
     turnServers: [],             // optional TURN relays {urls, username, credential} for strict NAT (none yet)
-    topics: ['lobby', 'turn', 'hash', 'start', 'ready'],// receivers registered as soon as a room is joined
+    topics: ['lobby', 'turn', 'hash', 'start', 'ready', 'chat'],// receivers registered as soon as a room is joined
     relayCheckTimeoutMs: 5000,   // relayCheck.js: a relay not answering a subscription (EOSE) by then counts as dead
     relayCheckKind: 20078,       // relayCheck.js: ephemeral event kind in the test subscription (any valid kind works)
   },
 };
 // --- [NET] end ---
+// --- [CHAT] [N11] text chat in multiplayer (src/net/Chat.js, src/ui/ChatBox.js, docs/notes/n11-chat.md) ---
+export const CHAT = {
+  topic: 'chat',            // transport topic, outside the lockstep (never touches the simulation)
+  teamPrefix: '/t ',        // typed prefix = team message (Shift+Enter does the same); '/a ' = everyone
+  allPrefix: '/a ',
+  maxLength: 200,           // characters of one message (longer is cut)
+  minIntervalMs: 700,       // sender: at least this between two messages (faster is refused)
+  burstCount: 5,            // receiver: more than this many messages from one peer ...
+  burstWindowMs: 5000,      // ... within this window are dropped
+  maxNameLength: 24,        // sender name shown (lobby nickname, cut)
+  visibleLines: 8,          // lines shown over the map
+  lineTtlMs: 12000,         // a line fades after this
+  fadeMs: 1500,             // fade-out duration at the end of the ttl
+  historyMax: 50,           // lines kept (reopening the field shows the recent ones again)
+  scopeTeamColor: '#7fd0ff',// colour of team-only lines
+};
+// --- [CHAT] end ---
 // --- [NET_LEAVE] a player leaving a running multiplayer match (src/net/Lockstep.js, docs/notes/mp-leave.md) ---
 export const NET_LEAVE = {
   commandType: 'playerLeft', // CommandBus command injected by the lockstep in the drop turn (game/commands/matchCommands.js)
@@ -485,6 +518,9 @@ export const AI = {
   superNodeHold: { offset: 1.0, maxDangerRatio: 1.5 },
   // v4 (docs/notes/ai-v4.md): a placement the game refused is logged once per building + reason within this time
   econ: { refusalNoteSeconds: 30 },
+  // D2: a team without a main building (start set 1, or a lost HQ): the HQ's missing energy has to come from power plants
+  // whose income is cut to noHqIncomeFactor – wanted so the gap closes within energySeconds, at most maxPlants in all
+  hqRecovery: { energySeconds: 120, maxPlants: 6 },
   // v5: recon before an attack – the scout is done this close to the enemy building / start it looks at;
   // research "waits" log lines: the same kind of reason at most once per noteSeconds
   recon: { arriveRadius: 70 },
@@ -713,7 +749,7 @@ export const TEAMS = [
   { nameKey: 'common.player', color: '#3a5ccc' },  // nameKey = i18n key of the team name (t(nameKey))
   { nameKey: 'common.enemy', color: '#c8302c' },
   { color: '#3f9e4d' },                            // no nameKey: SelectionPanel falls back to its generic name
-  { color: '#d6b21e' },
+  { color: '#e8a21a' },                            // orange-yellow = default of seat 4, the faction W (races.W.uiColor.primary)
 ];
 
 /**
@@ -753,6 +789,7 @@ export const KEYBINDINGS = {
   cancel: ['Escape'],
   move: ['KeyM'],             // targeted: click ground = move there (same as a right click)
   stop: ['KeyH'],             // drop the current order of the selected units (halt)
+  formation: [],              // cycle the formation of the selected units (no default key – set in Settings → Controls)
   deleteUnit: ['Delete'],     // destroy the selected own units (mech explodes, crew evacuates)
   stanceRanged: ['KeyR'],
   stanceMelee: ['KeyF'],
@@ -767,6 +804,7 @@ export const KEYBINDINGS = {
   fullscreen: [],                // toggle browser fullscreen (no default key – set in Settings → Controls)
   diplomacy: ['KeyU'],           // [B4] open / close the diplomacy menu (src/ui/DiplomacyView.js)
   stockWindow: ['KeyI'],         // [F1] open / close the part stock window (src/ui/StockWindow.js)
+  chat: ['Enter', 'NumpadEnter'], // [N11] open the chat line (multiplayer only; Shift+Enter in the field = team chat)
   groupModifier: 'ctrl',      // 'ctrl' | 'shift' | 'alt'
   controlGroups: [
     ['Digit1', 'Numpad1'], ['Digit2', 'Numpad2'], ['Digit3', 'Numpad3'],
@@ -937,6 +975,14 @@ export const MUZZLE = {
   socketPatterns: [/^socket_Launch/i, /^socket_[0-9a-f]{8}$/i],
 };
 
+/** Wiring of Effects.damageSmoke to every hurt unit / building (src/game/DamageSmokeWiring.js). Visual only. */
+export const DAMAGE_SMOKE = {
+  scanEveryTicks: 6,    // how often the unit lists are scanned for newly hurt targets
+  registerBelow: 0.62,  // start tracking below this hp fraction (a bit above data/explosions.json damage threshold)
+  releaseAbove: 0.75,   // stop tracking (repaired) above this fraction (hysteresis)
+  maxActive: 48,        // cap of smoking targets; the rest wait until a slot frees
+};
+
 /**
  * Combat visuals built from the static models in models/explosion/ (they have no animation – every
  * effect is animated here: scale, fade, spin, texture scroll). Model sizes: fireBall radius 7.5,
@@ -995,9 +1041,19 @@ export const VFX = {
    */
   projectile: {
     defaultSize: 0.6,
+    sizeScale: 1.6,          // global multiplier of every projectile radius (weapon projectileSize x this)
     maxLife: 30,             // s – safety limit for a projectile that never arrives
     segments: [10, 8],       // sphere width / height segments
-    shapes: { orb: { stretch: 1 }, shell: { stretch: 1.8 }, missile: { stretch: 3.2 } },
+    maxInstances: 256,       // batched draw capacity; more live projectiles still fly and hit, they just are not drawn
+    coreWhite: 0.55,         // 0..1 – the bright core is the colour mixed this much towards white
+    // stretch = length / width along the flight; glow = halo radius / core radius; glowOpacity = halo strength;
+    // color = optional fixed colour of the shape (else the colour passed by the shooter: energy / physical)
+    shapes: {
+      orb:     { stretch: 1,   glow: 2.4, glowOpacity: 0.45 },
+      shell:   { stretch: 2.2, glow: 1.8, glowOpacity: 0.35, color: '#ffc45a' },
+      missile: { stretch: 3.6, glow: 1.9, glowOpacity: 0.4,  color: '#ff7f3a' },
+      bolt:    { stretch: 6,   glow: 2.2, glowOpacity: 0.5 },
+    },
     defaultShape: { energy: 'orb', physical: 'shell' },
   },
   tracerLife: 0.12,          // s – instant shot line fades out in this time
@@ -1032,6 +1088,7 @@ export const MENU = {
     { color: '#8a4fd0', nameKey: 'color.purple' },
     { color: '#1fa5a5', nameKey: 'color.teal' },
     { color: '#d0509a', nameKey: 'color.pink' },
+    { color: '#e8a21a', nameKey: 'color.amber' }, // default colour of the faction W (TEAMS[3], races.W.uiColor.primary)
   ],
   fogModes: ['unexplored', 'explored', 'off'],  // world.settings.fogOfWar values (logic: map / fog of war)
   defaultFogMode: FOG.defaultMode,
@@ -1051,6 +1108,7 @@ export const VICTORY = {
   countUnfinishedBuildings: false, // does a construction site keep a team alive (condition 'destruction')?
   crewlessMechsCount: true,       // does a mech without a crew count as a combat unit?
   combatVehicleMinWeapons: 1,     // a vehicle with at least this many weapons (stats.weapons) is a combat unit
+  builderKeepsAlive: true,        // a living unit with the 'construct' ability keeps a team alive (start set 1 has no buildings)
 };
 
 /** Match statistics: resource flows (Economy.onFlow kind) that count as "gathered" */
@@ -1149,8 +1207,8 @@ export const GRAPHICS = {
 export const KEY_CATEGORIES = [
   { id: 'camera', actions: ['cameraForward', 'cameraBack', 'cameraLeft', 'cameraRight'] },
   { id: 'commands', actions: ['eject', 'dropLeft', 'dropRight', 'attackMove', 'guard', 'patrol', 'cancel', 'move', 'stop', 'deleteUnit', 'stanceRanged', 'stanceMelee',
-    'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair'] },
-  { id: 'general', actions: ['rotateBuilding', 'idleCrew', 'idleBuilder', 'idleDrill', 'fullscreen', 'diplomacy', 'stockWindow'] },
+    'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair', 'formation'] },
+  { id: 'general', actions: ['rotateBuilding', 'idleCrew', 'idleBuilder', 'idleDrill', 'fullscreen', 'diplomacy', 'stockWindow', 'chat'] },
 ];
 export const KEY_ACTIONS = {
   camera: KEY_CATEGORIES.find((c) => c.id === 'camera').actions,
@@ -1229,19 +1287,19 @@ export const HUD = {
         'move', 'attackMove', 'guard', 'patrol',
         'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'deleteUnit',
         'stanceRanged', 'stanceMelee', 'repair', null,
-        null, null, null, 'stop',
+        null, null, 'formation', 'stop',
       ],
       crew: [
         'move', null, null, null,
         null, 'behaviourDefensive', 'behaviourPassive', 'deleteUnit',
         null, null, null, null,
-        null, null, null, 'stop',
+        null, null, 'formation', 'stop',
       ],
       vehicle: [
         'move', null, null, null,
         null, null, null, 'deleteUnit',
         null, null, null, null,
-        null, null, null, 'stop',
+        null, null, 'formation', 'stop',
       ],
       repairVehicle: [
         null, null, null, null,
@@ -1253,7 +1311,7 @@ export const HUD = {
         'move', 'attackMove', 'guard', 'patrol',
         'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'deleteUnit',
         null, null, null, null,
-        null, null, null, 'stop',
+        null, null, 'formation', 'stop',
       ],
       structure: [
         null, null, null, null,
@@ -1269,6 +1327,7 @@ export const HUD = {
     deleteUnit: '✖',
     behaviourAggressive: '🔥', behaviourDefensive: '⛨', behaviourPassive: '☮', repair: '🔧', stopRepair: '⏹',
     repairUnit: '🛠',
+    formation: '▦',
   },
   // Production queue (top left, under the resources): sequential per producer (hangar, training)
   production: {
@@ -1488,14 +1547,23 @@ export const START_LAYOUT = {
   hoverTruck: { forward: -30, side: -45 },
   drillTruck: { forward: -30, side: 45 },
   fallback: { forward: -30, side: 0, step: 20 }, // unit ids without their own spot: in a row, step apart
-  // Test scene only (TEST_SCENE.structures)
+  // Start sets 3–4 (START_SETS, stats.json → rules.economy.startSets) and the test scene
   robotPartFactory: { forward: -75, side: -70 },
   robotAssemblyBay: { forward: -75, side: 70 },
+  vehicleFactory: { forward: -120, side: 0 },  // behind the main building
+  startMech: { forward: -30, side: 0 },        // between the two trucks (set 4)
+  startCrew: { forward: -12, side: 0 },        // in front of the mech; boards it at once
+};
+
+/** Start sets (src/game/StartSets.js; data in stats.json → rules.economy.startSets / startSetOrder / defaultStartSet) */
+export const START_SETS = {
+  armPlaceholder: '$startArm', // a mech slot with this value takes stats.json races.<race>.startArm
+  mechSlots: ['legs', 'torso', 'leftArm', 'rightArm'],
 };
 
 /**
- * Test scene (main.js): extra finished buildings the player gets at the start so robot production can be tried
- * at once (part factory + assembly bay). Empty list = a normal start (rules.economy.startUnits only).
+ * Test scene (main.js, only with ?test=1 or steelMans.startTestScene()): extra finished buildings the player gets
+ * so robot production can be tried at once (part factory + assembly bay). A normal start uses the start sets.
  */
 export const TEST_SCENE = {
   structures: ['robotPartFactory', 'robotAssemblyBay'],
@@ -1742,11 +1810,17 @@ export const ALLY_REPAIR = {
 
 // --- [N2UI] user reminders: mining cursor, carried part rest height, minimap marker size (docs/notes/n2-reminders-ui.md) ---
 export const N2_UI = {
-  mineCursor: 'copy',        // CSS cursor over an ore deposit while a harvester is selected (CommandInput)
   cargoRestFactor: 1,        // a part carried by a vehicle rests with its lowest point at this fraction of the vehicle height
   minimapMarkScale: 1.25,    // minimap unit / building markers: 1.25 = 25 % larger (Minimap.js)
 };
 // --- [N2UI] end ---
+
+// --- [N5] one ore-deposit icon: HUD resource bar (Hud.js ICONS.ore) + mining cursor (CommandInput sets --cursor-mine) ---
+// A glyph (emoji / character). An image path (.svg/.png/…) works for the cursor, but the HUD prints ICONS.ore as text,
+// so keep a glyph unless Hud.js learns to draw images.
+export const ORE_ICON = '⛏';
+export const ORE_ICON_CURSOR = { size: 32, fontSize: 24, baselineY: 25, hotspot: 16, fallback: 'copy', imagePattern: /\.(svg|png|webp|gif|cur)$/i };
+// --- [N5] end ---
 
 // --- [N1B] mining reach at the end of the path, repair tolerance (docs/notes/n1b-wireup.md) ---
 export const N1B = {
@@ -1816,6 +1890,7 @@ export const MAPS = {
     // Naming: Map<players>_<creation order among maps with that player count>; list sorted by players, then order
     { id: 'Map2_01', file: 'map2_01' },
     { id: 'Map4_01', file: 'map4_01' },
+    { id: 'Map4_02', file: 'map4_02' },   // same layout as Map4_01 on Mercury
     { id: 'Map6_01', file: 'map6_01' },   // destroyed city (Venus)
     { id: 'Map6_02', file: 'map6_02' },   // ruined wasteland (Mars)
     { id: 'Map8_01', file: 'map8_01' },   // city (Earth)
@@ -2005,6 +2080,15 @@ export const AIR = {
 };
 // --- [N7] end ---
 
+// --- [N7-los] line of sight over tall map obstacles + wall snapping to them (Combat.hasLineOfSight, Walls.planLine) ---
+export const LOS = {
+  enabled: true,
+  minHeight: 10,          // units – map obstacles at least this tall block shots and stop wall lines (ASCII walls ≈ 13–22)
+  clearance: 0.5,         // units – a shot passing this much above the top edge is not blocked
+  wallGap: 0.5,           // units – gap left between a wall line's last post and the obstacle it stops at
+};
+// --- [N7-los] end ---
+
 // --- [W7] mech collision bodies: shoulder circle + foot circle (Movement / Pathfinding – docs/notes/w7-crew-collision.md) ---
 // A mech has two circles: `radius` (shoulders: body + arms, unchanged) touches other mechs and everything as tall as
 // its shoulders or taller; `footRadius` (legs only) touches everything lower (crews, vehicles, low buildings / walls,
@@ -2065,4 +2149,19 @@ export const PART_SALE = {
   percent: 100,
   windowIcon: '▦',                   // button icon in the factory / assembly bay panel
   maxCountClamp: 9999,               // upper bound accepted for `count` of a command (sanity)
+};
+
+// --- [ICON] building icons rendered at runtime (src/ui/IconRenderer.js, docs/notes/icon-renderer.md) ---
+export const ICON_RENDERER = {
+  size: 96,                         // px, default icon edge
+  perFrame: 1,                      // icons rendered per animation frame
+  fov: 26,                          // deg
+  fitMargin: 1.12,                  // > 1: free space around the bounding sphere
+  viewDir: [0.8, 0.7, 1],           // camera direction from the model centre (+Z = gate side, front-right, above)
+  targetLift: 0.04,                 // share of radius the look-at point is lowered
+  nearMin: 0.1,                     // camera near plane lower bound
+  farInitial: 5000,                 // camera far plane before the first fit
+  hemi: { sky: 0xdfe8ff, ground: 0x4a4a52, intensity: 1.6 },
+  sun: { color: 0xfff1dc, intensity: 2.6, pos: [-1.2, 2, 1.4] },
+  emblemColorFallback: '#ffffff',
 };

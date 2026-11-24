@@ -2,7 +2,7 @@
 // the team wants. It writes wishes to the blackboard (bb.minVehicles, bb.wantStructures); Production and
 // Construction carry them out. Harvest orders are given here.
 import { AI } from '../../config.js';
-import { unitStats } from '../../data/Stats.js';
+import { getStats, unitStats } from '../../data/Stats.js';
 import { PRIORITY, dist, isIdle, posOf, nearest, affordsAbove } from '../util.js';
 import { fullPopulation, resolveStructure, resolveVehicle, vehicleMatches, structureMatches } from '../AiData.js';
 import { checkRules } from '../../game/commands/buildCommands.js';
@@ -253,13 +253,17 @@ export class EconomyManager {
     const structures = [];
     let block = null;
 
+    // D2: no main building (start set 1 / lost HQ) – it comes before everything else. Without it the population cap and
+    // the income are gone, so a supply building / vehicle factory wish would only take the builder's first slots.
+    const hqLost = this.#hqLost(wants, structures);
+
     // Population: full (no room for a truck) – a supply building first
     const cap = eco.populationCap(team);
     const used = eco.populationUsed(team);
     const max = eco.populationMaxOf(team); // [W5b] rules populationMax and the menu's population limit
     const truckSupply = truckId ? (unitStats('vehicles', truckId, ai.race, team)?.supply ?? 1) : 1;
     const popFull = !fullPopulation(ai.race) && cap < max && used + truckSupply > cap;
-    if (popFull && resolveStructure('@supply', ai.race, unlocks)) {
+    if (popFull && !hqLost && resolveStructure('@supply', ai.race, unlocks)) {
       const supply = p.own.structures.filter((s) => (s.stats.supplyProvided ?? 0) > 0 && !s.stats.hq);
       if (!supply.some((s) => !s.complete)) wants.push({ value: '@supply', count: supply.length + 1, priority: PRIORITY.urgent });
       structures.push('@supply');
@@ -267,7 +271,7 @@ export class EconomyManager {
     }
     if (lack) {
       const factories = p.own.structures.filter((s) => structureMatches('@vehicles', s.unitId)); // R3: not the hangar
-      if (!factories.length && resolveStructure('@vehicles', ai.race, unlocks)) {
+      if (!factories.length && !hqLost && resolveStructure('@vehicles', ai.race, unlocks)) {
         wants.push({ value: '@vehicles', count: 1, priority: PRIORITY.urgent });
         structures.push('@vehicles');
         block ??= 'no vehicle factory';
@@ -276,8 +280,7 @@ export class EconomyManager {
     }
     // D3: the HQ (matter converter) is lost – without it every income is cut to noHqIncomeFactor. Once the ore for it
     // is there it is wanted urgently, reserved as an economy build, and the hold stops new consumers so the energy
-    // for it can gather (a lost HQ under attack: no hold while defending, as for the trucks).
-    const hqLost = this.#hqLost(wants, structures);
+    // for it can gather (a lost HQ under attack: no hold while defending, as for the trucks). See #hqLost above.
     // the HQ comes first in the indicator (also while it is rebuilt, or while its ore is missing)
     if (!eco.hasHq(team)) {
       const hqText = p.own.hq ? 'no HQ (rebuilding)' : hqLost ? 'no HQ' : 'no HQ (ore missing)';
@@ -301,6 +304,34 @@ export class EconomyManager {
     if (!affordsAbove(ai.world.economy, ai.team, this.hqOre)) return false;
     wants.push({ value: '@hq', count: 1, priority: PRIORITY.urgent });
     structures.push('@hq');
+    this.#hqEnergy(wants, structures, cost);
     return true;
+  }
+
+  /**
+   * D2: the HQ costs energy too (start set 1 starts with a share of the cap only), and with no HQ the plants give just
+   * noHqIncomeFactor of their income. Power plants are wanted (urgent, economy builds – the hold lets them through) so
+   * the missing energy arrives within AI.hqRecovery.energySeconds, as many as the ore above the HQ's price pays for.
+   */
+  #hqEnergy(wants, structures, hqCost) {
+    const ai = this.ai;
+    const eco = ai.world.economy;
+    if (eco.infiniteResources) return;
+    const missing = (hqCost.energy ?? 0) - eco.amount(ai.team, 'energy');
+    if (missing <= 0) return;
+    const plantId = resolveStructure('@power', ai.race, ai.teamUnlocks);
+    const plant = plantId ? unitStats('structures', plantId, ai.race, ai.team) : null;
+    const perSecond = (plant?.income?.energy ?? 0) * (getStats().rules.economy?.noHqIncomeFactor ?? 1);
+    if (!(perSecond > 0)) return;
+    const cfg = AI.hqRecovery;
+    const owned = ai.construction?.ownedCount('@power') ?? 0;
+    const target = Math.min(cfg.maxPlants, Math.ceil(missing / (perSecond * cfg.energySeconds)));
+    const plantOre = plant.cost?.ore ?? 0;
+    const spare = eco.amount(ai.team, 'ore') - (hqCost.ore ?? 0);
+    const affordable = plantOre > 0 ? Math.floor(Math.max(0, spare) / plantOre) : target;
+    const count = Math.max(owned, Math.min(target, owned + affordable));
+    if (count <= owned) return;
+    wants.push({ value: '@power', count, priority: PRIORITY.urgent });
+    structures.push('@power');
   }
 }

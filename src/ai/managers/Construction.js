@@ -422,7 +422,7 @@ export class ConstructionManager {
     for (let k = 0; k < cfg.angles; k++) {
       const a = (k / cfg.angles) * Math.PI * 2;
       const d = { x: Math.cos(a), z: Math.sin(a) };
-      const score = prefDirs ? Math.max(...prefDirs.map((p) => p.x * d.x + p.z * d.z)) : Math.random();
+      const score = prefDirs ? Math.max(...prefDirs.map((p) => p.x * d.x + p.z * d.z)) : this.ai.rng.next();
       angles.push({ d, score });
     }
     angles.sort((a, b) => b.score - a.score);

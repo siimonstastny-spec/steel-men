@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { findMechPart } from '../units/MechPart.js';
 import { Crew } from '../units/Crew.js';
-import { KEYBINDINGS, ORDER_BUTTONS, CAMERA, PLACEMENT, MATCH_UI, CMD_BUILD, BAY_CREW, WALL_DRAG, SELECTION } from '../config.js';
+import { KEYBINDINGS, ORDER_BUTTONS, CAMERA, PLACEMENT, MATCH_UI, CMD_BUILD, BAY_CREW, WALL_DRAG, SELECTION, FORMATION } from '../config.js';
 import { unitTypeKey, preferCombat, isOnScreen } from './SelectionRules.js';
 import { bayCrewCount } from '../game/BayCrew.js';
 import { getSettings } from '../core/Profile.js';
@@ -23,7 +23,16 @@ import { play } from '../audio/Sound.js';
 import { setUnitHighlight } from '../core/Highlight.js';
 import { confirmDialog, isConfirmDialogOpen } from '../ui/ConfirmDialog.js';
 import { isServiceBay, bayAssembling, canRepairTarget, repairInterruptible } from '../game/Repair.js';
-import { ALLY_REPAIR } from '../config.js'; // [N5FIX] repair cursor
+import { ALLY_REPAIR, ORE_ICON, ORE_ICON_CURSOR } from '../config.js'; // [N5FIX] repair cursor, [N5] ore icon
+
+// [N5] Sets --cursor-mine once from the shared ore icon (glyph -> SVG data URL, image path -> url(path)).
+function applyMineCursor() {
+  const c = ORE_ICON_CURSOR;
+  const img = c.imagePattern.test(ORE_ICON)
+    ? `url("${ORE_ICON}")`
+    : `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='${c.size}' height='${c.size}'><text x='${c.size / 2}' y='${c.baselineY}' font-size='${c.fontSize}' text-anchor='middle'>${ORE_ICON}</text></svg>`)}")`;
+  document.documentElement.style.setProperty('--cursor-mine', `${img} ${c.hotspot} ${c.hotspot}, ${c.fallback}`);
+}
 // [W4] cursors are defined in ui/cursors.css (custom properties with a standard-cursor fallback)
 const CURSOR_MINE = 'var(--cursor-mine, copy)';
 const CURSOR_ATTACK = 'var(--cursor-attack, crosshair)';
@@ -40,7 +49,7 @@ const CLICK_TOLERANCE_PX = 5; // větší posun = výběr obdélníkem
 export const TARGETED_ORDERS = ['move', 'attackMove', 'guard', 'patrol', 'repairUnit'];
 // Orders issued at once by their key (the command grid calls command(name) for every button)
 const INSTANT_KEY_ORDERS = ['eject', 'dropLeft', 'dropRight', 'stop', 'deleteUnit', 'stanceRanged', 'stanceMelee',
-  'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair'];
+  'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair', 'formation'];
 // Behaviour buttons -> unit.setBehaviour mode (BEHAVIOUR.mechModes / crewModes in config.js)
 const BEHAVIOUR_COMMANDS = { behaviourAggressive: 'aggressive', behaviourDefensive: 'defensive', behaviourPassive: 'passive' };
 const STANCE_COMMANDS = { stanceRanged: 'ranged', stanceMelee: 'melee' };
@@ -80,6 +89,7 @@ export class CommandInput {
    *                          { controls } – OrbitControls, panned by dragging with the right mouse button
    */
   constructor(camera, dom, world, { onFocus, controls = null } = {}) {
+    applyMineCursor();
     this.camera = camera;
     this.dom = dom;
     this.world = world;
@@ -264,6 +274,7 @@ export class CommandInput {
       const loaded = mechs.filter((m) => m.crew);
       if (loaded.length) this.#submit('eject', { units: ids(loaded) }); // the selection follows the crews (onExecuted)
     }
+    if (name === 'formation') this.#cycleFormation([...mechs, ...crews, ...vehicles]);
     const behaviour = BEHAVIOUR_COMMANDS[name];
     if (behaviour) this.#submit('behaviour', { units: ids([...mechs, ...crews, ...this.selectedArmedVehicles]), mode: behaviour });
     if (name === 'repair') {
@@ -277,6 +288,18 @@ export class CommandInput {
       // Second press of the same order cancels it; the target comes with the next left click
       this.#setPending(this.pending === name || !this.commands[name] ? null : name);
     }
+  }
+
+  /** Formation key: the next mode (after the majority mode of the units) for all of them (same as the HUD button) */
+  #cycleFormation(units) {
+    if (!units.length) return;
+    const modes = FORMATION.modes;
+    const fallback = modes.indexOf(FORMATION.defaultMode);
+    const counts = modes.map(() => 0);
+    for (const u of units) { const k = modes.indexOf(u.formation); counts[k < 0 ? fallback : k]++; }
+    let best = 0;
+    for (let k = 1; k < counts.length; k++) if (counts[k] > counts[best]) best = k;
+    this.#submit('setFormation', { units: ids(units), mode: modes[(best + 1) % modes.length] });
   }
 
   /**

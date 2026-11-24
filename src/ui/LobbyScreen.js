@@ -5,6 +5,9 @@ import { NET, MENU, ECONOMY, VICTORY, LOBBY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_
 import { cleanAiIdentity } from '../ai/AiProfiles.js'; // [N6]
 import { avatarForNetwork, avatarHtml, humanAvatarHtml } from './Avatar.js';
 import { validPrebuild } from '../game/PreBuild.js'; // [N8] pre-build phase option
+import { validStartSet } from '../game/StartSets.js'; // [N15] start set
+import { getStats } from '../data/Stats.js';
+import { validConditionForSet } from '../game/Victory.js';
 import { oreMultiplierFromSettings } from '../game/OreMultiplier.js'; // [B1]
 import { startMultiplierFromSettings } from '../game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings } from '../game/StartResearch.js';
@@ -471,11 +474,12 @@ export class LobbyScreen {
     const s = this.lobby?.state?.settings ?? {};
     return {
       fogOfWar: s.fogOfWar ?? MENU.defaultFogMode,
-      victory: s.victory ?? VICTORY.defaultCondition,
+      victory: validConditionForSet(s.victory ?? VICTORY.defaultCondition, s.startSet, getStats()),
       energyCap: ECONOMY.energyCaps.includes(s.energyCap) ? s.energyCap : ECONOMY.defaultEnergyCap,
       populationCap: ECONOMY.populationCaps.includes(s.populationCap) ? s.populationCap : ECONOMY.defaultPopulationCap, // [W5a]
       speed: GAME_SPEED.options.includes(s.speed) ? s.speed : GAME_SPEED.default,
       prebuild: validPrebuild(s.prebuild), // [N8]
+      startSet: validStartSet(s.startSet, getStats()), // [N15] host's choice shown to everyone; the host sends it in the start message
       oreMultiplier: oreMultiplierFromSettings(s), // [B1]
       startMultiplier: startMultiplierFromSettings(s), // [D4]
       startResearch: startResearchFromSettings(s),

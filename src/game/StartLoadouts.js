@@ -4,7 +4,7 @@
 // slot, part sets in order of preference; the first set the race may produce (canProduce) and has a model of
 // (catalog entry of its own race) wins, Basic is the fallback. Raceless parts (Frame, Alien) are never picked.
 // Legs are chosen last: the first candidate whose loadCapacity carries the chosen torso and arms (no overload).
-import { LOADOUT } from '../config.js';
+import { LOADOUT, START_SETS } from '../config.js';
 import { partStats, canProduce, SLOT_KIND } from '../data/Stats.js';
 
 const PRODUCTION_KIND = 'partSets'; // races[*].exclusive group that limits part production
@@ -47,6 +47,22 @@ export function loadoutFromTemplate(catalog, race, template) {
     leftArm: chosen.leftArm.path,
     rightArm: chosen.rightArm.path,
   };
+}
+
+/**
+ * [N15a] The mech of a start set (stats.json → rules.economy.startSets.<id>.mech): { legs, torso, leftArm, rightArm } set
+ * ids; START_SETS.armPlaceholder in a slot = the race's own `startArm` (stats.json races.<race>.startArm).
+ * A set the race cannot produce falls back to Basic (loadoutFromTemplate), so the result is always valid.
+ * @returns {{legs, torso, leftArm, rightArm}|null} model paths, or null when the set has no mech
+ */
+export function startSetLoadout(catalog, race, mech, raceData) {
+  if (!mech) return null;
+  const template = {};
+  for (const slot of START_SETS.mechSlots) {
+    const set = mech[slot] === START_SETS.armPlaceholder ? raceData?.startArm : mech[slot];
+    template[slot] = set ? [set] : [];
+  }
+  return loadoutFromTemplate(catalog, race, template);
 }
 
 /**

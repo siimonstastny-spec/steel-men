@@ -108,6 +108,9 @@
 .cp-unit:hover { background: rgba(40, 80, 120, .75); }
 .cp-unit .ico { font-size: calc(22 * var(--cu)); line-height: 1; }
 .cp-unit .pct { font-weight: 700; }
+.cp-unit .ico-img { width: calc(30 * var(--cu)); height: calc(30 * var(--cu)); }
+.cp-title .ico { display: inline-block; vertical-align: middle; margin-right: .4em; }
+.cp-title .ico-img { width: 1.6em; height: 1.6em; }
 
 .cp-stats {
   display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--cp-stat-rows), auto);

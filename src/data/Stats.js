@@ -1,5 +1,5 @@
 // Steel Mans – game stats: loading data/stats.json, resolving stats per model, composing mechs
-import { setFromPath } from '../config.js';
+import { setFromPath, ACCURACY } from '../config.js';
 
 const STATS_URL = './data/stats.json';
 const DAMAGE_TYPES = ['physical', 'energy'];
@@ -131,6 +131,38 @@ export function raceFromPath(path) {
   return keys.find((key) => base.endsWith(key)) ?? null;
 }
 
+/** Race whose models a faction borrows (stats.json races[race].modelRace), or null when it has its own */
+export const modelRaceOf = (race) => getStats().races?.[race]?.modelRace ?? null;
+
+/**
+ * Faction a part belongs to: the race in its model name – except that a faction using stand-in models
+ * (races[owner].modelRace === that race) owns parts with these models, so its modifiers apply.
+ */
+function partRace(path, ownerRace) {
+  const pathRace = raceFromPath(path);
+  if (pathRace && ownerRace && ownerRace !== pathRace && modelRaceOf(ownerRace) === pathRace) return ownerRace;
+  return pathRace ?? ownerRace;
+}
+
+/**
+ * Adds, for every faction with a modelRace, catalog entries { path, set, race: faction } copied from its model
+ * race (the model stays, ownership and modifiers are the faction's). Returns a new catalog; the input is untouched.
+ */
+export function withModelRaceParts(catalog) {
+  const races = getStats().races ?? {};
+  const out = {};
+  for (const [slot, list] of Object.entries(catalog ?? {})) {
+    if (!Array.isArray(list)) { out[slot] = list; continue; }
+    const extra = [];
+    for (const [key, r] of Object.entries(races)) {
+      if (!r.modelRace) continue;
+      for (const p of list) if (p.race === r.modelRace) extra.push({ ...p, race: key });
+    }
+    out[slot] = [...list, ...extra];
+  }
+  return out;
+}
+
 // ---------- parts ----------
 
 /**
@@ -144,7 +176,7 @@ export function partStats(path, slot, ownerRace = null, team = null) {
   const s = getStats();
   const set = setFromPath(path);
   const kind = SLOT_KIND[slot];
-  const race = raceFromPath(path) ?? ownerRace;
+  const race = partRace(path, ownerRace);
   const raw = s.parts[set]?.[kind];
   if (!raw) console.warn(`[Stats] No stats for parts.${set}.${kind} (${path}), using defaults`);
 
@@ -321,8 +353,11 @@ function resolveUnit(raw, id, race) {
   const unit = structuredClone(raw);
   unit.id = id;
   unit.race = race;
-  const races = raw.races ?? Object.keys(s.races);
-  const modelRace = races.includes(race) ? race : races[0];
+  // Model of the race: its own when the unit lists it, else the race's modelRace (stand-in models), else the first listed one
+  const own = s.races?.[race]?.modelRace;
+  const modelRace = raw.races
+    ? (raw.races.includes(race) ? race : (raw.races.includes(own) ? own : raw.races[0]))
+    : (own ?? race);
   unit.model = raw.model.replaceAll('{race}', modelRace ?? race);
   if (unit.mobility) unit.mobility = deepMerge(s.defaults.mobility, unit.mobility);
   unit.weapons = (unit.weapons ?? []).map((w) => deepMerge(s.defaults.weapon, w));
@@ -351,10 +386,34 @@ export function applyArmor(damage, armor = {}) {
   return out;
 }
 
-/** Average damage per second of a weapon (no armor, all hits land) */
+/**
+ * [F2] Accuracy profile of a weapon, derived only from rules.combat.accuracy and the weapon data (mirrors
+ * Combat.hitChance without target evasion / movement): near / far = hit chance at point blank / at max range,
+ * avg = mean over distances 0…range (share `o` of the range at full accuracy, then a linear fall to the long factor).
+ * @returns {{ melee: boolean, homing: boolean, near: number, far: number, avg: number, movingPenalty: number }}
+ */
+export function accuracyProfile(w) {
+  const a = stats?.rules?.combat?.accuracy;
+  const base = w.accuracy ?? 1;
+  if (!a || !ACCURACY.enabled) return { melee: false, homing: false, near: base, far: base, avg: base, movingPenalty: 0 };
+  if (w.class === 'melee') {
+    const v = base * a.meleeAccuracyFactor;
+    return { melee: true, homing: false, near: v, far: v, avg: v, movingPenalty: 0 };
+  }
+  const o = w.accuracyOptimalRange ?? a.optimalRangeFactor;
+  const longFactor = w.accuracyLongFactor ?? a.longRangeFactor;
+  const homing = !!(w.homing && a.homingIgnoresMoving);
+  const rangeAvg = o + (1 - o) * (1 + longFactor) / 2;
+  return {
+    melee: false, homing, near: base, far: base * longFactor, avg: base * rangeAvg,
+    movingPenalty: w.projectileSpeed > 0 && !homing ? a.movingPenalty : 0,
+  };
+}
+
+/** Average damage per second of a weapon (no armor); hit chance is the average over distance (accuracyProfile.avg) */
 export function weaponDps(w) {
   const perHit = sum(DAMAGE_TYPES, (t) => w.damage[t] ?? 0);
-  return (perHit * w.burst * w.accuracy) / (w.attackTime + w.cooldown);
+  return (perHit * w.burst * accuracyProfile(w).avg) / (w.attackTime + w.cooldown);
 }
 
 // ---------- helpers ----------

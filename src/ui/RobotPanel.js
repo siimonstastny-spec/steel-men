@@ -6,6 +6,7 @@ import { HUD_PANELS, TEAMS } from '../config.js';
 import { isLocal } from '../core/LocalPlayer.js';
 import { t } from '../i18n/i18n.js';
 import { avatarHtml } from './Avatar.js';
+import { accuracyText } from './CenterPanel.js';
 import { pilotSlot } from '../units/ModularMech.js';
 import { esc, partLabel, mechState, teamTag, bonusText, weaponState, slimBar, pct, plainText } from './hudUtil.js';
 
@@ -131,7 +132,8 @@ export class RobotPanel {
     const p = mech.parts[pilotSlot(slot)];
     if (!p) return [`<span class="muted">${esc(t('part.missing'))}</span>`, '', ''];
     const armor = p.stats.armor ?? {};
-    const tip = t('part.armor', { physical: armor.physical ?? 0, energy: armor.energy ?? 0 });
+    const accuracy = p.weapons.map((w) => `${w.def?.id ?? ''}: ${accuracyText(w)}`);
+    const tip = [t('part.armor', { physical: armor.physical ?? 0, energy: armor.energy ?? 0 }), ...accuracy].join('\n');
     const hp = `${esc(p.set)}${SEP}${Math.ceil(p.hp)}/${p.maxHp}${SEP}${pct(p.maxHp ? p.hp / p.maxHp : 0)} %`
       + ` ${slimBar(p.hp, p.maxHp)}`;
     return [hp, this.#detail(mech, slot, p), tip];

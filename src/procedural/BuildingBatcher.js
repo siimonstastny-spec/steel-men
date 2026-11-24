@@ -150,16 +150,23 @@ class Batcher {
     this.dirty = true;                // decide all LODs at the next frame
     this.forceAll = true;             // re-apply every LOD (quality changed)
     this.shadows = getBuildingQuality().shadows;
-    this.prevHook = scene.onBeforeRender;
     this.disposed = false;
     this.candidates = [];             // scratch list of the LOD0 candidates
     this.lastSweep = 0;
-    this.hook = (renderer, sc, camera, target) => {
-      this.prevHook.call(sc, renderer, sc, camera, target);
-      if (this.disposed) return;
-      this.#frame(camera);
-    };
-    scene.onBeforeRender = this.hook;
+    // one persistent hook per scene (sceneHooks): a disposed batcher leaves a pass-through that the next batcher of the
+    // scene reuses, so the onBeforeRender chain never grows when batchers come and go (other hooks may chain after it)
+    let entry = sceneHooks.get(scene);
+    if (!entry) {
+      entry = { batcher: null, prev: scene.onBeforeRender, hook: null };
+      entry.hook = (renderer, sc, camera, target) => {
+        entry.prev.call(sc, renderer, sc, camera, target);
+        if (entry.batcher && !entry.batcher.disposed) entry.batcher.renderFrame(camera);
+      };
+      scene.onBeforeRender = entry.hook;
+      sceneHooks.set(scene, entry);
+    }
+    entry.batcher = this;
+    this.hookEntry = entry;
     this.unsubscribe = onBuildingQualityChange(() => { this.dirty = true; this.forceAll = true; });
   }
 
@@ -227,7 +234,8 @@ class Batcher {
   }
 
   // Per rendered frame (scene.onBeforeRender): frame time for the auto level, LOD decisions every few frames
-  #frame(camera) {
+  /** Per rendered frame, from the scene hook (render side only) */
+  renderFrame(camera) {
     noteRenderFrame();
     this.frame++;
     if (!this.dirty && this.frame % BUILDING_LOD.updateFrames !== 0) return;
@@ -258,8 +266,9 @@ class Batcher {
     const limit2 = q.full * hyst * (q.full * hyst);
     for (let i = 0; i < n; i++) {
       const b = models[i].batch;
-      b.rank = n;
-      if (q.full > 0 && b.visible && b.dist2 <= limit2) { b.rank = 0; cand.push(b); }
+      // static-only models (plain wall segments) have no extra meshes at LOD0: they never take a LOD0 slot
+      b.rank = b.staticOnly ? 0 : n;
+      if (q.full > 0 && !b.staticOnly && b.visible && b.dist2 <= limit2) { b.rank = 0; cand.push(b); }
     }
     for (let i = 0; i < cand.length && cand.length > BUILDING_LOD.maxFull; i++) {   // few candidates: all of them get LOD0, rank stays 0
       const b = cand[i];
@@ -308,7 +317,12 @@ class Batcher {
 
   dispose() {
     this.disposed = true;
-    if (this.scene.onBeforeRender === this.hook) this.scene.onBeforeRender = this.prevHook;
+    const entry = this.hookEntry;
+    if (entry.batcher === this) entry.batcher = null;
+    if (this.scene.onBeforeRender === entry.hook) {   // still the last link: unhook completely
+      this.scene.onBeforeRender = entry.prev;
+      sceneHooks.delete(this.scene);
+    }                                                 // else: stays as a pass-through, reused by the next batcher
     this.unsubscribe();
     for (const g of this.groups.values()) g.dispose();
     this.groups.clear();
@@ -319,6 +333,7 @@ class Batcher {
 }
 
 const batchers = new WeakMap();   // scene -> Batcher
+const sceneHooks = new WeakMap(); // scene -> { batcher, prev, hook } (persistent onBeforeRender link, see Batcher)
 
 /** The batcher of a scene (created on first use, released when its last building goes) */
 export function batcherFor(scene) {

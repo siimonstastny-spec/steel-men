@@ -162,6 +162,10 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 .hud-cell:disabled { opacity: .35; cursor: default; }
 .hud-cell.empty { visibility: hidden; }
 .hud-cell .ico { font-size: max(14px, calc(18 * var(--hud-u))); line-height: 1; }
+/* Building icons rendered at runtime (src/ui/IconRenderer.js); the letters stay as the fallback */
+.ico-img { display: block; width: 1em; height: 1em; object-fit: contain; pointer-events: none; }
+.hud-cell .ico-img { width: max(30px, calc(44 * var(--hud-u))); height: max(30px, calc(44 * var(--hud-u))); }
+#queue-frame .qf-item .ico-img { width: calc(34 * var(--hud-u)); height: calc(34 * var(--hud-u)); }
 /* label: up to 2 lines (min 11 px), long words break; the full text is in the tooltip (title of the cell) */
 .hud-cell .lbl { font-size: max(11px, calc(10 * var(--hud-u))); line-height: 1.05; text-align: center; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; hyphens: auto; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .hud-cell kbd { position: absolute; right: calc(3 * var(--hud-u)); top: calc(1 * var(--hud-u)); max-width: calc(100% - 6px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1; box-sizing: border-box; font: max(11px, calc(9 * var(--hud-u))) system-ui, sans-serif; color: var(--hud-muted); }

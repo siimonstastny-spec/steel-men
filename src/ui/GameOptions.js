@@ -1,7 +1,7 @@
 // Steel Mans – [B1] shared game-setting comboboxes of the New game and multiplayer lobby screens (modern RTS style:
 // one labelled select per option). The screens own the state; this module only draws the controls and decodes changes.
 //
-//   optionsHtml(values, { disabled })         rows "label + select" (pre-build, energy cap, population cap,
+//   optionsHtml(values, { disabled })         rows "label + select" (pre-build, start set, energy cap, population cap,
 //                                             ore multiplier, game speed, fog of war, victory condition)
 //   mapSelectHtml(values, { maps, disabled, random })  the map select (above the map preview; random = "Random" entry)
 //   readOptionChange(target)                  -> { key, value } of a changed `select[data-opt]` (typed value) or null
@@ -17,6 +17,9 @@ import { START_RESEARCH, startResearchLabel } from '../game/StartResearch.js';
 import { t } from '../i18n/i18n.js';
 import { formatCapOption } from './formatAmount.js';
 import { RANDOM_MAP } from '../game/MapCatalog.js';
+import { getStats } from '../data/Stats.js';
+import { startSetOrder } from '../game/StartSets.js'; // [N15]
+import { conditionAllowed } from '../game/Victory.js';
 
 try {
   const href = new URL('./setup.css', import.meta.url).href;
@@ -40,10 +43,12 @@ function mapDef(maps, random) {
   return { key: 'map', labelKey: 'setup.map', hintKey: null, options };
 }
 
-function defs() {
+function defs(values) {
   const list = [];
   list.push(
     { key: 'prebuild', labelKey: 'setup.prebuild', hintKey: 'setup.prebuild.hint', options: PREBUILD.options.map((v) => ({ value: v, label: prebuildLabel(v) })) },
+    // [N15] start set: options from stats.json (rules.economy.startSetOrder); the hint follows the selected set
+    { key: 'startSet', labelKey: 'startSet.label', hintKey: null, options: startSetOrder(getStats()).map((v) => ({ value: v, label: t(`startSet.${v}`), hint: t(`startSet.${v}.desc`) })) },
     { key: 'energyCap', labelKey: 'setup.energyCap', hintKey: 'setup.energyCap.hint', options: ECONOMY.energyCaps.map((v) => ({ value: v, label: formatCapOption(v) })) },
     { key: 'populationCap', labelKey: 'setup.populationCap', hintKey: 'setup.populationCap.hint', options: ECONOMY.populationCaps.map((v) => ({ value: v, label: formatCapOption(v) })) },
     { key: 'oreMultiplier', labelKey: 'setup.oreMultiplier', hintKey: 'setup.oreMultiplier.hint', options: ORE_MULTIPLIER.options.map((v) => ({ value: v, label: oreMultiplierLabel(v) })) },
@@ -51,7 +56,11 @@ function defs() {
     { key: 'startResearch', labelKey: 'setup.startResearch', hintKey: 'setup.startResearch.hint', options: START_RESEARCH.options.map((v) => ({ value: v, label: startResearchLabel(v) })) },
     { key: 'speed', labelKey: 'setup.gameSpeed', hintKey: 'setup.gameSpeed.hint', options: GAME_SPEED.options.map((v) => ({ value: v, label: speedLabel(v) })) },
     { key: 'fogOfWar', labelKey: 'setup.fogOfWar', hintKey: null, options: MENU.fogModes.map((v) => ({ value: v, label: t(`setup.fog.${v}`), hint: t(`setup.fog.${v}.hint`) })) },
-    { key: 'victory', labelKey: 'setup.victory', hintKey: null, options: VICTORY.conditions.map((v) => ({ value: v, label: t(`victory.${v}`), hint: t(`victory.${v}.hint`) })) },
+    { key: 'victory', labelKey: 'setup.victory', hintKey: null, options: VICTORY.conditions.map((v) => {
+      // A condition the chosen start set cannot play (no main building) is listed but disabled, with the reason as tooltip
+      const allowed = !values || conditionAllowed(v, values.startSet, getStats());
+      return { value: v, label: t(`victory.${v}`), hint: allowed ? t(`victory.${v}.hint`) : t('victory.needsMainBuilding'), disabled: !allowed };
+    }) },
   );
   return list;
 }
@@ -61,12 +70,12 @@ function rowHtml(d, values, disabled) {
   const hint = d.hintKey ? t(d.hintKey) : (d.options.find((o) => String(o.value) === cur)?.hint ?? '');
   return `<label class="opt-row" title="${escapeHtml(hint)}"><span class="opt-label">${t(d.labelKey)}</span>
     <select class="opt-select" data-opt="${d.key}"${disabled ? ' disabled' : ''}>${d.options.map((o) =>
-    `<option value="${escapeHtml(o.value)}"${String(o.value) === cur ? ' selected' : ''}${o.hint ? ` title="${escapeHtml(o.hint)}"` : ''}>${escapeHtml(o.label)}</option>`).join('')}</select></label>`;
+    `<option value="${escapeHtml(o.value)}"${String(o.value) === cur ? ' selected' : ''}${o.disabled ? ' disabled' : ''}${o.hint ? ` title="${escapeHtml(o.hint)}"` : ''}>${escapeHtml(o.label)}</option>`).join('')}</select></label>`;
 }
 
 /** The rules comboboxes (the map select is separate: mapSelectHtml) */
 export function optionsHtml(values, { disabled = false } = {}) {
-  return defs().map((d) => rowHtml(d, values, disabled)).join('');
+  return defs(values).map((d) => rowHtml(d, values, disabled)).join('');
 }
 
 /** [W5a] Map combobox (shown above the map preview); random = add the "Random" entry (lobby); maps = GameMap list */

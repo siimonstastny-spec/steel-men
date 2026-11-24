@@ -20,7 +20,22 @@
       "startResources": { "ore": 1400 },
       "startEnergyShare": 0.25,
       "noHqIncomeFactor": 0.1,
-      "startUnits": { "structures": ["matterConverter"], "vehicles": ["hoverTruck", "drillTruck"] },
+      "startSetOrder": ["builderDrill", "withHq", "withRobotProduction", "withVehicleFactory"],
+      "defaultStartSet": "withHq",
+      "startSets": {
+        "builderDrill": { "structures": [], "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0 },
+        "withHq": { "structures": ["matterConverter"], "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0 },
+        "withRobotProduction": {
+          "structures": ["matterConverter", "robotPartFactory", "robotAssemblyBay"],
+          "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0
+        },
+        "withVehicleFactory": {
+          "structures": ["matterConverter", "robotPartFactory", "robotAssemblyBay", "vehicleFactory"],
+          "vehicles": ["hoverTruck", "drillTruck"],
+          "mech": { "legs": "Basic", "torso": "Basic", "leftArm": "Basic", "rightArm": "$startArm" },
+          "crew": 1
+        }
+      },
       "populationMax": 100
     },
     "construction": {
@@ -149,6 +164,7 @@
         "structures": ["cryoFarm"]
       },
       "construction": { "continuesWithoutBuilder": false },
+      "startArm": "KatanaSword",
       "population": { "fullFromStart": false }
     },
     "Y": {
@@ -165,6 +181,7 @@
         "structures": ["cryoFarm"]
       },
       "construction": { "continuesWithoutBuilder": true },
+      "startArm": "Axe",
       "population": { "fullFromStart": false }
     },
     "Z": {
@@ -181,7 +198,20 @@
         "structures": ["crewTrainingFacility"]
       },
       "construction": { "continuesWithoutBuilder": false },
+      "startArm": "ElectroGrip",
       "population": { "fullFromStart": true }
+    },
+    "W": {
+      "name": "Mercury",
+      "description": "Mezi Marsem a Venuší: vyvážená frakce, laserová technologie (vlastní modely zatím nahrazeny).",
+      "descriptionKey": "race.W.description",
+      "uiColor": { "primary": "#e8a21a", "accent": "#ffd75e", "neon": "#ffb62e", "frameFilter": "hue-rotate(185deg) saturate(1.5)", "panelTop": "rgba(92, 62, 14, 0.93)", "panelBottom": "rgba(58, 38, 8, 0.93)" },
+      "modifiers": { "hp": 1.01, "armor": 1.025, "moveSpeed": 1.025, "acceleration": 1.05 },
+      "modelRace": "X",
+      "exclusive": { "structures": ["cryoFarm"] },
+      "construction": { "continuesWithoutBuilder": false },
+      "startArm": "GattlingGun",
+      "population": { "fullFromStart": false }
     }
   },
 
@@ -395,7 +425,7 @@
     },
     "EnergyBlaster": {
       "arm": { "cost": { "ore": 60, "energy": 50 }, "buildTime": 8, "hp": 70, "armor": { "physical": 5, "energy": 25 }, "mass": 16,
-               "weapons": [{ "id": "energyBlaster", "damage": { "physical": 0, "energy": 14 }, "range": 60, "attackTime": 0.8, "cooldown": 0.8, "projectileSpeed": 120, "projectileSize": 1.1, "projectileShape": "orb", "accuracy": 0.9 }] }
+               "weapons": [{ "id": "energyBlaster", "damage": { "physical": 0, "energy": 14 }, "range": 60, "attackTime": 0.8, "cooldown": 0.8, "projectileSpeed": 120, "projectileSize": 1.1, "projectileShape": "bolt", "projectileColor": "#66e0ff", "accuracy": 0.9 }] }
     },
     "EnergyShield": {
       "arm": { "cost": { "ore": 70, "energy": 70 }, "buildTime": 10, "hp": 110, "armor": { "physical": 15, "energy": 70 }, "mass": 22,
@@ -438,7 +468,7 @@
     "PlasmaCannon": {
       "arm": { "cost": { "ore": 130, "energy": 90 }, "buildTime": 13, "hp": 85, "armor": { "physical": 10, "energy": 30 }, "mass": 28,
                "requires": ["researchFacility"], "requiresResearch": ["plasmaWeapons"],
-               "weapons": [{ "id": "plasmaCannon", "damage": { "physical": 15, "energy": 40 }, "range": 75, "attackTime": 0.8, "cooldown": 2.5, "projectileSpeed": 70, "projectileSize": 1.5, "projectileShape": "orb",
+               "weapons": [{ "id": "plasmaCannon", "damage": { "physical": 15, "energy": 40 }, "range": 75, "attackTime": 0.8, "cooldown": 2.5, "projectileSpeed": 70, "projectileSize": 1.5, "projectileShape": "orb", "projectileColor": "#7dff9a",
                              "splashRadius": 5, "accuracy": 0.9 }] }
     },
     "PowerFist": {
@@ -449,7 +479,7 @@
     "ProtoBlast": {
       "arm": { "cost": { "ore": 100, "energy": 100 }, "buildTime": 12, "hp": 75, "armor": { "physical": 5, "energy": 35 }, "mass": 20,
                "requires": ["researchFacility"], "requiresResearch": ["plasmaWeapons"],
-               "weapons": [{ "id": "protoBlast", "damage": { "physical": 0, "energy": 50 }, "range": 65, "attackTime": 1.5, "cooldown": 3.5, "projectileSpeed": 80, "projectileSize": 2.0, "projectileShape": "orb",
+               "weapons": [{ "id": "protoBlast", "damage": { "physical": 0, "energy": 50 }, "range": 65, "attackTime": 1.5, "cooldown": 3.5, "projectileSpeed": 80, "projectileSize": 2.0, "projectileShape": "orb", "projectileColor": "#d77dff",
                              "splashRadius": 12, "accuracy": 0.9 }] }
     },
     "RotaryBlade": {
@@ -686,6 +716,12 @@
     "mobileWallSegment": {
       "model": "3DStructures{race}/MobileWallWall{race}.glb", "modelScale": 1.5, "buildable": false,
       "cost": { "ore": 30, "energy": 0 }, "buildTime": 5,
+      "hp": 1200, "armor": { "physical": 60, "energy": 30 }, "sightRange": 20
+    },
+    "wallGate": {
+      "model": "3DStructures{race}/MobileWallWall{race}.glb", "modelScale": 1.5, "buildable": false,
+      "gate": true, "gateOpenRange": 20,
+      "cost": { "ore": 60, "energy": 10 }, "buildTime": 8,
       "hp": 1200, "armor": { "physical": 60, "energy": 30 }, "sightRange": 20
     },
     "mobileWallGunTurret": {

@@ -16,6 +16,22 @@
 
   "unitKinds": { "hoverTruck": "builder", "drillTruck": "builder" },
 
+  "damage": {
+    "_doc": "Damage smoke on hurt units / buildings (Effects.damageSmoke). Starts when hp fraction < threshold; severity = (threshold - hp) / threshold (0..1) raises emission rate (rateMin..rateMax puffs/s), puff size (x1..x sizeGain) and darkens the smoke (lightColor -> darkColor). Puffs spawn at target.position + height x (aimHeight for units / bodyHeight for buildings) in a disc of spread x radius. Visual only.",
+    "max": 400,
+    "opacity": 0.5,
+    "lightColor": "#a8a8a8",
+    "darkColor": "#161616",
+    "unit": {
+      "threshold": 0.6, "rateMin": 1.5, "rateMax": 9, "sizeFrom": 1.2, "sizeTo": 4, "sizeGain": 1.5,
+      "life": [1.0, 1.8], "rise": 9, "drift": 2, "height": 0.8, "spread": 0.3
+    },
+    "building": {
+      "threshold": 0.6, "rateMin": 2, "rateMax": 14, "sizeFrom": 2.5, "sizeTo": 8, "sizeGain": 1.6,
+      "life": [1.6, 2.8], "rise": 8, "drift": 2.5, "height": 0.7, "spread": 0.35
+    }
+  },
+
   "races": {
     "default": {
       "size": 0.9, "speed": 1, "ring": 0,

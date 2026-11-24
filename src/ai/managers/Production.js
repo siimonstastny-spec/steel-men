@@ -641,7 +641,7 @@ export class ProductionManager {
     const phase = armies.phases.find((p) => p.until === null || p.until === undefined || now < p.until) ?? armies.phases.at(-1);
     const w = armies.score;
     const counter = this.#counter();
-    let role = weightedPick(counter.roles(phase.roles)) ?? armies.fallbackRole;
+    let role = weightedPick(counter.roles(phase.roles), ai.rng) ?? armies.fallbackRole;
     const opts = Object.fromEntries(PART_SLOTS.map((slot) => [slot, this.prod.partOptions(this.team, slot)]));
     // Universal arms: one type goes on both sides (the model of each side is derived from the stock key)
     const arms = [];
@@ -694,7 +694,7 @@ export class ProductionManager {
     pool.sort((a, b) => b.value - a.value);
     // Quality 1 = always the best; lower = a random one of the best (1 - quality) share
     const top = Math.max(1, Math.round(pool.length * (1 - (ai.diff.loadoutQuality ?? 1))));
-    const chosen = pool[Math.floor(Math.random() * top)];
+    const chosen = pool[ai.rng.int(top)];
     return { role, loadout: chosen.loadout };
   }
 }

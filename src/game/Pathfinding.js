@@ -34,8 +34,26 @@ const BLOCK_RIFT = 2;
 const SOLID_FIRST = [true, false];
 const CROSS_FLY = 1;
 const CROSS_HOP = 2;
+const sameNum = (a, b) => a === b || (a !== a && b !== b);
 
 export class NavGrid {
+  // [N10] recycled buffers (no per-query allocation). Queries are synchronous and never nested, so one set is enough.
+  #shapePool = [];       // inflated shape objects { x, z, radius, halfX, halfZ, rift } (circle: halfX/halfZ undefined; box: radius undefined)
+  #shapes = [];          // the list handed out by #inflated / shapesFor: valid until the next call
+  #blocked;              // rasterized cells
+  #g;                    // A* cost
+  #from;                 // A* parent
+  #closed;               // A* closed flags
+  #entry;                // [R2] how a cell was entered
+  #seen;                 // #nearestFree visited flags
+  #ringA = [];           // #nearestFree rings (swapped)
+  #ringB = [];
+  #heap = new MinHeap(); // A* open list
+  #origin = new THREE.Vector3(); // #nearestFree scratch
+  #centre = new THREE.Vector3();
+  #sigValues = [];       // refresh(): rounded obstacle values of the last layout (4 per shape)
+  #sigCount = 0;
+
   /**
    * @param {object} opts
    * @param {number} opts.size      map width = depth (units), the map is centred on 0,0
@@ -48,7 +66,13 @@ export class NavGrid {
     this.half = size / 2;
     this.sources = [];
     this.version = 0;       // bumped whenever the obstacle layout changes -> units re-plan
-    this._signature = '';
+    const cells = this.cols * this.cols;
+    this.#blocked = new Uint8Array(cells);
+    this.#g = new Float32Array(cells);
+    this.#from = new Int32Array(cells);
+    this.#closed = new Uint8Array(cells);
+    this.#entry = new Uint8Array(cells);
+    this.#seen = new Uint8Array(cells);
   }
 
   /**
@@ -80,10 +104,32 @@ export class NavGrid {
 
   /** Call once per frame: bumps `version` when obstacles appeared, vanished or moved */
   refresh() {
-    const sig = this.obstacles()
-      .map((s) => `${Math.round(s.x)},${Math.round(s.z)},${Math.round(s.radius ?? s.halfX)},${Math.round(s.halfZ ?? 0)}`)
-      .join(';');
-    if (sig !== this._signature) { this._signature = sig; this.version++; }
+    // [N10] same test as comparing a string of the rounded values, without building it every tick
+    const prev = this.#sigValues;
+    let n = 0;
+    this.#sigChanged = false;
+    const snap = this._snapshot?.shapes;
+    if (snap) n = this.#signShapes(snap, n, prev);
+    else for (let i = 0; i < this.sources.length; i++) n = this.#signShapes(this.sources[i](), n, prev);
+    const changed = this.#sigChanged || n !== this.#sigCount;
+    this.#sigCount = n;
+    if (changed) this.version++;
+  }
+
+  #sigChanged = false;
+
+  // Writes the rounded values of `list` into `prev` from shape index n (4 per shape); flags a difference to the old values
+  #signShapes(list, n, prev) {
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      const v0 = Math.round(s.x), v1 = Math.round(s.z), v2 = Math.round(s.radius ?? s.halfX), v3 = Math.round(s.halfZ ?? 0);
+      const o = n * 4;
+      // (NaN compares equal to NaN, as it did in the string)
+      if (!sameNum(prev[o], v0) || !sameNum(prev[o + 1], v1) || !sameNum(prev[o + 2], v2) || !sameNum(prev[o + 3], v3)) this.#sigChanged = true;
+      prev[o] = v0; prev[o + 1] = v1; prev[o + 2] = v2; prev[o + 3] = v3;
+      n++;
+    }
+    return n;
   }
 
   /**
@@ -132,7 +178,7 @@ export class NavGrid {
       entry: null,
     };
     // [R2] how each cell was entered: CROSS_FLY / CROSS_HOP, 0 = walked
-    if (jets.fly || jets.hop) jets.entry = new Uint8Array(this.cols * this.cols);
+    if (jets.fly || jets.hop) jets.entry = this.#entry.fill(0);
     const cells = this.#astar(free, end, blocked, jets);
     if (free !== start) cells.unshift(start);
     const reachedEnd = cells[cells.length - 1] === end;
@@ -162,7 +208,7 @@ export class NavGrid {
 
   /** True when the straight segment a -> b does not cross any inflated shape */
   segmentClear(a, b, shapes) {
-    for (const s of shapes) if (segmentHits(a, b, s)) return false;
+    for (let i = 0; i < shapes.length; i++) if (segmentHits(a, b, shapes[i])) return false;
     return true;
   }
 
@@ -176,32 +222,50 @@ export class NavGrid {
   // ---------- internal ----------
 
   #inflated(radius, ignore, crossRift = false, body = null) {
+    // [N10] shapes are written into recycled objects; the returned list is valid until the next call (all callers use it at once)
+    const out = this.#shapes;
+    let n = 0;
+    const snap = this._snapshot?.shapes;
+    if (snap) n = this.#inflateList(snap, n, radius, ignore, crossRift, body);
+    else for (let i = 0; i < this.sources.length; i++) n = this.#inflateList(this.sources[i](), n, radius, ignore, crossRift, body);
+    out.length = n;
+    return out;
+  }
+
+  #inflateList(list, n, radius, ignore, crossRift, body) {
     const clearance = PATHFINDING.clearance;
-    return this.obstacles()
-      .filter((s) => !ignore.includes(s.owner) && !(crossRift && s.rift))
-      .map((s) => {
-        let own = s.radius;
-        let pad = radius;
-        if (body) {
-          const owner = s.owner;
-          if (owner?.isMech) { // a crewless mech: shoulders against mechs / tall units, legs against the rest
-            own = collisionReach(owner, Boolean(body.isMech), body.bodyHeight ?? 0);
-            pad = collisionReach(body, true, 0);
-          } else pad = collisionReach(body, false, obstacleHeight(s));
-        }
-        pad += clearance;
-        return s.radius !== undefined
-          ? { x: s.x, z: s.z, radius: own + pad, rift: s.rift === true }
-          : { x: s.x, z: s.z, halfX: s.halfX + pad, halfZ: s.halfZ + pad, rift: s.rift === true };
-      });
+    const pool = this.#shapePool;
+    const out = this.#shapes;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (ignore.includes(s.owner) || (crossRift && s.rift)) continue;
+      let own = s.radius;
+      let pad = radius;
+      if (body) {
+        const owner = s.owner;
+        if (owner?.isMech) { // a crewless mech: shoulders against mechs / tall units, legs against the rest
+          own = collisionReach(owner, Boolean(body.isMech), body.bodyHeight ?? 0);
+          pad = collisionReach(body, true, 0);
+        } else pad = collisionReach(body, false, obstacleHeight(s));
+      }
+      pad += clearance;
+      const o = pool[n] ??= { x: 0, z: 0, radius: undefined, halfX: undefined, halfZ: undefined, rift: false };
+      o.x = s.x; o.z = s.z; o.rift = s.rift === true;
+      if (s.radius !== undefined) { o.radius = own + pad; o.halfX = undefined; o.halfZ = undefined; }
+      else { o.radius = undefined; o.halfX = s.halfX + pad; o.halfZ = s.halfZ + pad; }
+      out[n++] = o;
+    }
+    return n;
   }
 
   // Cell values: 0 free, BLOCK_SOLID (any obstacle but a rift), BLOCK_RIFT (only rifts) – [R2] hops cross BLOCK_RIFT only
   #rasterize(shapes) {
     const n = this.cols;
-    const blocked = new Uint8Array(n * n);
+    const blocked = this.#blocked.fill(0);
     const c = this.cellSize;
-    for (const solid of SOLID_FIRST) for (const s of shapes) { // solid shapes first: a rift never downgrades a cell
+    for (let pass = 0; pass < SOLID_FIRST.length; pass++) for (let si = 0; si < shapes.length; si++) { // solid shapes first: a rift never downgrades a cell
+      const solid = SOLID_FIRST[pass];
+      const s = shapes[si];
       if (s.rift === solid) continue;
       const mark = solid ? BLOCK_SOLID : BLOCK_RIFT;
       const ex = s.radius ?? s.halfX;
@@ -210,9 +274,8 @@ export class NavGrid {
       const z0 = this.#col(s.z - ez), z1 = this.#col(s.z + ez);
       for (let iz = z0; iz <= z1; iz++) {
         for (let ix = x0; ix <= x1; ix++) {
-          const p = { x: (ix + 0.5) * c - this.half, z: (iz + 0.5) * c - this.half };
           const i = iz * n + ix;
-          if (!blocked[i] && inside(p, s)) blocked[i] = mark;
+          if (!blocked[i] && insideXZ((ix + 0.5) * c - this.half, (iz + 0.5) * c - this.half, s)) blocked[i] = mark;
         }
       }
     }
@@ -226,15 +289,16 @@ export class NavGrid {
   #astar(start, end, blocked, jets = null) {
     const entry = jets?.entry ?? null;
     const n = this.cols;
-    const g = new Float32Array(n * n).fill(Infinity);
-    const from = new Int32Array(n * n).fill(-1);
-    const closed = new Uint8Array(n * n);
+    const g = this.#g.fill(Infinity);
+    const from = this.#from.fill(-1);
+    const closed = this.#closed.fill(0);
     const ex = end % n, ez = Math.floor(end / n);
     const h = (i) => {
       const dx = Math.abs((i % n) - ex), dz = Math.abs(Math.floor(i / n) - ez);
       return Math.max(dx, dz) + (SQRT2 - 1) * Math.min(dx, dz);
     };
-    const open = new MinHeap();
+    const open = this.#heap;
+    open.clear();
     g[start] = 0;
     open.push(start, h(start));
     let best = start;
@@ -247,7 +311,9 @@ export class NavGrid {
       const hc = h(cur);
       if (hc < bestH) { best = cur; bestH = hc; }
       const cx = cur % n, cz = Math.floor(cur / n);
-      for (const [dx, dz, cost] of NEIGHBOURS) {
+      for (let k = 0; k < NEIGHBOURS.length; k++) {
+        const nb = NEIGHBOURS[k];
+        const dx = nb[0], dz = nb[1], cost = nb[2];
         const nx = cx + dx, nz = cz + dz;
         if (nx < 0 || nz < 0 || nx >= n || nz >= n) continue;
         const ni = nz * n + nx;
@@ -272,7 +338,9 @@ export class NavGrid {
     const n = this.cols;
     const penalty = rangePenalty / this.cellSize; // A* costs are in cells
     const mark = riftOnly ? CROSS_HOP : CROSS_FLY;
-    for (const [dx, dz, cost] of NEIGHBOURS) {
+    for (let d = 0; d < NEIGHBOURS.length; d++) {
+      const nb = NEIGHBOURS[d];
+      const dx = nb[0], dz = nb[1], cost = nb[2];
       let nx = cx + dx, nz = cz + dz;
       if (nx < 0 || nz < 0 || nx >= n || nz >= n) continue;
       const first = blocked[nz * n + nx];
@@ -320,16 +388,20 @@ export class NavGrid {
   #nearestFree(cell, blocked, prefer = null, point = null) {
     const n = this.cols;
     if (!blocked[cell]) return cell;
-    const seen = new Uint8Array(n * n);
-    let ring = [cell];
+    const seen = this.#seen.fill(0);
+    let ring = this.#ringA;
+    let next = this.#ringB;
+    ring.length = 0;
+    ring.push(cell);
     seen[cell] = 1;
-    const origin = point ? new THREE.Vector3(point.x, 0, point.z) : this.#cellCentre(cell, new THREE.Vector3());
-    const centre = new THREE.Vector3();
+    const origin = point ? this.#origin.set(point.x, 0, point.z) : this.#cellCentre(cell, this.#origin);
+    const centre = this.#centre;
     let best = -1;
     let bestScore = Infinity;
     let lastRing = Infinity;
     for (let k = 0; ring.length && k <= lastRing; k++) {
-      for (const c of ring) {
+      for (let ri = 0; ri < ring.length; ri++) {
+        const c = ring[ri];
         if (blocked[c]) continue;
         this.#cellCentre(c, centre);
         const score = centre.distanceTo(origin)
@@ -337,17 +409,18 @@ export class NavGrid {
         if (score < bestScore) { best = c; bestScore = score; }
       }
       if (best >= 0 && lastRing === Infinity) lastRing = Math.ceil(k * SQRT2) + 1;
-      const next = [];
-      for (const cur of ring) {
+      next.length = 0;
+      for (let ri = 0; ri < ring.length; ri++) {
+        const cur = ring[ri];
         const cx = cur % n, cz = Math.floor(cur / n);
-        for (const [dx, dz] of NEIGHBOURS) {
-          const nx = cx + dx, nz = cz + dz;
+        for (let d = 0; d < NEIGHBOURS.length; d++) {
+          const nx = cx + NEIGHBOURS[d][0], nz = cz + NEIGHBOURS[d][1];
           if (nx < 0 || nz < 0 || nx >= n || nz >= n) continue;
           const ni = nz * n + nx;
           if (!seen[ni]) { seen[ni] = 1; next.push(ni); }
         }
       }
-      ring = next;
+      const swap = ring; ring = next; next = swap;
     }
     return best;
   }
@@ -388,7 +461,15 @@ function inside(p, s) {
   return Math.abs(p.x - s.x) < s.halfX && Math.abs(p.z - s.z) < s.halfZ;
 }
 
-function insideAny(p, shapes) { return shapes.some((s) => inside(p, s)); }
+function insideXZ(px, pz, s) {
+  if (s.radius !== undefined) return Math.hypot(px - s.x, pz - s.z) < s.radius;
+  return Math.abs(px - s.x) < s.halfX && Math.abs(pz - s.z) < s.halfZ;
+}
+
+function insideAny(p, shapes) {
+  for (let i = 0; i < shapes.length; i++) if (inside(p, shapes[i])) return true;
+  return false;
+}
 
 /**
  * Does the segment a -> b enter shape s? A segment starting inside the shape only counts when it
@@ -407,11 +488,18 @@ function segmentHits(a, b, s) {
     return (a.x - s.x) * dx + (a.z - s.z) * dz < 0;
   }
   // Slab test against the box
+  // x slab, then z slab (inline: no temporary arrays)
   let t0 = 0, t1 = 1;
-  for (const [p, d, c, h] of [[a.x, dx, s.x, s.halfX], [a.z, dz, s.z, s.halfZ]]) {
-    if (Math.abs(d) < EPSILON) { if (Math.abs(p - c) >= h) return false; continue; }
-    let ta = (c - h - p) / d, tb = (c + h - p) / d;
-    if (ta > tb) [ta, tb] = [tb, ta];
+  if (Math.abs(dx) < EPSILON) { if (Math.abs(a.x - s.x) >= s.halfX) return false; } else {
+    let ta = (s.x - s.halfX - a.x) / dx, tb = (s.x + s.halfX - a.x) / dx;
+    if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+    t0 = Math.max(t0, ta);
+    t1 = Math.min(t1, tb);
+    if (t0 >= t1) return false;
+  }
+  if (Math.abs(dz) < EPSILON) { if (Math.abs(a.z - s.z) >= s.halfZ) return false; } else {
+    let ta = (s.z - s.halfZ - a.z) / dz, tb = (s.z + s.halfZ - a.z) / dz;
+    if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
     t0 = Math.max(t0, ta);
     t1 = Math.min(t1, tb);
     if (t0 >= t1) return false;
@@ -423,6 +511,7 @@ function segmentHits(a, b, s) {
 class MinHeap {
   constructor() { this.items = []; this.prio = []; }
   get size() { return this.items.length; }
+  clear() { this.items.length = 0; this.prio.length = 0; }
   push(item, p) {
     const it = this.items, pr = this.prio;
     let i = it.length;

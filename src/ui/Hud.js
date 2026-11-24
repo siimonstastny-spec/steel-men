@@ -10,7 +10,8 @@
 //   above units   health / progress bars (UnitOverlays), wreck tooltip under the cursor
 // --hud-scale (unitless, on :root) = clamp(min(W / 1920, H / 1080), HUD_V2.scaleMin, HUD_V2.scaleMax), updated on resize.
 import * as THREE from 'three';
-import { HUD, HUD_V2, ECONOMY_ALERTS, KEYBINDINGS, SIM, GAME_CLOCK, GAME_SPEED, IDLE_BUILDER, IDLE_DRILL } from '../config.js';
+import { commandBus } from '../game/commands/CommandBus.js';
+import { HUD, HUD_V2, ECONOMY_ALERTS, KEYBINDINGS, FORMATION, SIM, GAME_CLOCK, GAME_SPEED, IDLE_BUILDER, IDLE_DRILL, ORE_ICON } from '../config.js';
 import { localTeam } from '../core/LocalPlayer.js';
 import { getSettings } from '../core/Profile.js';
 import { formatGameTime, gameSpeed, speedLabel } from '../game/GameSpeed.js';
@@ -28,7 +29,7 @@ import { QueueFrame } from './QueueFrame.js'; // [W3] all queues of the player i
 import { esc, wreckInfo } from './hudUtil.js';
 import { formatAmount } from './formatAmount.js';
 
-const ICONS = { ore: '⛏', energy: '⚡', population: '👥', idleCrew: '👷' };
+const ICONS = { ore: ORE_ICON, energy: '⚡', population: '👥', idleCrew: '👷' };
 const GROUP_COUNT = 9;
 const GEOMETRY_VARS = ['--hud-prod-y', '--hud-prod-top-h', '--hud-prod-bottom-h', '--hud-prod-row-h', '--hud-prod-col-y', '--hud-idle-from-bottom',
   '--hud-ml', '--hud-mr', '--hud-mt', '--hud-mb', '--hud-idle-left', '--hud-idle-size', '--hud-idle-gap', '--hud-backdrop'];
@@ -87,9 +88,15 @@ export class Hud {
     this.cmdView = { items: this.cmdItems };
     this.cmdItemPool = Array.from({ length: cmdCount }, (_, i) => ({
       icon: '', label: '', hotkey: '', tip: '', disabled: false, on: false, pending: false,
-      onClick: () => { const name = this.cmdSlots[i]; if (name) { this.input.command(name); this.refresh(); } },
+      onClick: () => {
+        const name = this.cmdSlots[i];
+        if (name === 'formation') this.#cycleFormation();
+        else if (name) this.input.command(name);
+        if (name) this.refresh();
+      },
     }));
-    this.cmdSig = { names: new Array(cmdCount).fill(undefined), enabled: new Array(cmdCount).fill(false),
+    this.fmCounts = new Array(FORMATION.modes.length).fill(0); // recycled: units per formation mode of the selection
+    this.cmdSig = { names: new Array(cmdCount).fill(undefined), enabled: new Array(cmdCount).fill(false), formation: undefined,
       repairing: undefined, stance: undefined, behaviour: undefined, pending: undefined, lang: undefined };
     this.onResize = () => { this.#applyScale(); this.#fitBudget(); this.#fitProduction(); };
     window.addEventListener('resize', this.onResize);
@@ -332,7 +339,9 @@ export class Hud {
 
   #renderResources() {
     const eco = this.world.economy;
-    const pop = this.world.crews.filter((c) => c.team === localTeam() && !c.dead).reduce((s, c) => s + (c.supply ?? 0), 0);
+    let pop = 0;
+    const localT = localTeam();
+    for (const c of this.world.crews) if (c.team === localT && !c.dead) pop += c.supply ?? 0;
     const res = (key, icon, value, disabled, tip = t(`hud.${key}`), warn = false) =>
       `<span class="hud-res hud-res-${key} ${disabled ? 'disabled' : ''} ${warn === 'lowEnergy' ? 'lowEnergy' : warn ? 'warn' : ''}" title="${esc(tip)}${disabled ? ` – ${esc(t('hud.noEconomy'))}` : ''}">`
       + `<i>${icon}</i><b>${value}</b></span>`;
@@ -408,8 +417,45 @@ export class Hud {
     for (let i = 0; i < layout.length; i++) if (layout[i]) this.cmdSlots[i] = layout[i];
   }
 
+  /** Formation mode of the selected own units: the majority (a tie goes to the earlier mode); null = nothing to order */
+  #selectionFormation() {
+    const counts = this.fmCounts;
+    counts.fill(0);
+    let total = 0;
+    const input = this.input;
+    total += this.#countFormations(input.selectedMechs, counts);
+    total += this.#countFormations(input.selectedCrews, counts);
+    total += this.#countFormations(input.selectedVehicles, counts);
+    if (!total) return null;
+    let best = 0;
+    for (let k = 1; k < counts.length; k++) if (counts[k] > counts[best]) best = k;
+    return FORMATION.modes[best];
+  }
+
+  /** Adds the formation modes of `list` to `counts` (no temporary arrays); returns the number of units */
+  #countFormations(list, counts) {
+    const modes = FORMATION.modes;
+    const fallback = modes.indexOf(FORMATION.defaultMode);
+    for (let i = 0; i < list.length; i++) {
+      const k = modes.indexOf(list[i].formation);
+      counts[k < 0 ? fallback : k]++;
+    }
+    return list.length;
+  }
+
+  /** The formation button: the next mode for every selected own unit (command setFormation, the units remember it) */
+  #cycleFormation() {
+    const mode = this.#selectionFormation();
+    if (!mode) return;
+    const input = this.input;
+    const units = [...input.selectedMechs, ...input.selectedCrews, ...input.selectedVehicles];
+    const next = FORMATION.modes[(FORMATION.modes.indexOf(mode) + 1) % FORMATION.modes.length];
+    commandBus.submit({ type: 'setFormation', team: localTeam(), units: units.map((u) => u.eid), mode: next });
+  }
+
   #renderCommandGrid() {
     const enabled = this.input.commands;
+    const formation = this.#selectionFormation();
     const stance = this.input.stance;
     const behaviour = this.input.behaviour;
     const repairing = this.input.repairing;
@@ -430,14 +476,14 @@ export class Hud {
     const pending = input.pending;
     const lang = getLanguage();
     let changed = sig.repairing !== repairing || sig.stance !== stance || sig.behaviour !== behaviour
-      || sig.pending !== pending || sig.lang !== lang;
+      || sig.pending !== pending || sig.lang !== lang || sig.formation !== formation;
     for (let i = 0; i < grid.length; i++) {
       const name = grid[i];
-      const en = name ? Boolean(enabled[name]) : false;
+      const en = name === 'formation' ? formation !== null : name ? Boolean(enabled[name]) : false;
       if (sig.names[i] !== name || sig.enabled[i] !== en) { changed = true; sig.names[i] = name; sig.enabled[i] = en; }
     }
     if (!changed) return;
-    sig.repairing = repairing; sig.stance = stance; sig.behaviour = behaviour; sig.pending = pending; sig.lang = lang;
+    sig.formation = formation; sig.repairing = repairing; sig.stance = stance; sig.behaviour = behaviour; sig.pending = pending; sig.lang = lang;
     const items = this.cmdItems;
     for (let i = 0; i < grid.length; i++) {
       const name = grid[i];
@@ -445,7 +491,8 @@ export class Hud {
       const key = KEYBINDINGS[name]?.[0];
       // The repair button turns into "stop repair" while the selected mechs are being repaired
       const look = name === 'repair' && repairing ? 'stopRepair' : name;
-      const label = t(`cmd.${look}`);
+      const isFormation = name === 'formation';
+      const label = isFormation && formation ? t(`formation.${formation}`) : t(`cmd.${look}`); // shows the current mode
       const keyText = key ? keyLabel(key) : '';
       const it = this.cmdItemPool[i];
       // Long key names (Delete) are not drawn in the corner – they would be a second text next to the label; the tooltip has them
@@ -453,8 +500,9 @@ export class Hud {
       it.label = label;
       it.hotkey = keyText.length > HUD.commandGrid.hotkeyMaxLength ? '' : keyText;
       it.tip = t(`cmd.${look}.tip`) + (key ? ` [${keyText}]` : '');
-      it.disabled = !enabled[name];
-      it.on = (name === 'stanceRanged' && stance === 'ranged') || (name === 'stanceMelee' && stance === 'melee')
+      it.disabled = isFormation ? formation === null : !enabled[name];
+      it.on = (isFormation && formation !== null && formation !== FORMATION.defaultMode)
+        || (name === 'stanceRanged' && stance === 'ranged') || (name === 'stanceMelee' && stance === 'melee')
         || (BEHAVIOUR_CELLS[name] !== undefined && BEHAVIOUR_CELLS[name] === behaviour);
       it.pending = TARGETED_ORDERS.includes(name) && pending === name;
       items[i] = it;

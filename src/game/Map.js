@@ -162,6 +162,34 @@ export class GameMap {
     return shapes;
   }
 
+  /**
+   * [N7-los] Tall obstacles for line of sight: { x, z, radius | halfX+halfZ, top } with top = absolute height of the
+   * upper edge (terrain at the obstacle + its height). Only obstacles >= minHeight; rifts are not included (open
+   * air above them). Cached per map (heights are fixed once the map is built); the first call must come after build.
+   * @param {{ heightAt: (x:number, z:number) => number }} world  the World (heightAt)
+   */
+  losBlockers(world, minHeight) {
+    if (this.#blockers && this.#blockersMin === minHeight) return this.#blockers;
+    this.#blockersMin = minHeight;
+    this.#blockers = this.obstacles.filter((o) => (o.height ?? 0) >= minHeight)
+      .map((o) => ({ x: o.x, z: o.z, radius: o.radius, halfX: o.halfX, halfZ: o.halfZ, top: world.heightAt(o.x, o.z) + o.height }));
+    return this.#blockers;
+  }
+
+  /** [N7-walls] Shapes a wall line stops at: tall obstacles (>= minHeight) and rifts, as { x, z, radius | halfX+halfZ } */
+  wallStops(minHeight) {
+    if (this.#stops && this.#stopsMin === minHeight) return this.#stops;
+    this.#stopsMin = minHeight;
+    const tall = this.obstacles.filter((o) => (o.height ?? 0) >= minHeight);
+    this.#stops = [...tall, ...this.rifts].map((o) => ({ x: o.x, z: o.z, radius: o.radius, halfX: o.halfX, halfZ: o.halfZ }));
+    return this.#stops;
+  }
+
+  #stops = null;
+  #stopsMin = -1;
+  #blockers = null;
+  #blockersMin = -1;
+
   /** True when a point is inside the map square */
   contains(x, z) { return Math.abs(x) <= this.half && Math.abs(z) <= this.half; }
 

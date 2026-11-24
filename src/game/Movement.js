@@ -5,6 +5,11 @@ import { clampToArea, confineUnits } from './PreBuild.js';
 import { collisionReach } from './Pathfinding.js';
 
 const DEG = Math.PI / 180;
+const MOVED = new Set();     // scratch of resolveCollisions (cleared at the start and the end of each call)
+const IGNORE = [];           // scratch of followPath: [unit, ...ignore], read by findPath / shapesFor at once
+const FIND_OPTS = {          // scratch options of followPath's findPath call (findPath only destructures them)
+  radius: 0, ignore: IGNORE, crossRift: false, flyRange: 0, flyPenalty: 0, hopRange: 0, hopPenalty: 0, body: null,
+};
 
 /**
  * Pushes overlapping units apart (circles of unit.radius on the ground plane).
@@ -12,7 +17,8 @@ const DEG = Math.PI / 180;
  * @param {Array} units  mechs and crews currently in the world
  */
 export function resolveCollisions(units, world) {
-  const moved = new Set();
+  const moved = MOVED;
+  moved.clear();
   for (let i = 0; i < units.length; i++) {
     const a = units[i];
     if (a.inFlight) continue; // [R2] jet flight – nobody collides with it until it lands
@@ -49,6 +55,7 @@ export function resolveCollisions(units, world) {
     if (u.airborne) u.snapToGround(); // [N7] keeps its altitude over the new spot
     else if (!u.hopping) u.position.y = world.heightAt(u.position.x, u.position.z); // [R2] a hop keeps its arc height
   }
+  moved.clear();
 }
 
 // [N7] Straight-line "path" of an aircraft (no pathfinding, flies over everything); one object reused – callers read
@@ -90,6 +97,14 @@ export function canCrossRift(unit) {
   return MAPS.ascii.riftMovementTypes.includes(unit.stats?.mobility?.movementType);
 }
 
+// [unit, ...ignore] in the recycled IGNORE array (valid until the next call; callers use it at once)
+function ignoreList(unit, ignore) {
+  IGNORE.length = 0;
+  IGNORE.push(unit);
+  for (let i = 0; i < ignore.length; i++) IGNORE.push(ignore[i]);
+  return IGNORE;
+}
+
 /**
  * Steers a unit along a planned path to a goal (world.nav, see Pathfinding.js).
  * The plan is stored on the order (order.nav) and refreshed when obstacles change, or – for a moving
@@ -107,6 +122,12 @@ export function canCrossRift(unit) {
  *   The returned object is reused – read it at once, never keep it.
  */
 export function followPath(unit, order, goal, ignore, dt) {
+  // Formation speed limit (order.maxSpeed, set by unitCommands for shaped formations): the unit's own code
+  // accelerates by acceleration × dt right after this call, so clamp one step below the limit to end exactly on it
+  if (order.maxSpeed !== undefined) {
+    const limit = Math.max(0, order.maxSpeed - (unit.stats?.mobility?.acceleration ?? 0) * dt);
+    if (unit.speed > limit) unit.speed = limit;
+  }
   if (unit.airborne) return airPath(unit, goal); // [N7] aircraft fly straight
   const nav = unit.world.nav;
   // [N8] pre-build phase: a goal outside the unit's start square becomes the nearest point inside it (the copy lives
@@ -119,13 +140,15 @@ export function followPath(unit, order, goal, ignore, dt) {
   const replan = !plan || plan.version !== nav.version
     || (plan.timer <= 0 && goalMoved >= PATHFINDING.repathMoveThreshold);
   if (replan) {
-    const res = nav.findPath(unit.position, goal, {
-      radius: unit.radius, ignore: [unit, ...ignore], crossRift: canCrossRift(unit),
-      // [R2] null / undefined ability = cannot fly / hop
-      flyRange: unit.flightAbility?.range ?? 0, flyPenalty: JUMP_JET.flight.pathPenalty,
-      hopRange: unit.hopAbility?.range ?? 0, hopPenalty: JUMP_JET.hop.pathPenalty,
-      body: unit, // [W7] obstacles inflated by the unit's circle that touches them (mech: shoulders / legs)
-    });
+    const opts = FIND_OPTS;
+    opts.radius = unit.radius; opts.ignore = ignoreList(unit, ignore); opts.crossRift = canCrossRift(unit);
+    // [R2] null / undefined ability = cannot fly / hop
+    opts.flyRange = unit.flightAbility?.range ?? 0; opts.flyPenalty = JUMP_JET.flight.pathPenalty;
+    opts.hopRange = unit.hopAbility?.range ?? 0; opts.hopPenalty = JUMP_JET.hop.pathPenalty;
+    opts.body = unit; // [W7] obstacles inflated by the unit's circle that touches them (mech: shoulders / legs)
+    const res = nav.findPath(unit.position, goal, opts);
+    opts.body = null; // (do not keep the unit alive)
+    IGNORE.length = 0; // (nor the unit and its targets in the recycled ignore list)
     plan = order.nav = {
       waypoints: res.waypoints,
       goalFly: res.goalFly, // [R2] the last leg (to the goal) is a flight / a hop
@@ -145,9 +168,10 @@ export function followPath(unit, order, goal, ignore, dt) {
   while (wp.length) {
     const near = Math.hypot(wp[0].x - unit.position.x, wp[0].z - unit.position.z) <= PATHFINDING.waypointReach;
     const next = wp[1] ?? end;
-    if (near || nav.segmentClear(unit.position, next, nav.shapesFor(unit.radius, [unit, ...ignore], canCrossRift(unit), unit))) wp.shift();
+    if (near || nav.segmentClear(unit.position, next, nav.shapesFor(unit.radius, ignoreList(unit, ignore), canCrossRift(unit), unit))) wp.shift();
     else break;
   }
+  IGNORE.length = 0;
 
   const point = wp[0] ?? end;
   const fly = wp.length ? wp[0].fly === true : plan.goalFly === true;

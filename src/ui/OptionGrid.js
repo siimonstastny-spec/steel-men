@@ -58,7 +58,7 @@ export class OptionGrid {
       if (!it) { cells.push('<button class="hud-cell empty" tabindex="-1"></button>'); continue; }
       const cls = ['hud-cell', it.on ? 'on' : '', it.pending ? 'pending' : ''].join(' ');
       cells.push(`<button class="${cls}" data-i="${i}" title="${esc(it.tip)}" ${it.disabled ? 'disabled' : ''}>`
-        + `<span class="ico">${esc(it.icon)}</span><span class="lbl">${esc(it.label)}</span>`
+        + `<span class="ico">${it.iconUrl ? `<img class="ico-img" src="${esc(it.iconUrl)}" alt="">` : esc(it.icon)}</span><span class="lbl">${esc(it.label)}</span>`
         + (it.hotkey ? `<kbd>${esc(it.hotkey)}</kbd>` : '') + '</button>');
     }
     const head = title || back
