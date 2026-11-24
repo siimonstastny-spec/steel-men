@@ -1,4 +1,4 @@
-// Steel Mans AI – production: vehicles (trucks, builders, combat vehicles), crews for every robot, robot parts and
+// Steel Men AI – production: vehicles (trucks, builders, combat vehicles), crews for every robot, robot parts and
 // their assembly. Robots are planned as loadouts ("plans") scored from the part stats of what the team may make
 // now (data/ai/armies.json: role weights, cost limits, score weights) – no part or faction names in the code.
 // Everything is queued through the production commands after world.production.check() says they can run; the

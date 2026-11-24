@@ -1,4 +1,4 @@
-// Steel Mans AI – army: crews board empty robots, new robots get their stance / behaviour, the army waits at the
+// Steel Men AI – army: crews board empty robots, new robots get their stance / behaviour, the army waits at the
 // rally point in front of the base, defends the base when Strategy says so and attacks in waves:
 //   gather at the rally point → attack-move to the target → new target when it is reached → retreat when the wave
 //   lost too much strength (retreatRatio). Target: the best known enemy building (threat and distance, any number

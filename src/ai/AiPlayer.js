@@ -1,4 +1,4 @@
-// Steel Mans AI – one computer-controlled team (docs/AI.md, docs/notes/ai-core.md).
+// Steel Men AI – one computer-controlled team (docs/AI.md, docs/notes/ai-core.md).
 //
 //   const ai = new AiPlayer({ world, commandBus, team, race, difficulty: 'easy'|'normal'|'hard', unlocks, allies })
 //   ai.update(simTimeSeconds)   – call after each simulation tick (or less often); it thinks on its own intervals

@@ -1,4 +1,4 @@
-// Steel Mans – načítání GLB s cache – SIT
+// Steel Men – načítání GLB s cache – SIT
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MODELS_BASE, MODEL_ENCODING, BASE64_MODEL_SUFFIX, MODEL_TEXTURE_FIX, MODEL_GEOMETRY_FIX } from '../config.js';

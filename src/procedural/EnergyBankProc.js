@@ -1,4 +1,4 @@
-// Steel Mans – procedural energy bank (accumulator). A drop-in alternative to
+// Steel Men – procedural energy bank (accumulator). A drop-in alternative to
 // models/3DStructures{race}/EnergyBank{race}_Anim.glb built in code from the style modules (ProcModules.js) and the
 // faction style (data/buildingStyles.json):
 //   • footprint: pad ±6.9 × ±6.9 around the model origin (GLB: ±8 / ±8 / ±6.98 for the three races), front = +Z
@@ -17,6 +17,7 @@ import { PartBuilder, Blinker } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   spike, pipeRun, chimney, laserLink, arcGeometry, ArcFlicker, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES,
+  teamTrim, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -58,6 +59,19 @@ const DETAIL = {
   bus: { neonH: 0.06, neonT: 0.06, beaconInset: 0.3 },
   spike: { h: 0.8, r: 0.22, inset: 0.28 },
   crystal: { stretch: 2.4, tipLift: 1.25, halo: 1.1 },
+};
+
+/**
+ * Team paint (large surfaces, visible from the RTS camera down to LOD2; docs/notes/proc-teampaint-c.md): the platform top / stage,
+ * collars, caps and the bus bar are team paint (S.teamPaint / S.teamShade), plus a lip round the base and a roof mark by silhouette.
+ */
+const TEAM = {
+  detail: 2,              // coarsest LOD the team surfaces still appear in
+  slab: { t: 0.05, lift: 0.03, inset: 0.6 },   // rounded: team slab on the plinth top, neutral rim kept round it
+  trimH: 0.6,             // lip height (× style.teamPaint.trim)
+  trimOut: 0.6,           // angular: lip round the base, outside the base footprint
+  ringOut: 0.05,          // round: lip ring radius beyond the disc
+  mark: { z: -3.6, w: 7, d: 3.2 },   // faceted: roof mark on the stage behind the columns
 };
 
 /** Cell column kinds: how one slice looks (code knows shapes, the style data picks one through the body) */
@@ -190,15 +204,16 @@ BODIES.rounded = (c) => {
   pad(c);
   styledBox(b, kit, D.base.w, D.base.h, D.base.d, S.hullDark, { base: true, y: L.padH }, D.base.edge);
   const y1 = L.padH + D.base.h;
-  b.box(D.base.w * 0.96, DETAIL.band.h, DETAIL.band.t, S.team, { y: L.padH + D.base.h * 0.5, z: D.base.d / 2 + DETAIL.band.t / 2 });
-  for (const [x, z] of D.col.cols) b.cylinder(D.col.r + D.collar.over, D.col.r + D.collar.over, D.collar.h, SLICE_SEGMENTS, S.frame, { x, y: y1 + D.collar.h / 2, z });
+  const Tm = TEAM.slab;   // team slab over the plinth top (the neutral rim stays round it)
+  b.box(D.base.w - 2 * Tm.inset, Tm.t, D.base.d - 2 * Tm.inset, S.teamPaint, { y: y1 + Tm.lift + Tm.t / 2, detail: TEAM.detail });
+  for (const [x, z] of D.col.cols) b.cylinder(D.col.r + D.collar.over, D.col.r + D.collar.over, D.collar.h, SLICE_SEGMENTS, S.teamShade, { x, y: y1 + D.collar.h / 2, z, detail: TEAM.detail });
   const top = columns(c, y1 + D.collar.h, D.col);
   for (const [x, z] of D.col.cols) {
-    b.cylinder(D.col.r + D.cap.over, D.col.r + D.cap.over, D.cap.h, SLICE_SEGMENTS, S.frame, { x, y: top + D.cap.h / 2, z });
+    b.cylinder(D.col.r + D.cap.over, D.col.r + D.cap.over, D.cap.h, SLICE_SEGMENTS, S.teamPaint, { x, y: top + D.cap.h / 2, z, detail: TEAM.detail });
     neonRing(c, D.col.r + D.cap.over, top + D.cap.h * 0.2);
   }
   const by = top + D.cap.h + D.bus.lift;
-  b.box(D.bus.w, D.bus.h, D.bus.d, S.frame, { y: by, z: D.bus.z });
+  b.box(D.bus.w, D.bus.h, D.bus.d, S.teamPaint, { y: by, z: D.bus.z, detail: TEAM.detail });
   if (neon) neonStrip(b, kit, D.bus.w, DETAIL.bus.neonH, DETAIL.bus.neonT, { y: by + D.bus.h / 2 + DETAIL.bus.neonH / 2, z: D.bus.z });
   for (const x of D.bus.x) beacon(b, glows.get('beaconA'), kit, [x, by + D.bus.h / 2, D.bus.z]);
 
@@ -227,17 +242,17 @@ BODIES.angular = (c) => {
   pad(c);
   const Bs = D.base;
   b.box(Bs.w, Bs.h, Bs.d, S.lower, { base: true, y: L.padH });
-  b.taperedBox(Bs.taperW, Bs.taperTop, Bs.taperH, Bs.taperW, S.hull, { y: L.padH + Bs.h }, Bs.taperTop);
+  b.taperedBox(Bs.taperW, Bs.taperTop, Bs.taperH, Bs.taperW, S.teamPaint, { y: L.padH + Bs.h, detail: TEAM.detail }, Bs.taperTop);   // sloped plinth top = team paint
   const y1 = L.padH + Bs.h + Bs.taperH;
-  b.box(Bs.w * 0.95, DETAIL.band.h, DETAIL.band.t, S.team, { y: L.padH + D.bandY, z: Bs.d / 2 + DETAIL.band.t / 2 });
+  teamTrim(b, kit, { y: L.padH, w: Bs.w + TEAM.trimOut, d: Bs.d + TEAM.trimOut, h: TEAM.trimH });
   for (const [x, z] of D.col.cols) {
-    b.box(D.col.r * 2 + D.collar.over, D.collar.h, D.col.r * 2 + D.collar.over, S.hullDark, { base: true, x, y: y1, z });
+    b.box(D.col.r * 2 + D.collar.over, D.collar.h, D.col.r * 2 + D.collar.over, S.teamShade, { base: true, x, y: y1, z, detail: TEAM.detail });
   }
   const top = columns(c, y1 + D.collar.h, D.col);
   const cw = D.col.r * 2 + D.cap.over;
   const sp = DETAIL.spike;
   for (const [x, z] of D.col.cols) {
-    b.box(cw, D.cap.h, cw, S.hullDark, { base: true, x, y: top, z });
+    b.box(cw, D.cap.h, cw, S.teamPaint, { base: true, x, y: top, z, detail: TEAM.detail });
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) spike(b, kit, { x: x + sx * (cw / 2 - sp.inset), y: top + D.cap.h, z: z + sz * (cw / 2 - sp.inset), h: sp.h, r: sp.r });
     beacon(b, glows.get('beaconA'), kit, [x, top + D.cap.h, z]);
   }
@@ -260,9 +275,9 @@ BODIES.round = (c) => {
   const { b, S, kit, glows } = c;
   const neon = kit.style.neon >= L.neonMin;
   b.box(L.padHalf * 2, L.padH, L.padHalf * 2, S.ground, { base: true });
-  b.cylinder(D.disc.r, D.disc.r, D.disc.h, 48, S.hull, { y: L.padH + D.disc.h / 2 });
-  b.cylinder(D.tier.r, D.tier.r, D.tier.h, 40, S.hullDark, { y: L.padH + D.disc.h + D.tier.h / 2 });
-  b.torus(D.disc.r, DETAIL.band.h * 0.4, 4, D.ring.seg, TAU, S.team, { rx: Math.PI / 2, y: L.padH + D.disc.h / 2 });
+  b.cylinder(D.disc.r, D.disc.r, D.disc.h, 48, S.teamShade, { y: L.padH + D.disc.h / 2, detail: TEAM.detail });
+  b.cylinder(D.tier.r, D.tier.r, D.tier.h, 40, S.teamPaint, { y: L.padH + D.disc.h + D.tier.h / 2, detail: TEAM.detail });
+  teamTrim(b, kit, { y: L.padH, r: D.disc.r + TEAM.ringOut, h: TEAM.trimH });
   if (neon) b.torus(D.ring.r, D.ring.tube, 4, D.ring.seg, TAU, S.neon, { rx: Math.PI / 2, y: L.padH + D.disc.h });
   const y1 = L.padH + D.disc.h + D.tier.h;
   const top = columns(c, y1, D.col);
@@ -299,16 +314,17 @@ BODIES.faceted = (c) => {
   const neon = kit.style.neon >= L.neonMin;
   b.box(L.padHalf * 2, L.padH, L.padHalf * 2, S.ground, { base: true });
   const St = D.stage;
-  b.cylinder(St.rTop, St.rBottom, St.h, St.segments, S.hullDark, { y: L.padH + St.h / 2, ry: Math.PI / St.segments });
+  b.cylinder(St.rTop, St.rBottom, St.h, St.segments, S.teamPaint, { y: L.padH + St.h / 2, ry: Math.PI / St.segments, detail: TEAM.detail });
   if (neon) b.torus(St.rTop, St.neonTube, 4, St.segments * 2, TAU, S.neon, { rx: Math.PI / 2, y: L.padH + St.h });
   const y1 = L.padH + St.h;
-  for (const [x, z] of D.col.cols) b.box(D.collar.w, D.collar.h, D.collar.w, S.frame, { x, y: y1 + D.collar.h / 2, z, ry: Math.PI / 4 });
+  roofMark(b, kit, { y: y1, z: TEAM.mark.z, w: TEAM.mark.w, d: TEAM.mark.d });
+  for (const [x, z] of D.col.cols) b.box(D.collar.w, D.collar.h, D.collar.w, S.teamShade, { x, y: y1 + D.collar.h / 2, z, ry: Math.PI / 4, detail: TEAM.detail });
   const top = columns(c, y1 + D.collar.h, D.col);
   const tips = [];
   const Cr = D.crystal;
   const Dc = DETAIL.crystal;
   D.col.cols.forEach(([x, z], i) => {
-    b.box(D.cap.w, D.cap.h, D.cap.w, S.frame, { x, y: top + D.cap.h / 2, z, ry: Math.PI / 4 });
+    b.box(D.cap.w, D.cap.h, D.cap.w, S.teamPaint, { x, y: top + D.cap.h / 2, z, ry: Math.PI / 4, detail: TEAM.detail });
     const ty = top + D.cap.h + Dc.tipLift;
     if (i === 1) {   // the middle one floats (animated part)
       c.crystal = { x, y: ty + Cr.floatLift, z, size: Cr.size, stretch: Dc.stretch, amp: Cr.floatAmp };
@@ -328,7 +344,7 @@ BODIES.faceted = (c) => {
   const Po = D.post;
   for (const s of [-1, 1]) {
     const x = s * Po.x;
-    b.cylinder(Po.rTop, Po.rBottom, Po.h, 6, S.hullDark, { x, y: y1 + Po.h / 2, z: Po.z });
+    b.cylinder(Po.rTop, Po.rBottom, Po.h, 6, S.teamPaint, { x, y: y1 + Po.h / 2, z: Po.z, detail: TEAM.detail });
     b.sphere(Po.lensR, 8, 6, S.lens, { x, y: y1 + Po.h, z: Po.z });
     beacon(b, glows.get('beaconA'), kit, [x, y1 + Po.h + Po.lensR, Po.z]);
     const col = D.col.cols[s < 0 ? 0 : 2];

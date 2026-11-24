@@ -1,4 +1,4 @@
-// Steel Mans – [W5b] text of a resource amount / cap for the UI (HUD, statistics, tooltips, menus).
+// Steel Men – [W5b] text of a resource amount / cap for the UI (HUD, statistics, tooltips, menus).
 // An unlimited value (Infinity, the settings value ECONOMY.infinite, or the fixed amount of infinite resources
 // ECONOMY.infiniteAmount and above) reads "∞"; anything else is rounded down to a whole number.
 //

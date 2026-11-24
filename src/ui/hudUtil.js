@@ -1,4 +1,4 @@
-// Steel Mans – small helpers shared by the HUD panels
+// Steel Men – small helpers shared by the HUD panels
 import { HUD, TEAMS } from '../config.js';
 import { isLocal, localTeam } from '../core/LocalPlayer.js';
 import { areAllies } from '../game/Alliances.js';

@@ -1,4 +1,4 @@
-// Steel Mans – konfigurace modelů a socketů – SIT
+// Steel Men – konfigurace modelů a socketů – SIT
 
 export const MODELS_BASE = './models/';
 
@@ -9,7 +9,9 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v26';
+export const GAME_VERSION = 'v27';
+// Game name (brand, shown in the main menu title; not translated)
+export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
 // Model folders (path prefixes) whose textures were exported upside down (V flipped – round floor pads came out
 // inside out): the loader mirrors the texture transform once per model (src/core/AssetLoader.js), team colour copies
@@ -330,7 +332,7 @@ export const NET = {
   historyTurns: 600,         // executed turns kept for desyncReport() (60 s at the defaults)
   maxMessageBytes: 4096,     // room limit for one message (UTF-8 bytes of its JSON)
   messageHeadroomBytes: 384, // room left in a message for the header (acks, ping, hashes) when packing turns
-  maxCommandBytes: 1024,     // a bigger local command is refused (never sent, never executed)
+  maxCommandBytes: 2048,     // (~300 unit ids in one command; must fit one message part: maxMessageBytes - headroom) a bigger local command is refused (never sent, never executed)
   maxChunksPerSend: 4,       // a backlog of unacknowledged turns goes out in at most this many messages at once
   resendMs: 200,             // nothing sent for this long (stalled / waiting): resend the unacknowledged turns + acks
   maxTurnsAhead: 64,         // a received turn this far beyond the executed one is ignored (garbage / old match)
@@ -363,14 +365,14 @@ export const NET = {
   startRepeat: 3,            // the 'start' message is sent this many times…
   startRepeatMs: 300,        // …this far apart (lost messages)
   // BroadcastTransport (two tabs of one browser, local testing)
-  broadcastPrefix: 'steel-mans-net-',
+  broadcastPrefix: 'steel-men-net-',
   broadcastHeartbeatMs: 1000, // presence re-sent this often
   broadcastPeerTimeoutMs: 4000, // a tab silent for this long has left
   // Embedding in a foreign page (src/input/EmbedGuard.js, itch.io iframe): keys that would scroll the host page
   embedScrollKeys: ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'PageUp', 'PageDown', 'Home', 'End'],
   // P2PTransport (static web: WebRTC, signalling over public Nostr relays; vendor/trystero, docs/notes/p2p-transport.md)
   p2p: {
-    appId: 'steel-mans-rts-v1',  // Trystero namespace; change it when the wire format breaks (old clients never meet)
+    appId: 'steel-men-rts-v1',  // Trystero namespace; change it when the wire format breaks (old clients never meet)
     strategy: 'nostr',           // signalling strategy vendored in vendor/trystero/ (only 'nostr' is shipped)
     // wss:// signalling relays. Trystero's own default list is a random set of obscure relays (many dead), so we pin
     // well-known public ones; empty = Trystero's default list. Verify with relayCheck.js (docs/notes/g-web-iframe.md).
@@ -390,6 +392,10 @@ export const NET = {
     relayPollMs: 100,            // how often join() checks the relay sockets
     handshakeTimeoutMs: 10000,   // Trystero peer handshake after the data channel opened
     lobbyJoinTimeoutMs: 25000,   // transport.joinTimeoutMs hint: finding the host over relays + WebRTC takes 2–15 s
+    // [LOBBY_LIST] P2PSignalWatch: a peer that talks to us but sends no offer / answer this long = other password
+    passwordSuspectMs: 6000,
+    signalWatchMaxFrameChars: 65536, // relay frames longer than this are not inspected
+    signalWatchMaxPeers: 32,         // peers tracked by one watch
     stunUrls: [                  // public STUN (address discovery only, no traffic goes through them)
       'stun:stun.l.google.com:19302',
       'stun:stun1.l.google.com:19302',
@@ -399,6 +405,30 @@ export const NET = {
     topics: ['lobby', 'turn', 'hash', 'start', 'ready', 'chat'],// receivers registered as soon as a room is joined
     relayCheckTimeoutMs: 5000,   // relayCheck.js: a relay not answering a subscription (EOSE) by then counts as dead
     relayCheckKind: 20078,       // relayCheck.js: ephemeral event kind in the test subscription (any valid kind works)
+  },
+  // [LOBBY_LIST] list of open games over the same Nostr relays (src/net/LobbyDirectory.js, docs/notes/lobby-list.md)
+  directory: {
+    topicSuffix: 'lobby-dir-v1', // Nostr `x` tag = p2p.appId + ':' + this (ephemeral kind derived from it by Trystero)
+    relayCount: 6,               // first N relays of p2p.relayUrls (host and viewer use the same list)
+    announceMs: 8000,            // host of a public game re-announces this often
+    entryTtlMs: 25000,           // viewer drops an entry not refreshed for this long
+    sweepMs: 2000,               // viewer checks expiry (and refreshes its status line) this often
+    replyJitterMs: 800,          // host answers a viewer's query after a random 0..this ms (many hosts do not answer at once)
+    replyMinIntervalMs: 2000,    // ...and sends at most once per this interval (queries flood = no flood of answers)
+    offlineAfterMs: 8000,        // viewer: no relay open by then = "cannot reach the game list"
+    reconnectMinMs: 2000,        // relay socket reconnect backoff: first wait…
+    reconnectMaxMs: 30000,       // …doubling up to this
+    reconnectJitter: 0.5,        // + random 0..this share of the wait
+    maxEntries: 100,             // viewer keeps at most this many games (one per sender key; full = oldest refresh dropped)
+    tombstoneMs: 30000,          // viewer: after 'closed', a delayed older 'game' of that sender + code is ignored this long
+    maxContentChars: 1024,       // event content longer than this is ignored
+    maxFrameChars: 4096,         // relay frame longer than this is ignored before parsing
+    maxClockSkewS: 120,          // event created_at further than this from our clock is ignored (replays)
+    seenMax: 512,                // event ids remembered for dedup across relays
+    mapIdMaxLength: 64,
+    buildMaxLength: 16,          // GAME_VERSION string; another value = greyed out entry
+    subIdLength: 16,             // characters of our Nostr subscription id
+    keyChars: 16,                // entry.key = this many leading characters of the sender's pubkey (UI list key)
   },
 };
 // --- [NET] end ---
@@ -442,6 +472,13 @@ export const NET_LEAVE_WIN = {
 export const LOBBY = {
   codeMaxLength: 16,     // max characters of the join-code input
   copyFeedbackMs: 1500,  // how long the copy button shows "Copied"
+  // [LOBBY_LIST] game name, visibility, password (docs/notes/lobby-list.md)
+  nameMaxLength: 40,           // characters of a game name (lobby state, directory entry)
+  passwordMaxLength: 64,       // characters of a game password (Trystero `password`; never stored, never published)
+  visibilities: ['public', 'code'], // 'public' = in the game list (P2P only), 'code' = join by code only
+  defaultVisibility: 'public',
+  passwordGraceMs: 3000,       // join: after a "wrong password" signal, wait this long for the host state before failing
+  kickedMax: 32,               // host: at most this many kicked player ids kept in the lobby state (oldest dropped)
 };
 // --- [LOBBY] end ---
 // --- [AIMENU] computer player choice in New game and the lobby ---
@@ -1075,7 +1112,7 @@ export const PART_LABELS = {
  * (backgrounds, accents) is in src/ui/menu.css as CSS variables on #menu.
  */
 export const MENU = {
-  storageKey: 'steelMans.newGame',  // localStorage key of the last new-game choice
+  storageKey: 'steelMen.newGame',  // localStorage key of the last new-game choice
   // Default game rules of a new game (the last choice is remembered). Friendly fire options apply
   // only when enabled: artilleryOnly = only artillery/area hits hurt own units, reduced = lower damage.
   friendlyFire: { enabled: false, artilleryOnly: false, reduced: false },
@@ -1129,8 +1166,9 @@ export const MATCH_UI = {
 
 /** Local player profile (src/core/Profile.js): one localStorage key holding nickname, language, settings, last new game */
 export const PROFILE = {
-  storageKey: 'steelMans.profile',
-  legacyKeys: ['steelMans.newGame'], // older keys migrated into the profile (last new-game choice)
+  storageKey: 'steelMen.profile',
+  legacyProfileKey: 'steelMans.profile',                  // profile key of the game before the rename (taken over once, kept)
+  legacyKeys: ['steelMans.newGame', 'steelMen.newGame'], // older keys migrated into the profile (last new-game choice)
   version: 1,
   nicknameMaxLength: 24,
   defaultNickname: '',               // empty = UI shows the translated "Player"
@@ -1562,7 +1600,7 @@ export const START_SETS = {
 };
 
 /**
- * Test scene (main.js, only with ?test=1 or steelMans.startTestScene()): extra finished buildings the player gets
+ * Test scene (main.js, only with ?test=1 or steelMen.startTestScene()): extra finished buildings the player gets
  * so robot production can be tried at once (part factory + assembly bay). A normal start uses the start sets.
  */
 export const TEST_SCENE = {
@@ -1735,7 +1773,7 @@ export const PING = {
   alertDurationMs: 8000,
   alertMax: 3,                   // alerts shown at once
   // Lost part (arm shot off): event of ModularMech.onPartDamaged, badge above the robot, marker of the part on the minimap
-  partLostEvent: 'steelmans:partLost',
+  partLostEvent: 'steelmen:partLost',
   badgeText: '⚠',
   badgeDurationMs: 10000,
   badgeHeightOffset: 1.4,        // world units above the top of the robot
@@ -2104,7 +2142,7 @@ export const MECH_COLLISION = {
 
 // --- [18] procedural buildings (src/procedural, docs/notes/proc-style-kit.md) ---
 // A structure with a procedural model (src/procedural/registry.js) uses it instead of its GLB; the footprint still
-// comes from the GLB. `window.steelMans.procedural = false` (before a building loads) switches back for comparison.
+// comes from the GLB. `window.steelMen.procedural = false` (before a building loads) switches back for comparison.
 export const PROC_BUILDINGS = {
   enabled: true,
 };
@@ -2114,7 +2152,7 @@ export const PROC_BUILDINGS = {
 // building types, not buildings). LOD0 = everything incl. animated parts and glow meshes (a few buildings near the
 // camera), LOD1 = no small parts / animations / glow meshes, LOD2 = coarse silhouette. Visual only.
 export const BUILDING_LOD = {
-  enabled: true,             // false = every building keeps its own meshes (window.steelMans.batching = false does the same)
+  enabled: true,             // false = every building keeps its own meshes (window.steelMen.batching = false does the same)
   levels: 3,                 // LOD0..LOD2 (geometry sets built by PartBuilder.buildLods)
   // Part kept in LOD n when its largest side ≥ share × largest side of the whole building (explicit `detail` wins)
   partMinShare: [0, 0.02, 0.08],
@@ -2141,6 +2179,53 @@ export const BUILDING_LOD = {
 };
 // --- [18P] end ---
 
+// --- [18T] procedural buildings: faction emblem + team paint (src/procedural/ProcModules.js, docs/notes/proc-teamcolor-kit.md) ---
+// Emblem: the sign is always drawn on a NEUTRAL plate (part of the decal texture, 1 draw call); team paint never touches it.
+//   mode 'faction' = emblem in the faction logo colour (style.emblem.color, constant for every building of the race, the
+//   team colour does not repaint it); 'team' = emblem in the team colour (old behaviour). Read when a material is created
+//   (change it before the first building loads / reload the page). The plate colour is style.emblem.plate (dark | light).
+export const PROC_EMBLEM = {
+  mode: 'faction',          // 'faction' | 'team'
+  glyphFill: 0.74,          // share of the decal quad the sign itself covers (the rest is plate)
+  plate: {
+    grow: 1,                // decal quad size × this (1 = the placement `size`; > 1 makes the plate bigger than the old decal)
+    margin: 0.02,           // plate edge inset (share of the quad)
+    radius: 0.16,           // corner radius (share of the quad)
+    rim: 0.05,              // rim width (share of the quad)
+    alpha: 0.97,
+    dark: { base: '#15171b', rim: '#3d424b' },
+    light: { base: '#d6d8da', rim: '#8b9098' },
+  },
+  boost: { neon: 1.25, paint: 1 },   // faction colour multiplier (neon is unlit and tone-mapping is off; 'team' mode uses PROC_MODULES.emblem.neonBoost)
+};
+
+// Team paint: coloured surfaces of a building. They are ordinary vertices of the building's static geometry with the
+// team mask (aSurface.x = 1) of the shared paint shader → no extra draw call or material; the colour is uTeamColor /
+// the instance attribute aInst, so batching, LOD and staticOnly work unchanged and setTeamColor repaints everything.
+export const PROC_TEAM_PAINT = {
+  target: { min: 0.15, max: 0.30 },   // share of the visible surface area of a building painted in the team colour
+  paint: { metal: 0.15, rough: 0.38 },   // lacquer: lit, no emission
+  paintWhite: '#f2f2f2',              // diffuse of team paint (× team colour)
+  shadeWhite: '#b4b4b4',              // darker team paint (alternating stripes, panel cores)
+  // style.teamPaint is merged over these; mode → [stripe share, panel share] of the painted area (kit.team.mix)
+  defaults: { mode: 'mixed', share: 0.2, stripes: 2, stripeKind: 'band', panelKind: 'inset', banner: 'flag', trim: 1, roofMark: 1 },
+  modeMix: { stripes: [0.7, 0.3], panels: [0.3, 0.7], mixed: [0.5, 0.5] },
+  maxStripes: 6,
+  // coarsest BUILDING_LOD level the element still appears in (2 = even the far silhouette: team colour must read from the RTS camera)
+  lod: { stripe: 1, panel: 2, trim: 2, banner: 2, roofMark: 2 },
+  emblemClear: 0.15,                  // gap kept between team paint and an emblem decal (teamStripe `avoid`)
+  stripe: { depth: 0.05, gap: 0.3, fineShare: 0.3, slashWidth: 1.0, minSegment: 0.3 },   // gap = share of a band's height; slash = stripe width in heights
+  panel: { depth: 0.07, frame: 0.12, rivetR: 0.07, rivetInset: 0.22, lowerShare: 0.14, coreShare: 0.55, segments: 20 },
+  trim: { h: 0.22, t: 0.14, tubeSegments: 4, ringSegments: 40 },
+  banner: {
+    poleR: 0.07, poleSegments: 6, clothTopShare: 0.92,
+    flagLen: 0.5, flagH: 0.28, clothT: 0.05, pennantLen: 0.55, pennantH: 0.22, orbR: 0.1, finW: 0.3, finT: 0.06,
+  },
+  roofMark: { h: 0.12, frame: 0.12, chevronArm: 0.34, chevronAngle: 0.62, stripeShare: 0.12, discCore: 0.45, rhombusCore: 0.55, segments: 28 },
+  share: { downFacing: -0.5, teamMask: 0.5 },   // teamPaintShare(): skip triangles with normal.y below this; team = aSurface.x ≥ teamMask
+};
+// --- [18T] end ---
+
 // --- [F1] part stock window and selling parts (src/ui/StockWindow.js, src/game/commands/stockCommands.js, docs/notes/f1-inventory.md) ---
 export const PART_SALE = {
   commandType: 'sellPart',           // { type, team, path, count } – count 1..stock
@@ -2165,3 +2250,21 @@ export const ICON_RENDERER = {
   sun: { color: 0xfff1dc, intensity: 2.6, pos: [-1.2, 2, 1.4] },
   emblemColorFallback: '#ffffff',
 };
+
+// --- [GENBLAST] death blast of a power generator (Combat.structureBlast; balance in stats.json structures.powerGenerator.explosion) ---
+export const GENERATOR_BLAST = {
+  delay: 0.4,                 // s between the building being destroyed and the blast (chains ripple from generator to generator)
+  visualSizePerRadius: 0.07,  // effect size = blast radius × this (VFX layers are made for size 1 ≈ fireball radius 15)
+  heightUnit: 8,              // layer heights (VFX `height`) × this = units above the reactor centre
+  layers: [
+    { model: 'fireBall', duration: 1.4, scaleFrom: 0.3, scaleTo: 2.0, opacityFrom: 1, opacityTo: 0, height: 0.5, spin: 2, scroll: 0.6 },
+    { model: 'fireBall', delay: 0.3, duration: 1.1, scaleFrom: 0.2, scaleTo: 1.5, opacityFrom: 0.9, opacityTo: 0, height: 1.5, spin: -3, scroll: 0.8 },
+    { model: 'shockDome', duration: 1.0, scaleFrom: 0.2, scaleTo: 2.6, opacityFrom: 0.6, opacityTo: 0, height: 0, flatten: 0.3 },
+    { model: 'spiral', delay: 0.1, duration: 1.8, scaleFrom: 0.4, scaleTo: 1.4, opacityFrom: 0.8, opacityTo: 0, height: 0, spin: 4, scroll: 1 },
+  ],
+};
+// --- [GENBLAST] end ---
+// --- [LOBBY_LIST] last multiplayer game setup (Profile.js getLobbyPrefs / saveLobbyPrefs); the password is never stored ---
+// name: null = default t('lobby.defaultName', {name}) that follows the current nickname; visibility: one of LOBBY.visibilities
+SETTINGS_DEFAULTS.lobby = { name: null, visibility: LOBBY.defaultVisibility };
+// --- [LOBBY_LIST] end ---

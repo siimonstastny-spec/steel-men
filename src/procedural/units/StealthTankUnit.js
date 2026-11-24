@@ -1,4 +1,4 @@
-// Steel Mans – procedural stealth tank (roadmap U3). Low, flat hull with diamond-section side pods, snub plasma gun and
+// Steel Men – procedural stealth tank (roadmap U3). Low, flat hull with diamond-section side pods, snub plasma gun and
 // a dim "cloak emitter" ring on the turret base. The camouflage itself is the owner's call: setCloaked(0..1) fades the
 // hull to style.unit.cloak.minOpacity, hides glow / emblem / shadow (kit); setStatus('cloaked') = blue lamp.
 // Shape by style.silhouette (never by faction name): rounded / angular = tracked, round / faceted = hover.
@@ -6,6 +6,7 @@
 // Registered as 'stealthTank'. No per-frame code of its own.
 import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
 import { hull, tracks, hover, turret, weapon, exhaust, statusLamp, prism } from './UnitModules.js';
+import { skirtTeamRim, teamDeck } from './LightPlasmaTankUnit.js';   // shared team helpers (skirt rim, deck marks)
 
 const HALF_PI = Math.PI / 2;
 const BASE = {
@@ -52,21 +53,23 @@ function build(kit) {
   if (s.chassis === 'hover') {
     ub.bone('hull', 'root', [0, L * P.gap, 0]);
     base = hover(ub, { bone: 'hull', L: L * P.skirtL, W: W * P.skirtW, skirtH: L * P.skirtH, pads: P.pads.map(([x, z]) => [x * W, z * L]) });
+    skirtTeamRim(ub, { y: base, w: W * P.skirtW, d: L * P.skirtL });
   } else {
     const th = L * P.th;
-    tracks(ub, { L, gauge: W * P.gauge, tw: W * P.tw, th });
+    tracks(ub, { L, gauge: W * P.gauge, tw: W * P.tw, th, team: true });
     ub.bone('hull', 'root', [0, th * P.hullLift, 0]);
     ub.meta.hull = { bone: 'hull', bank: false };
   }
-  const hl = hull(ub, { bone: 'hull', y: base, L: L * P.hullL, W, H });
+  const hl = hull(ub, { bone: 'hull', y: base, L: L * P.hullL, W, H, team: true });
+  teamDeck(ub, { top: hl.top, hullLen: L * P.hullL, L, W });
   const t = s.turret;
-  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h });
+  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
   weapon(ub, 'plasma', {
     parent: 'turret', position: [0, tr.mid, tr.front * WEAPON_MOUNT], length: s.gun.length, caliber: s.gun.caliber, pitch: s.gun.pitch,
   });
   const g = ub.glow('hull');
   for (const side of [1, -1]) {
-    prism(ub.paint('hull'), 4, POD.size, POD.size, L * POD.l, kit.S.hullDark, { x: side * (W / 2 + POD.out), y: base + H * POD.y, z: L * POD.z });
+    prism(ub.paint('hull'), 4, POD.size, POD.size, L * POD.l, kit.S.teamShade, { x: side * (W / 2 + POD.out), y: base + H * POD.y, z: L * POD.z });
     g.point([side * W * EYE.x, base + H * EYE.y, L * EYE.z], EYE.r, ub.style.weaponGlow, { intensity: EYE.intensity });
   }
   ub.glow('turret').torus(t.w * RING.r, RING.tube, RING.radial, RING.seg, ub.style.hoverGlow, { rx: HALF_PI, y: RING.y, intensity: RING.intensity });

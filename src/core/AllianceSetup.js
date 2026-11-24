@@ -1,4 +1,4 @@
-// Steel Mans – helpers for the alliance choice in the menus (new game and lobby). Pure functions, no DOM.
+// Steel Men – helpers for the alliance choice in the menus (new game and lobby). Pure functions, no DOM.
 // An alliance layout is an array indexed by seat: alliances[seat] = alliance id (number). Seats with the same id are
 // allies. The simulation gets the normalised layout (src/game/Alliances.js setAlliances), see docs/notes/n5-contract.md.
 import { PLAYERS_UI } from '../config.js';

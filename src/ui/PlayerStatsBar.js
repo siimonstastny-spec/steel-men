@@ -1,4 +1,4 @@
-// Steel Mans – short player statistics above the minimap (docs/notes/b4-diplomacy.md). One row per team of the
+// Steel Men – short player statistics above the minimap (docs/notes/b4-diplomacy.md). One row per team of the
 // match, grouped by alliance: colour, name, solo value, team (alliance) value; a defeated team is struck through.
 // Value = MatchStats.score / allianceScore (weights PLAYER_STATS_BAR.score). UI only, never touches the simulation.
 //

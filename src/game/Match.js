@@ -1,4 +1,4 @@
-// Steel Mans – the running match: checks the chosen victory condition a few times per second, handles surrender
+// Steel Men – the running match: checks the chosen victory condition a few times per second, handles surrender
 // and keeps the statistics (MatchStats). One instance per game (created by main.js after the scene is built).
 //
 // The match is part of the simulation: it never reads the local player. Every team is evaluated the same way, so all

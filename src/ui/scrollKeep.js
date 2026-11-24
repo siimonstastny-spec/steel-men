@@ -1,4 +1,4 @@
-// Steel Mans – keeps scroll positions when a panel's markup is rewritten (innerHTML collapses the content, the
+// Steel Men – keeps scroll positions when a panel's markup is rewritten (innerHTML collapses the content, the
 // browser clamps scrollTop to 0 and the list "jumps to the top" on every refresh).
 //   setHtmlKeepScroll(el, html)
 // Remembered before the rewrite and restored after it (the browser clamps to the new maximum, so a vanished row

@@ -1,4 +1,4 @@
-// Steel Mans – view adapter of the local player's production queues for the HUD (queue strip) and UnitOverlays
+// Steel Men – view adapter of the local player's production queues for the HUD (queue strip) and UnitOverlays
 // (progress bar at the producer). The queues themselves live in the simulation (world.production,
 // src/game/Production.js); this only reads them for localTeam(), adds display label / icon, and turns a cancel
 // click into a 'cancelProduction' command. View items are cached per sim item id, so they stay the same object

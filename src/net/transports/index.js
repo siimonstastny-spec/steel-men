@@ -1,6 +1,8 @@
-// Steel Mans – multiplayer transport factory (docs/MULTIPLAYER.md, "Transport").
+// Steel Men – multiplayer transport factory (docs/MULTIPLAYER.md, "Transport").
 //   const t = await createTransport()   // RoomTransport inside a claude.ai artifact, else P2PTransport (WebRTC)
-//   t.kind ('room' | 'p2p' | 'broadcast'), t.selfId, await t.join(name) -> channel
+//   t.kind ('room' | 'p2p' | 'broadcast'), t.selfId, await t.join(name, { password }?) -> channel
+//   [LOBBY_LIST] password is enforced only by P2P (room / broadcast accept and ignore it); the game list
+//   (src/net/LobbyDirectory.js) exists only for P2P: supportsDirectory(t)
 //   channel: selfId, send(topic, data), on(topic, fn({from, data})) -> unsubscribe, peers() -> [{id, presence, isMe}],
 //            onPeers(fn({peers, joined, left, updated})) -> unsubscribe, setPresence(obj), leave()
 // URL ?net=broadcast forces the local transport (two tabs), ?net=p2p forces WebRTC (also inside an artifact / on
@@ -22,6 +24,9 @@ const isLocalDev = () => LOCAL_HOSTS.has(globalThis.location?.hostname ?? '');
 
 const broadcast = () => (BroadcastTransport.available() ? new BroadcastTransport() : null);
 
+/** [LOBBY_LIST] Does this transport take part in the public game list (and enforce passwords)? Only P2P. */
+export const supportsDirectory = (transport) => transport?.kind === 'p2p';
+
 /** true inside a claude.ai artifact (the platform's `claude` runtime is present) */
 export const inArtifact = () => typeof globalThis.claude?.use === 'function';
 
@@ -39,9 +44,9 @@ export function getNetDiagnosis() { return lastDiagnosis; }
 /** Records what a join found: peers (others) seen in the room when we left it, and the join error code. */
 function instrument(transport, diag) {
   const join = transport.join.bind(transport);
-  transport.join = async (name) => {
+  transport.join = async (name, opts) => { // [LOBBY_LIST] opts ({ password }) passed through
     let ch;
-    try { ch = await join(name); } catch (e) { diag.joinError = String(e?.code ?? e?.message ?? e); throw e; }
+    try { ch = await join(name, opts); } catch (e) { diag.joinError = String(e?.code ?? e?.message ?? e); throw e; }
     if (!ch.diagWrapped) {
       ch.diagWrapped = true;
       const leave = ch.leave.bind(ch);

@@ -1,4 +1,4 @@
-// Steel Mans – fog of war for EVERY team (the simulation uses it, so it must be deterministic).
+// Steel Men – fog of war for EVERY team (the simulation uses it, so it must be deterministic).
 //
 // Per team, a grid of FOG.cellSize cells over the map remembers which cells were ever seen (explored) and which
 // are in sight of an own unit right now (visible). All teams are recomputed together every FOG.updateInterval

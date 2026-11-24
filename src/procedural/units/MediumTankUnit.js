@@ -1,10 +1,10 @@
-// Steel Mans – procedural medium tank (roadmap U1). Balanced tracked tank: wider and longer than the light tank, taller
+// Steel Men – procedural medium tank (roadmap U1). Balanced tracked tank: wider and longer than the light tank, taller
 // turret with a rear bustle, one main cannon. The file belongs to one faction look only: the shape table is keyed by
 // style.silhouette and has just the `rounded` entry (every other style falls back to it – shape, not names).
 //   • sockets: muzzle, turret, aim, cargo, smoke; bones: hull, turret, barrel, recoil, flash, tracks (see proc-unit-kit.md)
 // Model units (before VEHICLE.modelScale × stats.modelScale): ≈ 7.0 long, 3.7 wide, 3.1 high. Visual only.
 import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
-import { hull, tracks, turret, weapon, statusLamp } from './UnitModules.js';
+import { hull, tracks, turret, weapon, statusLamp, teamPanel } from './UnitModules.js';
 
 /** Shape by style.silhouette (unknown → rounded); sizes in model units */
 export const MEDIUM_TANK_SHAPES = {
@@ -17,7 +17,9 @@ export const MEDIUM_TANK_SHAPES = {
 
 const CHASSIS = { gauge: 0.88, tw: 0.26, th: 0.14, hullLift: 0.95, hullL: 0.92 };   // shares of L / W
 const BUSTLE = { w: 0.8, h: 0.6, d: 0.7, y: 0.5, z: -0.62 };    // turret rear box: shares of turret w / h / d, centre height share, z share of d
-const STOWAGE = { w: 0.22, h: 0.18, d: 0.32, x: 0.5, y: 0.78, z: -0.2 };   // hull side boxes: shares of W / H / L (x, y, z = centre offsets)
+const TEAM_DETAIL = 2;       // team-painted bustle kept down to the far LOD (as the kit's team panels)
+const BUSTLE_PANEL ={ w: 0.6, h: 0.6 };   // team panel on the bustle's rear face: shares of the bustle width / height
+const STOWAGE ={ w: 0.22, h: 0.18, d: 0.32, x: 0.5, y: 0.78, z: -0.2 };   // hull side boxes: shares of W / H / L (x, y, z = centre offsets)
 const WEAPON_MOUNT = 0.85;   // trunnion z = turret front × this
 const SOCKET_AIM = 0.5;      // aim socket at hull top + turret height × this
 const SMOKE_Z = 0.45;        // smoke socket behind the centre, share of the hull length
@@ -30,17 +32,23 @@ function buildMediumTank(kit) {
   const { L, W, H } = s;
   const ub = new UnitBuilder(kit);
   const th = L * P.th;
-  tracks(ub, { L, gauge: W * P.gauge, tw: W * P.tw, th });
+  // team colour: module team layouts (skirts, deck stripes / plates, roof mark, emblems on plates) + bustle panel
+  tracks(ub, { L, gauge: W * P.gauge, tw: W * P.tw, th, team: true });
   ub.bone('hull', 'root', [0, th * P.hullLift, 0]);
   ub.meta.hull = { bone: 'hull', bank: false };
-  const hl = hull(ub, { bone: 'hull', y: 0, L: L * P.hullL, W, H });
+  const hl = hull(ub, { bone: 'hull', y: 0, L: L * P.hullL, W, H, team: true });
   // hull stowage boxes (cheap plain boxes over the track tops)
   const S = kit.S;
   const hb = ub.paint('hull');
-  for (const side of [1, -1]) hb.box(W * STOWAGE.w, H * STOWAGE.h, L * STOWAGE.d, S.hullDark, { x: side * W * STOWAGE.x, y: H * STOWAGE.y, z: L * STOWAGE.z });
+  // stowage in the darker team lacquer: the hull's deck stripe runs into it (it covers the stripe's rear part)
+  for (const side of [1, -1]) hb.box(W * STOWAGE.w, H * STOWAGE.h, L * STOWAGE.d, S.teamShade, { x: side * W * STOWAGE.x, y: H * STOWAGE.y, z: L * STOWAGE.z });
   const t = s.turret;
-  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h });
-  ub.paint('turret').box(t.w * BUSTLE.w, t.h * BUSTLE.h, t.d * BUSTLE.d, S.hull, { y: t.h * BUSTLE.y, z: t.d * BUSTLE.z });
+  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
+  // bustle in the darker team lacquer (its top reads from the RTS camera behind the roof mark), team panel on its rear face
+  ub.paint('turret').box(t.w * BUSTLE.w, t.h * BUSTLE.h, t.d * BUSTLE.d, S.teamShade, { y: t.h * BUSTLE.y, z: t.d * BUSTLE.z, detail: TEAM_DETAIL });
+  teamPanel(ub, 'turret', t.w * BUSTLE.w * BUSTLE_PANEL.w, t.h * BUSTLE.h * BUSTLE_PANEL.h, {
+    y: t.h * BUSTLE.y, z: t.d * (BUSTLE.z - BUSTLE.d / 2), ry: Math.PI,
+  });
   weapon(ub, 'cannon', {
     parent: 'turret', position: [0, tr.mid, tr.front * WEAPON_MOUNT], length: s.gun.length, caliber: s.gun.caliber, pitch: s.gun.pitch,
   });

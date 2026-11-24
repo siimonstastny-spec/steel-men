@@ -1,4 +1,4 @@
-// Steel Mans – game speed [N4] (docs/notes/n4-clock.md). Speed only changes how many fixed simulation ticks run per
+// Steel Men – game speed [N4] (docs/notes/n4-clock.md). Speed only changes how many fixed simulation ticks run per
 // real second (main.js: simAccumulator += dt * gameSpeed.value); the step 1 / SIM.tickRate is never scaled, so the
 // simulation stays deterministic. Single player: the in-game menu sets it directly. Multiplayer: only the host
 // asks (Lockstep.requestSpeed); every client applies the same change before the same tick (Lockstep, control

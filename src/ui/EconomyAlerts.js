@@ -1,4 +1,4 @@
-// Steel Mans – economy alerts at the top of the screen (below the pre-build banner, never overlapping it):
+// Steel Men – economy alerts at the top of the screen (below the pre-build banner, never overlapping it):
 //   - no HQ (main building): mining and energy income only 10 %
 //   - low energy: towers off, production slowed
 // Local player only; hidden for spectators and after the match ended. Refreshes on an interval (no per-frame DOM work).

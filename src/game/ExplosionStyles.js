@@ -1,4 +1,4 @@
-// Steel Mans – unit death explosions: data (data/explosions.json) resolved per unit kind x race, plus a batched
+// Steel Men – unit death explosions: data (data/explosions.json) resolved per unit kind x race, plus a batched
 // particle field (three InstancedMeshes: glow / smoke / debris). Visual only: uses its own seeded generator,
 // never world.rng, never touches the simulation. Played by Effects (unitDeath / explodeUnit / burn).
 import * as THREE from 'three';

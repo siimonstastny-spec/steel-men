@@ -1,7 +1,7 @@
 {
-  "name": "Steel Mans",
-  "short_name": "Steel Mans",
-  "description": "Steel Mans – RTS",
+  "name": "STEEL MEN",
+  "short_name": "STEEL MEN",
+  "description": "STEEL MEN – RTS",
   "start_url": "./index.html",
   "scope": "./",
   "display": "fullscreen",

@@ -1,4 +1,4 @@
-// Steel Mans AI – small helpers shared by the managers (geometry, unit state, strength). Read-only: nothing here
+// Steel Men AI – small helpers shared by the managers (geometry, unit state, strength). Read-only: nothing here
 // changes the simulation.
 import { weaponDps } from '../data/Stats.js';
 import { playerOrder } from '../units/OrderQueue.js';

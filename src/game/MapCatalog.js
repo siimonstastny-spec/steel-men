@@ -1,4 +1,4 @@
-// Steel Mans – list of playable maps for the New game menu and the lobby (MAPS.list in config.js).
+// Steel Men – list of playable maps for the New game menu and the lobby (MAPS.list in config.js).
 // Loads every map file once (GameMap without visuals: size, starts, walls, fields) and keeps it for previews.
 import { MAPS } from '../config.js';
 import { GameMap, resolveMapId } from './Map.js';

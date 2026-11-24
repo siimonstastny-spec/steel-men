@@ -1,4 +1,4 @@
-// Steel Mans – starting research option (New game / lobby combobox, settings key `startResearch`).
+// Steel Men – starting research option (New game / lobby combobox, settings key `startResearch`).
 // Value: one of START_RESEARCH.options = the highest tier whose research every team starts with (0 = none).
 // Every team (humans and AI) gets all research of tier <= value that its faction may research; building / previous
 // tier / salvage requirements are ignored. Effects go through Research.complete (same as a finished research).

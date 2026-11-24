@@ -1,4 +1,4 @@
-// Steel Mans – keeps the game usable inside a foreign page (itch.io iframe): the game window takes keyboard focus on
+// Steel Men – keeps the game usable inside a foreign page (itch.io iframe): the game window takes keyboard focus on
 // click, scrolling keys do not scroll the host page, text selection and drag-and-drop do not break the controls.
 //   const guard = installEmbedGuard();   // once, at start (main.js); guard.dispose() removes everything
 // Text fields, selects and anything inside a visible menu keep their normal behaviour.

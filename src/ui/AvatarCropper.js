@@ -1,4 +1,4 @@
-// Steel Mans – modal square crop of an avatar picture: drag = move, wheel / slider = zoom, Confirm / Cancel.
+// Steel Men – modal square crop of an avatar picture: drag = move, wheel / slider = zoom, Confirm / Cancel.
 //
 //   openAvatarCropper(bitmap) -> Promise<{ sx, sy, side } | null>
 //     bitmap = ImageBitmap / HTMLImageElement (not closed by the cropper); result = source-pixel square the user picked,

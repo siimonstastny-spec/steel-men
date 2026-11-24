@@ -1,4 +1,4 @@
-// Steel Mans – procedural rail gun (roadmap 18, defence buildings; `buildable: false`). Drop-in alternative to
+// Steel Men – procedural rail gun (roadmap 18, defence buildings; `buildable: false`). Drop-in alternative to
 // models/3DStructures{race}/RailGun{race}_Anim.glb (the GLB is a placeholder box ±10 × ±10, 14.4 high):
 //   • same kit as PointDefenseProc (plinth, tower, turret head, barrel node, sensor, style vent) with ONE long rail pair
 //     lying on the head (slightly raised, RAIL_PITCH), coil frames / rings along it, capacitor banks on the back of the head
@@ -43,7 +43,7 @@ export const RAIL_SHAPES = {
     plinth: { kind: 'box', R: 8.5, h: 2.0, ventX: 5.2, ventZ: -5.2, ventR: 1.1 },
     tower: { seg: 20, rTop: 3.0, rBottom: 3.8, h: 1.6 },
     head: { kind: 'box', w: 5.6, h: 3.0, d: 7.0, ring: 3.2, faceX: 2.8, edge: 1 },
-    barrels: { kind: 'box', r: 0.3, len: 10.0, start: -1.5, coils: 5, coil: 'frame', coilSurface: 'team', offsets: [[-0.7, 0.3], [0.7, 0.3]] },
+    barrels: { kind: 'box', r: 0.3, len: 10.0, start: -1.5, coils: 5, coil: 'frame', coilSurface: 'teamPaint', offsets: [[-0.7, 0.3], [0.7, 0.3]] },
     sensor: { kind: 'dish', mastH: 1.6, z: -2.2 },
     pitch: 0.12,
   },
@@ -51,7 +51,7 @@ export const RAIL_SHAPES = {
     plinth: { kind: 'armored', R: 8.8, h: 2.6, baseH: 1.0, ventX: 4.6, ventZ: -4.6, ventR: 1.1 },
     tower: { seg: 4, rTop: 3.2, rBottom: 4.0, h: 1.4 },
     head: { kind: 'wedge', w: 6.4, topW: 5.0, topD: 6.0, h: 3.4, d: 7.4, ring: 3.6, faceX: 3.0 },
-    barrels: { kind: 'heavy', r: 0.5, len: 10.0, start: -1.5, coils: 4, coil: 'frame', coilSurface: 'hullDark', offsets: [[-0.95, 0.5], [0.95, 0.5]] },
+    barrels: { kind: 'heavy', r: 0.5, len: 10.0, start: -1.5, coils: 4, coil: 'frame', coilSurface: 'teamShade', offsets: [[-0.95, 0.5], [0.95, 0.5]] },
     sensor: { kind: 'bar', mastH: 1.4, z: -2.4 },
     pitch: 0.1,
   },
@@ -149,9 +149,9 @@ function railTurretExtra(b, glows, kit, shape, head) {
     const x = e * hd.w * D.cap.xShare;
     const z = hd.d * D.cap.zShare;
     const y = head.top + D.cap.h / 2 - D.cap.sink;
-    b.cylinder(D.cap.r, D.cap.r, D.cap.h, D.seg.cap, S.hullDark, { x, y, z });
+    b.cylinder(D.cap.r, D.cap.r, D.cap.h, D.seg.cap, S.teamShade, { x, y, z });
     b.torus(D.cap.r + D.cap2.ringOver, D.cap.ringTube, 4, D.seg.capRing, TAU, S.neon, { rx: HALF_PI, x, y: y + D.cap.h * D.cap2.ringY, z });
-    b.sphere(D.cap.r * D.cap2.domeR, D.seg.capDomeU, D.seg.capDomeV, S.hull, { x, y: y + D.cap.h / 2, z, sy: D.cap2.domeFlat });
+    b.sphere(D.cap.r * D.cap2.domeR, D.seg.capDomeU, D.seg.capDomeV, S.teamPaint, { x, y: y + D.cap.h / 2, z, sy: D.cap2.domeFlat });
   }
 }
 

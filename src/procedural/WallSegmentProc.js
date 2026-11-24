@@ -1,4 +1,4 @@
-// Steel Mans – procedural wall segment (roadmap 18, walls). Drop-in alternative to
+// Steel Men – procedural wall segment (roadmap 18, walls). Drop-in alternative to
 // models/3DStructures{race}/MobileWallWall{race}.glb (one box ±16 long, 9 high, ≤ 5 thick), very cheap because many are built:
 //   • modelled at the NOMINAL length WALL_SPAN (32 GLB units) and stretched along x by the structure (Walls.js sets
 //     holder.scale.x, exactly like the GLB) – so the model works from 0.2 × to 1.4 × and, being static, is batched
@@ -12,7 +12,11 @@
 // Visual only: update() takes the frame delta, nothing here is read by the simulation. No allocations in update().
 import { PartBuilder } from './ProcKit.js';
 import { ProcModel, createSharedCache, GlowSet, marking, neonStrip, spike, pulseWave } from './ProcModules.js';
-import { WALL_SPAN, WALL_LAYOUT, WALL_ANIM, HALF_PI, nextWallInstance, pickBoxGeometry, addPickBox } from './MobileWallProc.js';
+import { WALL_SPAN, WALL_LAYOUT, WALL_ANIM, WALL_TEAM, HALF_PI, nextWallInstance, pickBoxGeometry, addPickBox } from './MobileWallProc.js';
+
+// Team paint (S.teamPaint / S.teamShade, see WALL_TEAM): long boxes / tubes along the whole nominal length, so they stretch
+// with the segment (holder.scale.x) like the wall itself; they are vertices of the static geometry (batching unchanged).
+const TEAM_DETAIL = { detail: WALL_TEAM.detail };
 
 const DEG = Math.PI / 180;
 const FACE_OUT = 0.02;       // markings / strips stand this far off the wall face
@@ -23,8 +27,8 @@ export const SEGMENT_SHAPES = {
     footH: 0.8, footD: 4.4,
     body: { y0: 0.8, h: 7.2, d: 4.0, topD: 3.2 },
     cap: { r: 1.6, flat: 0.6, seg: 10 },
-    team: { y: 2.2, h: 0.5, t: 0.12, len: 31 },
-    mark: { y: 4.4, h: 1.6, len: 30 },
+    team: { y: 2.0, h: 2.2, t: 0.12, len: 31 },   // wide team band on both faces (the round cap on top is team paint too)
+    mark: { y: 4.8, h: 1.4, len: 30 },
     neon: { y: 7.2, h: 0.12, t: 0.06, len: 30 },
   },
   angular: {
@@ -35,15 +39,15 @@ export const SEGMENT_SHAPES = {
     spike: { h: 0.8, r: 0.2 },
     buttress: { xs: [-10, 0, 10], w: 1.6, topW: 0.9, h: 5.2, d: 1.0, topD: 0.5, sink: 0.3 },
     rust: { y: 2.0, h: 1.6, len: 31.5, t: 0.1 },
-    team: { y: 4.8, h: 0.4, len: 31, t: 0.1 },
+    team: { y: 4.4, h: 1.6, len: 31, t: 0.1 },   // wide team band under the parapet (the parapet is team paint too)
   },
   round: {
     A: 2.2, B: 4.5, seg: 16,                                  // elliptical tube: half thickness A, half height B (sits on the ground)
-    veinTube: 0.1, veinPhis: [55, 125], teamPhi: 90, teamTube: 0.28, outScale: 1.01,   // degrees from the top; lines sit this much outside
+    veinTube: 0.1, veinPhis: [40, 140], teamPhis: [90, 68, 112], teamTube: 1.0, teamOut: 0.9, outScale: 1.01,   // degrees from the top; lines sit this much outside (the team rail sits at teamOut)
     conduit: { r: 0.35, seg: 8, glowR: 0.8 },
   },
   faceted: {
-    rail: { h: 0.35, d: 1.0 }, topRail: { h: 0.3, d: 1.0 },
+    rail: { h: 0.8, d: 1.6 }, topRail: { h: 0.5, d: 1.6 },   // both rails are team paint (the posts hold the emitters)
     lineT: 0.16, sheet: { y: 5.0, h: 7.0, t: 0.1 }, halo: 0.45,
   },
 };
@@ -56,10 +60,10 @@ function buildRoundedSegment(b, glows, kit, P) {
   const faceHalf = (y) => bd.d / 2 + ((bd.topD - bd.d) / 2) * ((y - bd.y0) / bd.h);
   b.box(WALL_SPAN, P.footH, P.footD, S.hullDark, { base: true });
   b.taperedBox(WALL_SPAN, WALL_SPAN, bd.h, bd.d, S.hull, { y: bd.y0 }, bd.topD);
-  b.cylinder(P.cap.r, P.cap.r, WALL_SPAN, P.cap.seg, S.hullDark, { rz: HALF_PI, sx: P.cap.flat, y: bd.y0 + bd.h }, true);   // round top edge
+  b.cylinder(P.cap.r, P.cap.r, WALL_SPAN, P.cap.seg, S.teamShade, { rz: HALF_PI, sx: P.cap.flat, y: bd.y0 + bd.h, ...TEAM_DETAIL }, true);   // round top edge = team paint
   for (const e of both) {
     const turn = e > 0 ? 0 : Math.PI;
-    b.box(P.team.len, P.team.h, P.team.t, S.team, { y: P.team.y, z: e * faceHalf(P.team.y) });
+    b.box(P.team.len, P.team.h, P.team.t, S.teamPaint, { y: P.team.y, z: e * faceHalf(P.team.y), ...TEAM_DETAIL });
     marking(b, kit, P.mark.len, P.mark.h, { y: P.mark.y, z: e * (faceHalf(P.mark.y) + FACE_OUT), ry: turn });
     if (kit.style.neon >= WALL_LAYOUT.neonMin) neonStrip(b, kit, P.neon.len, P.neon.h, P.neon.t, { y: P.neon.y, z: e * (faceHalf(P.neon.y) + P.neon.t / 2) });
   }
@@ -72,7 +76,7 @@ function buildAngularSegment(b, glows, kit, P) {
   const topY = bd.y0 + bd.h;
   b.box(WALL_SPAN, P.footH, P.footD, S.hullDark, { base: true });
   b.taperedBox(WALL_SPAN, WALL_SPAN, bd.h, bd.d, S.hull, { y: bd.y0 }, bd.topD);
-  b.box(WALL_SPAN, P.parapet.h, P.parapet.d, S.hullDark, { base: true, y: topY });
+  b.box(WALL_SPAN, P.parapet.h, P.parapet.d, S.teamShade, { base: true, y: topY, ...TEAM_DETAIL });   // the parapet is team paint
   const M = P.merlons;
   const pitch = WALL_SPAN / M.count;
   const merlonY = topY + P.parapet.h;
@@ -84,7 +88,7 @@ function buildAngularSegment(b, glows, kit, P) {
   const U = P.buttress;
   for (const e of both) {
     b.box(P.rust.len, P.rust.h, P.rust.t, S.lower, { y: P.rust.y, z: e * (faceHalf(P.rust.y) + P.rust.t / 2) });
-    b.box(P.team.len, P.team.h, P.team.t, S.team, { y: P.team.y, z: e * (faceHalf(P.team.y) + P.team.t / 2) });
+    b.box(P.team.len, P.team.h, P.team.t, S.teamPaint, { y: P.team.y, z: e * (faceHalf(P.team.y) + P.team.t / 2), ...TEAM_DETAIL });
     for (const x of U.xs) b.taperedBox(U.w, U.topW, U.h, U.d, S.hullDark, { x, y: bd.y0, z: e * (faceHalf(bd.y0) + U.d / 2 - U.sink) }, U.topD);
   }
 }
@@ -94,12 +98,12 @@ function buildRoundSegment(b, glows, kit, P) {
   const vertical = P.B / P.A;                                   // sx scales the tube's height (its local x is world y after the turn)
   b.cylinder(P.A, P.A, WALL_SPAN, P.seg, S.hull, { rz: HALF_PI, sx: vertical, y: P.B }, true);
   // lines along the tube surface (angle phi from the top): neon veins, a team stripe on the equator
-  const along = (phi, tube, s) => {
+  const along = (phi, tube, s, out = P.outScale, t = {}) => {
     const a = phi * DEG;
-    b.cylinder(tube, tube, WALL_SPAN, 5, s, { rz: HALF_PI, y: P.B + P.B * Math.cos(a) * P.outScale, z: P.A * Math.sin(a) * P.outScale }, true);
+    b.cylinder(tube, tube, WALL_SPAN, 5, s, { rz: HALF_PI, y: P.B + P.B * Math.cos(a) * out, z: P.A * Math.sin(a) * out, ...t }, true);
   };
   if (kit.rich) for (const phi of P.veinPhis) for (const e of both) along(e * phi, P.veinTube, S.neon);
-  for (const e of both) along(e * P.teamPhi, P.teamTube, S.team);
+  for (const phi of P.teamPhis) for (const e of both) along(e * phi, P.teamTube, S.teamPaint, P.teamOut, TEAM_DETAIL);   // broad team band (three overlapping rails) around the equator
   const c = P.conduit;                                           // plasma conduit on the ridge
   b.cylinder(c.r, c.r, WALL_SPAN, c.seg, S.plasma, { rz: HALF_PI, y: P.B * 2 }, true);
   glows.get('pulse').cylinder(c.glowR, c.glowR, WALL_SPAN, c.seg, { rz: HALF_PI, y: P.B * 2 });
@@ -108,8 +112,8 @@ function buildRoundSegment(b, glows, kit, P) {
 function buildFacetedSegment(b, glows, kit, P) {
   const S = kit.S;
   const top = WALL_LAYOUT.segmentHeight;
-  b.box(WALL_SPAN, P.rail.h, P.rail.d, S.team, { base: true });
-  b.box(WALL_SPAN, P.topRail.h, P.topRail.d, S.hullDark, { y: top - P.topRail.h / 2 });
+  b.box(WALL_SPAN, P.rail.h, P.rail.d, S.teamPaint, { base: true, ...TEAM_DETAIL });
+  b.box(WALL_SPAN, P.topRail.h, P.topRail.d, S.teamShade, { y: top - P.topRail.h / 2, ...TEAM_DETAIL });
   const sheet = glows.get('sheet');
   const halo = glows.get('halo');
   for (const y of WALL_LAYOUT.barrierYs) {

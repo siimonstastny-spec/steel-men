@@ -1,4 +1,4 @@
-// Steel Mans – style-aware building modules (roadmap 18, phase A). Every procedural building is composed from these:
+// Steel Men – style-aware building modules (roadmap 18, phase A). Every procedural building is composed from these:
 //   • styleKit(race)         resolved style (data/buildingStyles.json) + ready surfaces + glow colours
 //   • ProcModel              base class of a building model: paint / glow / emblem meshes, setTeamColor, stats, dispose
 //   • createSharedCache      per-style cache of the shared geometries of one building type (ref-counted)
@@ -8,7 +8,9 @@
 //                            plasmaCoil, laserLink, spike
 //   • animated parts         GlowLayer (intensity), Levitator, ArcFlicker, CraneRig (gantry / heavyGantry / plasma /
 //                            tractorBeam), fan blades and rings as shared geometries
-//   • emblem                 faction sign from SVG paths: decal texture + emblemDecalGeometry (1 draw call), emblemShape
+//   • team paint             teamStripe / teamPanel / teamTrim / teamBanner / roofMark: team-coloured surfaces (team-mask
+//                            vertices of the static geometry, style.teamPaint), teamPaintShare / teamPaintBudget
+//   • emblem                 faction sign (logo colour on a neutral plate, PROC_EMBLEM) from SVG paths: decal texture + emblemDecalGeometry (1 draw call), emblemShape
 //                            (extruded), emblemShapes / emblemPathData for icons and UI
 // Code reads style properties only, never faction names. Visual only: nothing here touches the simulation; update()
 // methods allocate nothing. See docs/notes/proc-style-kit.md.
@@ -19,7 +21,7 @@ import {
   acquireInstancedPaintMaterial, releaseInstancedPaintMaterial,
 } from './ProcKit.js';
 import { getBuildingStyle, resolveStyleKey } from './BuildingStyle.js';
-import { BUILDING_LOD, PROC_BUILDINGS } from '../config.js';
+import { BUILDING_LOD, PROC_BUILDINGS, PROC_EMBLEM, PROC_TEAM_PAINT } from '../config.js';
 import { batcherFor } from './BuildingBatcher.js';
 
 /** Module tuning (visual only, model units unless noted) */
@@ -121,13 +123,16 @@ export const PROC_MODULES = {
     },
   },
   emblem: {
-    textureSize: 256, padding: 0.08, blur: 24, haloPasses: 4, maskColor: '#ffffff',
-    neonBoost: 1.6,            // neon emblem colour = team colour × this (brighter; channels clip at 1, toneMapped off)
+    textureSize: 256, blur: 24, haloPasses: 4,
+    // decal texture channels: R = sign (+ neon halo), G = plate coverage, B = plate rim (see createEmblemTexture)
+    maskR: '#ff0000', maskPlate: '#00ff00', maskRim: '#0000ff',
+    neonBoost: 1.6,            // neon emblem colour = team colour × this ('team' mode; brighter, channels clip at 1, toneMapped off)
     curveSegments: 10, arcSegments: 16, decalOffset: 0.03, paintRough: 0.7, polygonOffset: -2,
   },
 };
 
 const M = PROC_MODULES;
+const TP = PROC_TEAM_PAINT;
 const TAU = Math.PI * 2;
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -151,6 +156,8 @@ function styleSurfaces(st) {
     dark: s(p.dark, P.dark),
     rubber: s(p.dark, P.rubber),
     team: s(M.teamWhite, P.team, { team: 1 }),
+    teamPaint: s(TP.paintWhite, TP.paint, { team: 1 }),   // lit team lacquer (no emission) – see the team paint modules
+    teamShade: s(TP.shadeWhite, TP.paint, { team: 1 }),   // darker team lacquer (alternating stripes, panel cores)
     neon: s(st.neonTeam ? M.neonTeamWhite : p.neon, P.neon, { team: st.neonTeam ? 1 : 0, glow: lerp(M.neonGlow[0], M.neonGlow[1], st.neon) }),
     window: s(p.window, P.window, { glow: lerp(M.windowGlow[0], M.windowGlow[1], st.neon) }),
     interior: s(p.interior, P.interior),
@@ -160,6 +167,22 @@ function styleSurfaces(st) {
     hole: s(M.holeColor, P.hole),
     plasma: s(p.neon, P.plasma),
   };
+}
+
+/**
+ * style.teamPaint merged over PROC_TEAM_PAINT.defaults and sanitised: `share` clamped to the target range, `stripes`
+ * to 1..maxStripes, `mix` = [stripe share, panel share] of `mode`. Frozen, part of the kit (kit.team).
+ */
+function resolveTeamPaint(style) {
+  const t = { ...TP.defaults, ...style.teamPaint };
+  const mix = TP.modeMix[t.mode] ?? TP.modeMix[TP.defaults.mode];
+  return Object.freeze({
+    ...t,
+    share: Math.min(TP.target.max, Math.max(TP.target.min, t.share)),
+    stripes: Math.min(TP.maxStripes, Math.max(1, Math.round(t.stripes))),
+    stripeShare: mix[0],
+    panelShare: mix[1],
+  });
 }
 
 const kitCache = new Map();   // style key -> kit
@@ -179,6 +202,7 @@ export function styleKit(race) {
       key,
       style,
       S: styleSurfaces(style),
+      team: resolveTeamPaint(style),
       rich: style.neon >= M.richNeon,
       glowColors: Object.freeze({ beacon: light, pulse: p.neon, radiator: p.neon, laser: p.neon, arc: p.neon, beam: p.neon, reactor: style.reactorGlow }),
     });
@@ -369,7 +393,10 @@ export class ProcModel extends THREE.Group {
     return g;
   }
 
-  /** Team colour: paint (shared per colour + texture) and emblem (shared per style + colour; the texture stays) */
+  /**
+   * Team colour: paint incl. all team paint surfaces (shared per colour + texture; batched: instance attribute) and, only
+   * in PROC_EMBLEM mode 'team', the emblem (shared per style + colour; the texture stays). Faction mode keeps the emblem.
+   */
   setTeamColor(color) {
     this.teamColor = color;
     const next = acquirePaintMaterial(color, this.kit.style.texture);
@@ -381,7 +408,7 @@ export class ProcModel extends THREE.Group {
       this.batch.team.set(color);
       this.batch.batcher?.refreshInst(this);
     }
-    if (!this.emblemMaterial) return;
+    if (!this.emblemMaterial || !teamEmblem()) return;   // faction mode: the sign keeps the logo colour
     const nextEmblem = acquireEmblemMaterial(this.kit, color);
     const prevEmblem = this.emblemMaterial;
     this.emblemMaterial = nextEmblem;
@@ -396,10 +423,10 @@ export class ProcModel extends THREE.Group {
 
   /**
    * Finished building: from now on tick() may hand its static body, emblem and frozen far parts to the batcher (needs
-   * staticMesh() and the model inside a scene; off with BUILDING_LOD.enabled / window.steelMans.batching = false).
+   * staticMesh() and the model inside a scene; off with BUILDING_LOD.enabled / window.steelMen.batching = false).
    */
   enableBatching() {
-    const on = BUILDING_LOD.enabled && PROC_BUILDINGS.enabled && globalThis.window?.steelMans?.batching !== false;
+    const on = BUILDING_LOD.enabled && PROC_BUILDINGS.enabled && globalThis.window?.steelMen?.batching !== false;
     if (this.batch || !this.staticLods || !on) return;
     this.batch = {
       registered: false, batcher: null, items: null,
@@ -695,6 +722,267 @@ export function laserLink(b, glow, kit, a, c) {
 /** Four-sided spike standing at [x, y, z] */
 export function spike(b, kit, { x, y, z, h, r, s = kit.S.frame }) {
   return b.cylinder(0, r, h, M.spike.segments, s, { x, y: y + h / 2, z, ry: Math.PI / 4 });
+}
+
+// ---------------------------------------------------------------- team paint writers (construction time only)
+// Coloured surfaces of a building: kit.S.teamPaint / kit.S.teamShade vertices (team mask of the paint shader) merged
+// into the building's static geometry – no extra draw call, material or instance data (docs/notes/proc-teamcolor-kit.md).
+// Wall elements (stripe, panel) have their origin ON the wall, centred, and stick out toward local +Z; the placement
+// `t` ({ x, y, z, ry, detail }) puts them on any wall (ry turns +Z toward the wall normal). The look follows style.teamPaint
+// (kit.team): stripeKind, panelKind, banner, trim, roofMark – code never reads a faction name.
+
+// Placement with a local x / z offset (rotated by t.ry) – for PartBuilder methods that cannot offset their own geometry
+function shiftPlacement(t, lx, lz) {
+  const c = Math.cos(t.ry ?? 0);
+  const s = Math.sin(t.ry ?? 0);
+  return { ...t, x: (t.x ?? 0) + lx * c + lz * s, z: (t.z ?? 0) - lx * s + lz * c };
+}
+
+const lodOf = (kind, t) => ({ detail: TP.lod[kind], ...t });
+
+/** Box geometry offset inside its own frame (local x y z), added with the placement t */
+function addBox(b, s, t, w, h, d, lx, ly, lz) {
+  return b.add(new THREE.BoxGeometry(w, h, d).translate(lx, ly, lz), s, t);
+}
+
+/** Flat rhombus slab facing +Z (extent w × h, depth d, standing on the wall plane), local offset (0, 0, zLift) */
+function rhombusGeometry(w, h, d, zLift) {
+  const g = new THREE.BoxGeometry(1, 1, d);
+  g.rotateZ(Math.PI / 4);
+  g.scale(w / Math.SQRT2, h / Math.SQRT2, 1);
+  return g.translate(0, 0, d / 2 + zLift);
+}
+
+/** Free intervals of [−length/2, length/2] around `avoid` ([from, to] pairs in local x) + PROC_TEAM_PAINT.emblemClear */
+function freeSpans(length, avoid) {
+  let spans = [[-length / 2, length / 2]];
+  for (const [a, c] of avoid ?? []) {
+    const lo = Math.min(a, c) - TP.emblemClear;
+    const hi = Math.max(a, c) + TP.emblemClear;
+    const next = [];
+    for (const [s0, s1] of spans) {
+      if (hi <= s0 || lo >= s1) { next.push([s0, s1]); continue; }
+      if (lo > s0) next.push([s0, lo]);
+      if (hi < s1) next.push([hi, s1]);
+    }
+    spans = next;
+  }
+  return spans.filter(([s0, s1]) => s1 - s0 >= TP.stripe.minSegment);
+}
+
+/**
+ * Team stripes on a wall: a strip `length` (local x) × `height` (local y) of style.teamPaint.stripeKind – 'band' (`count`
+ * parallel bands), 'slash' (diagonal hatching, alternating team / shade), 'fine' (`count` × 2 thin lines). `count` defaults
+ * to style.teamPaint.stripes. avoid = [[x0, x1], …] local x intervals (e.g. an emblem plate) the stripes keep free by
+ * PROC_TEAM_PAINT.emblemClear on both sides – team paint never touches the emblem.
+ */
+export function teamStripe(b, kit, length, height, t = {}, { avoid, count = kit.team.stripes } = {}) {
+  const S = kit.S;
+  const K = TP.stripe;
+  const kind = kit.team.stripeKind;
+  const tt = lodOf('stripe', t);
+  for (const [s0, s1] of freeSpans(length, avoid)) {
+    const len = s1 - s0;
+    const cx = (s0 + s1) / 2;
+    if (kind === 'slash') {
+      b.hazardStrip(len, height, height * K.slashWidth, S.teamPaint, S.teamShade, shiftPlacement({ ...tt }, cx, K.depth));
+      continue;
+    }
+    const lines = kind === 'fine' ? count * 2 : count;
+    const pitch = height / lines;
+    const thick = kind === 'fine' ? pitch * K.fineShare : height / (lines + (lines - 1) * K.gap);
+    const step = kind === 'fine' ? pitch : thick * (1 + K.gap);
+    for (let i = 0; i < lines; i++) {
+      const y = -height / 2 + thick / 2 + i * step + (kind === 'fine' ? (pitch - thick) / 2 : 0);
+      addBox(b, kind === 'fine' && i % 2 ? S.teamShade : S.teamPaint, tt, len, thick, K.depth, cx, y, K.depth / 2);
+    }
+  }
+  return b;
+}
+
+/**
+ * Team panel on a wall (w × h, centred): style.teamPaint.panelKind – 'inset' (metal frame round a team core), 'plate'
+ * (heavy plate: darker lower band + rivets), 'pearl' (oval pill with a darker core), 'blade' (rhombus with a darker core).
+ */
+export function teamPanel(b, kit, w, h, t = {}) {
+  const S = kit.S;
+  const K = TP.panel;
+  const d = K.depth;
+  const tt = lodOf('panel', t);
+  switch (kit.team.panelKind) {
+    case 'plate': {
+      addBox(b, S.teamPaint, tt, w, h, d, 0, 0, d / 2);
+      const lowerH = h * K.lowerShare;
+      addBox(b, S.teamShade, tt, w, lowerH, d * 1.3, 0, -h / 2 + lowerH / 2, d * 0.65);
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+        addBox(b, S.trim, tt, K.rivetR * 2, K.rivetR * 2, d * 1.6, sx * (w / 2 - K.rivetInset), sy * (h / 2 - K.rivetInset), d * 0.8);
+      }
+      break;
+    }
+    case 'pearl': {
+      const pill = (sx, sy, depth, s) => b.add(new THREE.CylinderGeometry(1, 1, depth, K.segments).rotateX(Math.PI / 2).scale(sx, sy, 1).translate(0, 0, depth / 2), s, tt);
+      pill(w / 2, h / 2, d, S.teamPaint);
+      pill((w / 2) * K.coreShare, (h / 2) * K.coreShare, d * 1.4, S.teamShade);
+      break;
+    }
+    case 'blade':
+      b.add(rhombusGeometry(w, h, d, 0), S.teamPaint, tt);
+      b.add(rhombusGeometry(w * K.coreShare, h * K.coreShare, d * 1.4, 0), S.teamShade, tt);
+      break;
+    default: { // 'inset'
+      const f = K.frame;
+      addBox(b, S.teamPaint, tt, w - 2 * f, h - 2 * f, d, 0, 0, d / 2);
+      addBox(b, S.frame, tt, w, f, d * 1.3, 0, h / 2 - f / 2, d * 0.65);
+      addBox(b, S.frame, tt, w, f, d * 1.3, 0, -h / 2 + f / 2, d * 0.65);
+      addBox(b, S.frame, tt, f, h - 2 * f, d * 1.3, -w / 2 + f / 2, 0, d * 0.65);
+      addBox(b, S.frame, tt, f, h - 2 * f, d * 1.3, w / 2 - f / 2, 0, d * 0.65);
+    }
+  }
+  return b;
+}
+
+/**
+ * Team trim: a low lip round a footprint – rectangular (w × d) or round (r) – standing on y. Height / thickness from
+ * PROC_TEAM_PAINT.trim × style.teamPaint.trim (0 = none). Place it on a plinth edge, a pad rim or a roof edge.
+ */
+export function teamTrim(b, kit, { x = 0, y = 0, z = 0, w, d, r, h }, t = {}) {
+  if (kit.team.trim <= 0) return b;
+  const K = TP.trim;
+  const th = (h ?? K.h) * kit.team.trim;
+  const tt = lodOf('trim', t);
+  const s = kit.S.teamPaint;
+  if (r !== undefined) return b.torus(r, th / 2, K.tubeSegments, K.ringSegments, TAU, s, { ...tt, rx: Math.PI / 2, x, y: y + th / 2, z });
+  for (const e of [-1, 1]) {
+    b.box(w, th, K.t, s, { ...tt, x, y: y + th / 2, z: z + e * (d / 2 - K.t / 2) });
+    b.box(K.t, th, d - 2 * K.t, s, { ...tt, x: x + e * (w / 2 - K.t / 2), y: y + th / 2, z });
+  }
+  return b;
+}
+
+/**
+ * Banner on a pole standing at (x, y, z) with its base on y, `h` tall, cloth sticking out toward local +X (turn it with
+ * ry): style.teamPaint.banner – 'flag', 'pennant' (triangle), 'orb' (ball on the pole), 'fin' (rhombic blade). Static.
+ */
+export function teamBanner(b, kit, { x = 0, y = 0, z = 0, h = 3, ry = 0 }, t = {}) {
+  const S = kit.S;
+  const K = TP.banner;
+  const tt = { ...lodOf('banner', t), x, y, z, ry };
+  b.add(new THREE.CylinderGeometry(K.poleR * 0.7, K.poleR, h, K.poleSegments).translate(0, h / 2, 0), S.frame, tt);
+  const top = h * K.clothTopShare;
+  switch (kit.team.banner) {
+    case 'pennant': {
+      const len = h * K.pennantLen;
+      const r = (h * K.pennantH) / 2;
+      b.add(new THREE.CylinderGeometry(0, r, len, 3).rotateZ(-Math.PI / 2).scale(1, 1, K.clothT / (2 * r)).translate(K.poleR + len / 2, top - r, 0), S.teamPaint, tt);
+      break;
+    }
+    case 'orb':
+      b.add(new THREE.SphereGeometry(h * K.orbR, 12, 8).translate(0, h + h * K.orbR * 0.6, 0), S.teamPaint, tt);
+      break;
+    case 'fin': {
+      const bh = h * 0.7;
+      const g = new THREE.BoxGeometry(1, 1, K.finT);
+      g.rotateZ(Math.PI / 4);
+      g.scale((h * K.finW) / Math.SQRT2, bh / Math.SQRT2, 1);
+      b.add(g.translate(0, h - bh / 2, 0), S.teamPaint, tt);
+      break;
+    }
+    default: { // 'flag'
+      const fl = h * K.flagLen;
+      const fh = h * K.flagH;
+      addBox(b, S.teamPaint, tt, fl, fh, K.clothT, K.poleR + fl / 2, top - fh / 2, 0);
+      addBox(b, S.teamShade, tt, fl, fh / 3, K.clothT * 1.3, K.poleR + fl / 2, top - fh + fh / 6, 0);
+    }
+  }
+  return b;
+}
+
+const ROOF_MARKS = { rounded: 'plate', angular: 'chevron', round: 'disc', faceted: 'rhombus' };   // by style.silhouette
+
+/**
+ * Roof / ground mark on a surface at (x, y, z) (y = the surface), footprint w × d scaled by style.teamPaint.roofMark
+ * (0 = none), turned by ry (the chevron points toward local +Z). Shape by silhouette: rounded framed plate, angular
+ * chevron, round disc, faceted rhombus – the part of the team colour that reads best from the RTS camera.
+ */
+export function roofMark(b, kit, { x = 0, y = 0, z = 0, w, d, ry = 0 }, t = {}) {
+  const k = kit.team.roofMark;
+  if (k <= 0) return b;
+  const S = kit.S;
+  const K = TP.roofMark;
+  const tt = { ...lodOf('roofMark', t), x, y, z, ry };
+  const W = w * k;
+  const D = d * k;
+  const h = K.h;
+  const top = h * 1.6;
+  switch (ROOF_MARKS[kit.style.silhouette] ?? 'plate') {
+    case 'chevron': {
+      const angle = K.chevronAngle;
+      const armW = D * K.chevronArm;
+      const len = Math.min(W / 2 / Math.cos(angle), (D - armW) / Math.sin(angle));
+      for (const s of [-1, 1]) {   // each arm starts at the tip (front centre) and sweeps back and outward
+        b.add(new THREE.BoxGeometry(len, top, armW).translate((s * len) / 2, top / 2, 0).rotateY(s * angle).translate(0, 0, D / 2 - armW / 2), S.teamPaint, tt);
+      }
+      break;
+    }
+    case 'disc': {
+      const r = Math.min(W, D) / 2;
+      b.add(new THREE.CylinderGeometry(r + K.frame, r + K.frame, h, K.segments).translate(0, h / 2, 0), S.frame, tt);
+      b.add(new THREE.CylinderGeometry(r, r, top, K.segments).translate(0, top / 2, 0), S.teamPaint, tt);
+      b.add(new THREE.CylinderGeometry(r * K.discCore, r * K.discCore, top * 1.15, K.segments).translate(0, top * 0.575, 0), S.teamShade, tt);
+      break;
+    }
+    case 'rhombus': {
+      const diamond = (dw, dd, dh) => {
+        const g = new THREE.BoxGeometry(1, dh, 1);
+        g.rotateY(Math.PI / 4);
+        g.scale(dw / Math.SQRT2, 1, dd / Math.SQRT2);
+        return g.translate(0, dh / 2, 0);
+      };
+      b.add(diamond(W + 2 * K.frame, D + 2 * K.frame, h), S.frame, tt);
+      b.add(diamond(W, D, top), S.teamPaint, tt);
+      b.add(diamond(W * K.rhombusCore, D * K.rhombusCore, top * 1.15), S.teamShade, tt);
+      break;
+    }
+    default: { // 'plate'
+      addBox(b, S.frame, tt, W + 2 * K.frame, h, D + 2 * K.frame, 0, h / 2, 0);
+      addBox(b, S.teamPaint, tt, W, top, D, 0, top / 2, 0);
+      addBox(b, S.teamShade, tt, W * K.stripeShare, top * 1.15, D * 0.9, 0, top * 0.575, 0);
+    }
+  }
+  return b;
+}
+
+/** Team-paint budget: the area (model units²) of team colour a building should carry for `visibleArea` (style.teamPaint.share, clamped to PROC_TEAM_PAINT.target) */
+export const teamPaintBudget = (kit, visibleArea) => visibleArea * kit.team.share;
+
+/**
+ * Measured share of a static geometry's surface (triangles not facing down) that is team paint (aSurface.x ≥ 0.5) –
+ * a test / tuning helper (`teamPaintShare(model.shared.static[0])`), compare with PROC_TEAM_PAINT.target. The ground pad counts as surface.
+ */
+export function teamPaintShare(geometry) {
+  const pos = geometry.attributes.position;
+  const surf = geometry.attributes.aSurface;
+  const idx = geometry.index;
+  const count = idx ? idx.count : pos.count;
+  const a = new THREE.Vector3();
+  const c1 = new THREE.Vector3();
+  const c2 = new THREE.Vector3();
+  let team = 0;
+  let total = 0;
+  for (let i = 0; i < count; i += 3) {
+    const i0 = idx ? idx.getX(i) : i;
+    const i1 = idx ? idx.getX(i + 1) : i + 1;
+    const i2 = idx ? idx.getX(i + 2) : i + 2;
+    a.fromBufferAttribute(pos, i0);
+    c1.fromBufferAttribute(pos, i1).sub(a);
+    c2.fromBufferAttribute(pos, i2).sub(a);
+    c1.cross(c2);
+    const area = c1.length() / 2;
+    if (area <= 0 || c1.y / (2 * area) < TP.share.downFacing) continue;
+    total += area;
+    if (surf.getX(i0) >= TP.share.teamMask) team += area;
+  }
+  return total > 0 ? team / total : 0;
 }
 
 /** Crane guide rails on a roof, styled by style.crane; rails = [{ x, y }] (y = surface under the rail) */
@@ -1094,7 +1382,7 @@ export const emblemPaths = (race) => getBuildingStyle(resolveStyleKey(race)).emb
 /** All emblem subpaths as one SVG `d` string – e.g. `new Path2D(emblemPathData(race))`, fill 'evenodd' */
 export const emblemPathData = (race) => emblemPaths(race).join(' ');
 
-/** Logo colour (sRGB hex string) of a race – for UI / icons; on buildings the emblem takes the team colour */
+/** Logo colour (sRGB hex string) of a race – for UI / icons; on buildings it is the emblem colour too (PROC_EMBLEM mode 'faction') */
 export const emblemColor = (race) => getBuildingStyle(resolveStyleKey(race)).emblem?.color ?? '#ffffff';
 
 const NUMBER_OR_COMMAND = /[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g;
@@ -1230,13 +1518,14 @@ const _dz = new THREE.Vector3();
 const _dm = new THREE.Matrix4();
 
 /**
- * Emblem decal quads (merged, position + normal + uv) for ProcModel.emblem → one draw call per building.
+ * Emblem decal quads (merged, position + normal + uv) for ProcModel.emblem → one draw call per building. Each quad is
+ * the sign on a neutral plate (both in the decal texture; PROC_EMBLEM), `size` × PROC_EMBLEM.plate.grow wide.
  * placements: [{ position: [x,y,z], normal: [x,y,z], size, up?: [x,y,z] }] (quad lifted M.emblem.decalOffset off the wall)
  */
 export function emblemDecalGeometry(placements) {
   if (!placements.length) return null;
   const parts = placements.map(({ position, normal, size, up }) => {
-    const g = new THREE.PlaneGeometry(size, size);
+    const g = new THREE.PlaneGeometry(size * PROC_EMBLEM.plate.grow, size * PROC_EMBLEM.plate.grow);
     _dn.fromArray(normal).normalize();
     if (up) _du.fromArray(up); else _du.set(0, Math.abs(_dn.y) > 0.99 ? 0 : 1, Math.abs(_dn.y) > 0.99 ? -1 : 0);
     _dm.identity().lookAt(_dn, _dz.set(0, 0, 0), _du);   // local +Z → normal
@@ -1250,28 +1539,56 @@ export function emblemDecalGeometry(placements) {
   return merged;
 }
 
-// Emblem mask texture of a style, white on transparent (the team colour comes from the material): neon = soft white
-// halo (several blurred passes) + solid core; paint = solid shape. One texture per style, shared by every team colour.
+// Emblem decal texture of a style: a DATA texture, channels added on a black canvas ('lighter'): R = the sign (neon: soft
+// halo of several blurred passes + solid core; paint: solid shape), G = plate coverage (rounded rectangle), B = plate
+// rim. The shader (emblemShaderPatch) colours them: sign = emblem colour, plate = neutral PROC_EMBLEM.plate colours.
+// One texture per style, shared by every colour mode.
+function roundedRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 function createEmblemTexture(style) {
   const E = M.emblem;
+  const P = PROC_EMBLEM.plate;
   const e = style.emblem;
   const size = E.textureSize;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, size, size);
+  ctx.globalCompositeOperation = 'lighter';
+  // plate (G) and its rim (B)
+  const m = P.margin * size;
+  const rim = P.rim * size;
+  roundedRectPath(ctx, m, m, size - 2 * m, size - 2 * m, P.radius * size);
+  ctx.fillStyle = E.maskPlate;
+  ctx.fill();
+  roundedRectPath(ctx, m + rim / 2, m + rim / 2, size - 2 * m - rim, size - 2 * m - rim, P.radius * size - rim / 2);
+  ctx.strokeStyle = E.maskRim;
+  ctx.lineWidth = rim;
+  ctx.stroke();
+  // sign (R), centred and PROC_EMBLEM.glyphFill of the quad wide
   const path = new Path2D(e.paths.join(' '));
-  const scale = (size * (1 - 2 * E.padding)) / 100;
-  ctx.setTransform(scale, 0, 0, scale, size * E.padding, size * E.padding);
-  ctx.fillStyle = E.maskColor;
+  const scale = (size * PROC_EMBLEM.glyphFill) / 100;
+  const offset = (size * (1 - PROC_EMBLEM.glyphFill)) / 2;
+  ctx.setTransform(scale, 0, 0, scale, offset, offset);
+  ctx.fillStyle = E.maskR;
   if (e.render === 'neon') {
-    ctx.shadowColor = E.maskColor;
+    ctx.shadowColor = E.maskR;
     ctx.shadowBlur = E.blur;
     for (let k = 0; k < E.haloPasses; k++) ctx.fill(path, 'evenodd');
     ctx.shadowBlur = 0;
   }
   ctx.fill(path, 'evenodd');
   const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.colorSpace = THREE.NoColorSpace;   // data channels, not a colour
   tex.anisotropy = 4;
   return tex;
 }
@@ -1296,28 +1613,89 @@ function releaseEmblemTexture(styleKey) {
   emblemTextures.delete(styleKey);
 }
 
+const teamEmblem = () => PROC_EMBLEM.mode === 'team';
+
 /**
- * Decal material of a style in a team colour, ref-counted (pair with releaseEmblemMaterial). neon: unlit sign, colour =
- * team colour × M.emblem.neonBoost; paint: lit paint in the team colour with an emissive backlight (style.emblem.backlight).
+ * Emblem colour of a building (linear colour, a fresh THREE.Color): the faction logo colour (style.emblem.color) in
+ * PROC_EMBLEM mode 'faction' (× PROC_EMBLEM.boost, the team colour is ignored), the team colour × M.emblem.neonBoost
+ * (neon) in mode 'team'. Construction time only.
+ */
+function emblemSignColor(kit, teamColor) {
+  const neon = kit.style.emblem.render === 'neon';
+  if (teamEmblem()) return new THREE.Color(teamColor).multiplyScalar(neon ? M.emblem.neonBoost : 1);
+  return new THREE.Color(kit.style.emblem.color).multiplyScalar(neon ? PROC_EMBLEM.boost.neon : PROC_EMBLEM.boost.paint);
+}
+
+// Shader part shared by the plain and the instanced decal material (regular function: `this` = material). The decal
+// texture is data (see createEmblemTexture): sign R, plate G, rim B. In 'team' mode the instanced material takes the sign
+// colour from aInst (team × colourScale, BuildingBatcher); otherwise from the uEmblemColor uniform.
+function emblemOnBeforeCompile(shader) {
+  const u = this.userData;
+  const instTeam = this.defines?.EMBLEM_INSTANCE_TEAM !== undefined;
+  shader.uniforms.uEmblemColor = u.uEmblemColor;
+  shader.uniforms.uPlateBase = u.uPlateBase;
+  shader.uniforms.uPlateRim = u.uPlateRim;
+  shader.uniforms.uPlateAlpha = u.uPlateAlpha;
+  shader.uniforms.uBacklight = u.uBacklight;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', instTeam ? '#include <common>\nattribute vec4 aInst;\nvarying vec3 vInstTeam;' : '#include <common>')
+    .replace('#include <begin_vertex>', instTeam ? '#include <begin_vertex>\nvInstTeam = aInst.rgb;' : '#include <begin_vertex>');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', [
+      '#include <common>',
+      'uniform vec3 uEmblemColor;\nuniform vec3 uPlateBase;\nuniform vec3 uPlateRim;\nuniform float uPlateAlpha;\nuniform float uBacklight;',
+      instTeam ? 'varying vec3 vInstTeam;' : '',
+    ].join('\n'))
+    .replace('#include <map_fragment>', [
+      'vec4 emTex = texture2D( map, vMapUv );',
+      `vec3 emSign = ${instTeam ? 'vInstTeam' : 'uEmblemColor'};`,
+      'diffuseColor.rgb = mix( mix( uPlateBase, uPlateRim, emTex.b ), emSign, emTex.r );',
+      'diffuseColor.a *= max( emTex.g * uPlateAlpha, emTex.r );',
+    ].join('\n'))
+    // paint style: the sign glows a little (backlight); the plate never does
+    .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += emSign * emTex.r * uBacklight;');
+}
+
+/** Decal material (plain or instanced) of a style: uniforms for the sign colour, the plate colours and the backlight */
+function createEmblemMaterial(kit, signColor, { instanced }) {
+  const E = M.emblem;
+  const e = kit.style.emblem;
+  const neon = e.render === 'neon';
+  const texture = acquireEmblemTexture(kit);
+  const common = {
+    map: texture, transparent: true, depthWrite: false, color: 0xffffff,
+    polygonOffset: true, polygonOffsetFactor: E.polygonOffset, polygonOffsetUnits: E.polygonOffset,
+  };
+  const material = neon
+    ? new THREE.MeshBasicMaterial({ ...common, toneMapped: false })
+    : new THREE.MeshStandardMaterial({ ...common, roughness: E.paintRough, metalness: 0 });
+  const plate = PROC_EMBLEM.plate[e.plate] ?? PROC_EMBLEM.plate.dark;
+  material.userData.uEmblemColor = { value: signColor };
+  material.userData.uPlateBase = { value: new THREE.Color(plate.base) };
+  material.userData.uPlateRim = { value: new THREE.Color(plate.rim) };
+  material.userData.uPlateAlpha = { value: PROC_EMBLEM.plate.alpha };
+  material.userData.uBacklight = { value: neon ? 0 : (e.backlight ?? 0) };
+  if (instanced && teamEmblem()) {
+    material.defines ??= {};   // MeshBasicMaterial has none
+    material.defines.EMBLEM_INSTANCE_TEAM = '';
+  }
+  material.onBeforeCompile = emblemOnBeforeCompile;
+  material.customProgramCacheKey = () => `steelMenEmblem:${neon ? 'N' : 'P'}:${instanced ? 'I' : 'M'}:${teamEmblem() ? 'T' : 'F'}`;
+  return material;
+}
+
+/**
+ * Decal material of a style, ref-counted (pair with releaseEmblemMaterial): the sign on a neutral plate. Mode 'faction'
+ * (PROC_EMBLEM): one material per style, sign in the logo colour, the team colour is ignored (the same object is returned
+ * for every colour, so acquire-new-then-release-old on a team change is harmless). Mode 'team': one per style + team colour.
+ * neon: unlit sign (+ halo); paint: lit sign with an emissive backlight (style.emblem.backlight).
  */
 export function acquireEmblemMaterial(kit, teamColor = M.defaultTeamColor) {
   const color = new THREE.Color(teamColor);
-  const key = `${kit.key}:${color.getHexString()}`;
+  const key = `${kit.key}:${teamEmblem() ? color.getHexString() : 'faction'}`;
   let entry = emblemMaterials.get(key);
   if (!entry) {
-    const E = M.emblem;
-    const e = kit.style.emblem;
-    const texture = acquireEmblemTexture(kit);
-    const common = {
-      map: texture, transparent: true, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: E.polygonOffset, polygonOffsetUnits: E.polygonOffset,
-    };
-    const material = e.render === 'neon'
-      ? new THREE.MeshBasicMaterial({ ...common, color: color.clone().multiplyScalar(E.neonBoost), toneMapped: false })
-      : new THREE.MeshStandardMaterial({
-        ...common, color, roughness: E.paintRough, metalness: 0, emissive: color, emissiveMap: texture, emissiveIntensity: e.backlight ?? 0,
-      });
-    entry = { material, styleKey: kit.key, users: 0 };
+    entry = { material: createEmblemMaterial(kit, emblemSignColor(kit, teamColor), { instanced: false }), styleKey: kit.key, users: 0 };
     emblemMaterials.set(key, entry);
   }
   entry.users++;
@@ -1327,35 +1705,14 @@ export function acquireEmblemMaterial(kit, teamColor = M.defaultTeamColor) {
 const instancedEmblems = new Map();   // style key -> { material, users }
 
 /**
- * Instanced decal material of a style (BuildingBatcher): the team colour comes from the instance attribute aInst
- * (the batcher multiplies neon by M.emblem.neonBoost). Ref-counted, pair with releaseInstancedEmblemMaterial.
+ * Instanced decal material of a style (BuildingBatcher). Mode 'faction': constant logo colour (the instance colour is
+ * ignored); mode 'team': the sign colour comes from the instance attribute aInst (the batcher multiplies neon by
+ * M.emblem.neonBoost). Ref-counted, pair with releaseInstancedEmblemMaterial.
  */
 export function acquireInstancedEmblemMaterial(kit) {
   let entry = instancedEmblems.get(kit.key);
   if (!entry) {
-    const E = M.emblem;
-    const e = kit.style.emblem;
-    const texture = acquireEmblemTexture(kit);
-    const common = {
-      map: texture, transparent: true, depthWrite: false, color: 0xffffff,
-      polygonOffset: true, polygonOffsetFactor: E.polygonOffset, polygonOffsetUnits: E.polygonOffset,
-    };
-    const neon = e.render === 'neon';
-    const material = neon
-      ? new THREE.MeshBasicMaterial({ ...common, toneMapped: false })
-      : new THREE.MeshStandardMaterial({
-        ...common, roughness: E.paintRough, metalness: 0, emissive: 0xffffff, emissiveMap: texture, emissiveIntensity: e.backlight ?? 0,
-      });
-    material.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute vec4 aInst;\nvarying vec3 vInstTeam;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvInstTeam = aInst.rgb;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vInstTeam;')
-        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= vInstTeam;')
-        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vInstTeam;');
-    };
-    material.customProgramCacheKey = () => (neon ? 'steelMansEmblemInstancedNeon' : 'steelMansEmblemInstancedPaint');
+    const material = createEmblemMaterial(kit, emblemSignColor(kit, M.defaultTeamColor), { instanced: true });
     entry = { material, users: 0, styleKey: kit.key };
     instancedEmblems.set(kit.key, entry);
   }

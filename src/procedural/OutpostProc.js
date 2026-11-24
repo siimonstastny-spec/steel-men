@@ -1,4 +1,4 @@
-// Steel Mans – procedural Outpost (future teleport, stats.json → structures.outpost, buildable: false). A drop-in
+// Steel Men – procedural Outpost (future teleport, stats.json → structures.outpost, buildable: false). A drop-in
 // alternative to models/3DStructures{race}/Outpost{race}_Anim.glb built in code from the style modules (ProcModules.js):
 //   • footprint inside the GLB's ground box (±12.8 × ±12.8): pad ±12.6, front = +Z where the arrival platform lies
 //   • a gate / portal standing in the XY plane at z = 0: a disc (or diamond) of pulsing energy with a spinning swirl and two
@@ -14,6 +14,7 @@ import { PartBuilder, GlowBuilder, Blinker } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   spike, pipeRun, chimney, plasmaCoil, laserLink, arcGeometry, ArcFlicker, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES,
+  teamTrim, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -103,6 +104,20 @@ const DIM = {
   },
 };
 
+/**
+ * Team paint (large surfaces, visible from the RTS camera down to LOD2; docs/notes/proc-teampaint-c.md): the main structural
+ * units (pylons / ring / diamond frame + outriggers) are team paint, plus lips and a roof mark by silhouette; the emblem
+ * decals keep their own neutral plate. Marks / lips are { x, z, w, d } / insets in model units.
+ */
+const TEAM = {
+  detail: 2,                 // coarsest LOD the team surfaces still appear in
+  arrivalLip: 0.5,           // lip round the arrival platform (h × style.teamPaint.trim)
+  rounded: { lipInset: 0.3, lipH: 0.6, mark: { x: 0, z: 0, w: 5, d: 2 } },      // lintel roof lip + mark between the fans
+  angular: { lipInset: 1.2, lipH: 0.6, mark: { x: 0, z: 3.3, w: 8, d: 3 } },    // lintel roof lip (clear of the spikes) + mark on the plinth top
+  round: { lipR: 8.5, lipH: 0.6 },                                              // lip ring on the pedestal plinth
+  faceted: { mark: { x: 0, z: 3.2, w: 7, d: 2.6 } },                            // mark on the stage
+};
+
 const BODIES = {};   // filled below (silhouette → frame builder)
 
 // ---------------------------------------------------------------- small helpers (construction time only)
@@ -126,6 +141,7 @@ function foundation(c, kind) {
   b.box(A.w, A.h, A.d, S.lower, { base: true, y: L.padH, z: A.z });
   marking(b, kit, A.w - 0.4, A.markH, { rx: -Math.PI / 2, y: L.padH + A.h + 0.01, z: A.z - A.d / 2 + A.markH });
   c.decals.push({ position: [0, L.padH + A.h, A.z + A.markH / 2], normal: [0, 1, 0], size: A.decal });
+  teamTrim(b, kit, { z: A.z, y: L.padH + A.h, w: A.w, d: A.d, h: TEAM.arrivalLip });
 }
 
 /** Wall decal; `tilt` leans the normal upwards (sloped walls) */
@@ -152,16 +168,16 @@ BODIES.rounded = (c) => {
   const outer = D.pylon.x + D.pylon.w / 2;
   styledBox(b, kit, D.plinth.w, D.plinth.h, D.plinth.d, S.hullDark, { base: true, y: L.padH });
   for (const s of [-1, 1]) {
-    styledBox(b, kit, D.pylon.w, D.pylon.h, D.pylon.d, S.hull, { base: true, x: s * D.pylon.x, y: y0 });
-    for (const e of [-1, 1]) {
-      b.box(D.pylon.w * D.band.w, D.band.h, D.band.t, S.team, { x: s * D.pylon.x, y: y0 + D.band.y, z: e * (D.pylon.d / 2 + D.band.t / 2) });
-    }
+    styledBox(b, kit, D.pylon.w, D.pylon.h, D.pylon.d, S.teamPaint, { base: true, x: s * D.pylon.x, y: y0, detail: TEAM.detail });   // pylons = team colour
     marking(b, kit, D.mark.len, D.mark.h, { rz: Math.PI / 2, x: s * D.pylon.x, y: y0 + D.mark.y, z: D.pylon.d / 2 + D.mark.out });
     wallDecal(c, [s * outer, y0 + D.pylon.h * D.decal.pylonY, 0], s, 0, D.decal.pylon);
     pipeRun(b, kit, [[s * (outer + D.pipes.out), y0, D.pipes.z], [s * (outer + D.pipes.out), pyTop, D.pipes.z]], D.pipes.r);
     c.vents.push(ventUnit(b, c.glows, kit, { x: s * D.vents.x, y: pyTop + D.lintel.h, z: 0, r: D.vents.r }));
   }
   styledBox(b, kit, D.lintel.w, D.lintel.h, D.lintel.d, S.hull, { base: true, y: pyTop });
+  const Tm = TEAM.rounded;
+  teamTrim(b, kit, { y: pyTop + D.lintel.h, w: D.lintel.w - 2 * Tm.lipInset, d: D.lintel.d - 2 * Tm.lipInset, h: Tm.lipH });
+  roofMark(b, kit, { x: Tm.mark.x, y: pyTop + D.lintel.h, z: Tm.mark.z, w: Tm.mark.w, d: Tm.mark.d });
   wallDecal(c, [0, pyTop + D.lintel.h / 2, D.lintel.d / 2], 0, 1, D.decal.lintel);
   wallDecal(c, [0, pyTop + D.lintel.h / 2, -D.lintel.d / 2], 0, -1, D.decal.lintel);
   if (kit.style.neon >= L.neonMin) {
@@ -189,7 +205,7 @@ BODIES.angular = (c) => {
   const decalHalf = (yRel) => Y.w / 2 - ((Y.w - Y.topW) / 2) * (yRel / Y.h);
   for (const s of [-1, 1]) {
     const x = s * Y.x;
-    b.taperedBox(Y.w, Y.topW, Y.h, Y.d, S.hull, { x, y: y0 }, Y.topD);
+    b.taperedBox(Y.w, Y.topW, Y.h, Y.d, S.teamPaint, { x, y: y0, detail: TEAM.detail }, Y.topD);   // pylons = team colour
     b.box(Y.w * D.lower.w, D.lower.h, D.lower.t, S.lower, { x, y: y0 + D.lower.y, z: Y.d / 2 + D.lower.t / 2 });
     const Bt = D.buttress;
     b.taperedBox(Bt.w, Bt.topW, Bt.h, Bt.d, S.hullDark, { x: s * (Y.x + Bt.dx), y: y0, z: -(Y.d / 2 + Bt.dz) }, Bt.topD);
@@ -200,7 +216,9 @@ BODIES.angular = (c) => {
   const lTop = y0 + Y.h + T.h;
   b.box(T.w, T.h, T.d, S.hull, { base: true, y: y0 + Y.h });
   b.box(D.slit.w, D.slit.h, D.slit.t, S.window, { y: y0 + Y.h + T.h / 2, z: T.d / 2 + D.slit.out });
-  b.box(D.band.w, D.band.h, D.band.t, S.team, { y: y0 + Y.h + D.band.drop, z: T.d / 2 + D.band.t / 2 });
+  const Tm = TEAM.angular;
+  teamTrim(b, kit, { y: lTop, w: T.w - 2 * Tm.lipInset, d: T.d - 2 * Tm.lipInset, h: Tm.lipH });
+  roofMark(b, kit, { x: Tm.mark.x, y: y0, z: Tm.mark.z, w: Tm.mark.w, d: Tm.mark.d });
   wallDecal(c, [0, y0 + Y.h + T.h * 0.62, -T.d / 2], 0, -1, D.decal.lintel);
   for (const [x, z] of D.spikes.list) spike(b, kit, { x, y: lTop, z, h: D.spikes.h, r: D.spikes.r });
   for (const s of [-1, 1]) {
@@ -224,9 +242,10 @@ BODIES.round = (c) => {
   const cy = y0 + R.y;
   const Pd = D.pedestal;
   b.cylinder(Pd.rTop, Pd.rBottom, Pd.h, Pd.segments, S.hullDark, { y: y0 + Pd.h / 2 });
-  b.torus(R.R, R.tube, R.radial, R.tubular, TAU, S.hull, { y: cy });
+  b.torus(R.R, R.tube, R.radial, R.tubular, TAU, S.teamPaint, { y: cy, detail: TEAM.detail });   // the portal ring = team colour
   b.torus(R.R - R.tube, R.innerTube, 4, R.tubular, TAU, S.neon, { y: cy });
-  for (const e of [-1, 1]) b.torus(R.R, R.teamTube, 4, R.tubular, TAU, S.team, { y: cy, z: e * R.teamZ });
+  for (const e of [-1, 1]) b.torus(R.R, R.teamTube, 4, R.tubular, TAU, S.teamShade, { y: cy, z: e * R.teamZ, detail: TEAM.detail });
+  teamTrim(b, kit, { y: y0, r: TEAM.round.lipR, h: TEAM.round.lipH });
   const O = D.orbs;
   for (const s of [-1, 1]) {
     c.vents.push(ventUnit(b, glows, kit, { x: s * O.x, y: L.padH, z: O.z, r: O.r }));
@@ -249,6 +268,7 @@ BODIES.faceted = (c) => {
   const y0 = L.padH + D.stage.h;
   b.cylinder(D.stage.r, D.stage.r, D.stage.h, D.stage.segments, S.hullDark, { y: L.padH + D.stage.h / 2, ry: Math.PI / D.stage.segments });
   const M = D.diamond;
+  roofMark(b, kit, { x: TEAM.faceted.mark.x, y: y0, z: TEAM.faceted.mark.z, w: TEAM.faceted.mark.w, d: TEAM.faceted.mark.d });
   const cy = y0 + M.lift + M.half;
   const side = M.half * Math.SQRT2;
   const inward = (M.t / 2) / Math.SQRT2;
@@ -257,7 +277,7 @@ BODIES.faceted = (c) => {
       const rz = sx * sy > 0 ? -Math.PI / 4 : Math.PI / 4;
       const x = (sx * M.half) / 2;
       const y = cy + (sy * M.half) / 2;
-      b.box(side + M.t, M.t, M.depth, S.hullDark, { x, y, rz });
+      b.box(side + M.t, M.t, M.depth, S.teamPaint, { x, y, rz, detail: TEAM.detail });   // the diamond blades = team colour
       b.box(side, M.t * 0.3, M.depth * 1.15, S.frame, { x, y, rz });
       neonStrip(b, kit, side, M.neonT, M.neonT, { x: x - sx * inward, y: y - sy * inward, rz });
     }
@@ -272,7 +292,7 @@ BODIES.faceted = (c) => {
     for (const sz of [-1, 1]) {
       const x = sx * Og.x;
       const z = sz * Og.z;
-      b.taperedBox(Og.w, Og.topW, Og.h, Og.w, S.hullDark, { x, y: y0 });
+      b.taperedBox(Og.w, Og.topW, Og.h, Og.w, S.teamPaint, { x, y: y0, detail: TEAM.detail });
       laserLink(b, laser, kit, [x, y0 + Og.linkY, z], [sx * M.half, cy, 0]);
       beacon(b, glows.get('beaconA'), kit, [x, y0 + Og.beaconY, z]);
     }

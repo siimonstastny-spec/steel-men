@@ -1,4 +1,4 @@
-// Steel Mans – procedural CrewTrainingFacility (training centre of a style without its own GLB; roadmap 18, phase B). A drop-in alternative to
+// Steel Men – procedural CrewTrainingFacility (training centre of a style without its own GLB; roadmap 18, phase B). A drop-in alternative to
 // models/3DStructuresX/CrewTrainingFacilityX_Anim.glb (the only GLB; every style gets this model) built in code from the
 // style modules (ProcModules.js):
 //   • footprint inside the GLB's (about 29.7 × 38.8 → pad ±14 × ±18, front = +Z = the drill yard, the hall is at the back)
@@ -16,6 +16,7 @@ import { PartBuilder, Blinker, Spinner, plateau } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   spike, chimney, laserLink, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES,
+  teamPanel, teamTrim, teamBanner, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -97,6 +98,24 @@ const SHAPES = {
     decals: { frontY: 5.8, sideY: 4.2 },
     rig: 'crystal', target: 'diamond', idleLift: 0.4, tower: 'laser',
   },
+};
+
+/**
+ * Team paint layout (docs/notes/proc-teampaint-b.md). Big coloured areas are whole surfaces painted S.teamPaint / S.teamShade
+ * (one main volume per body + a drill-yard inlay whose outline follows the silhouette); kit modules (panels, trim, mark,
+ * banner) add the style's look. Static geometry only (no draw calls).
+ */
+const TEAM = {
+  inlayH: 0.05,   // thickness of the yard inlay (stands on the pad top)
+  inlay: {        // outline by silhouette: rectangle · ellipse · rhombus (angular: the painted hall is enough)
+    rounded: { kind: 'rect', z: 3, w: 23.6, d: 18 },
+    round: { kind: 'ellipse', z: 3.5, w: 24, d: 16, segments: 40 },
+    faceted: { kind: 'rhombus', z: 5, w: 28, d: 22 },
+  },
+  rounded: { side: { dz: 3.8, y: 3.5, w: 2.4, h: 3.2 }, mark: { z: -8, w: 16, d: 3 }, trimInset: 0.8, banner: { x: -11, z: -16.5, h: 4 } },
+  angular: { banner: { x: 0, z: -12, h: 4 } },
+  round: { banner: { x: -11, z: 10, h: 4 } },
+  faceted: { banner: { x: -12.2, z: -3.4, h: 5 } },
 };
 
 /** Moving parts (shared geometry per style): rig = turning simulator, targets = pop-up row */
@@ -190,6 +209,21 @@ function tower(c, kind, y0) {
   beacon(b, glows.get('beaconA'), kit, [x, y0 + T.beaconY, z]);
 }
 
+/** Team-painted drill-yard floor (shape by silhouette; none for a silhouette without an entry) */
+function yardInlay(c, sil, y0) {
+  const I = TEAM.inlay[sil];
+  if (!I) return;
+  const { b, S } = c;
+  const t = { y: y0 + TEAM.inlayH / 2, z: I.z, detail: 2 };
+  if (I.kind === 'ellipse') b.cylinder(1, 1, TEAM.inlayH, I.segments, S.teamShade, { ...t, sx: I.w / 2, sz: I.d / 2 });
+  else if (I.kind === 'rhombus') {
+    const g = new THREE.BoxGeometry(1, TEAM.inlayH, 1);
+    g.rotateY(Math.PI / 4);
+    g.scale(I.w / Math.SQRT2, 1, I.d / Math.SQRT2);
+    b.add(g, S.teamShade, t);
+  } else b.box(I.w, TEAM.inlayH, I.d, S.teamShade, t);
+}
+
 const BODIES = {};
 
 /** rounded: styled hall with a stepped top, windows, hangar door and roof fans */
@@ -202,9 +236,16 @@ BODIES.rounded = (c) => {
   const H = D.hall;
   const front = L.hallZ + H.d / 2;
   styledBox(b, kit, H.w, H.h, H.d, S.hull, { base: true, y: y0, z: L.hallZ });
-  styledBox(b, kit, D.top.w, D.top.h, D.top.d, S.hull, { base: true, y: y0 + H.h, z: D.top.z });
+  styledBox(b, kit, D.top.w, D.top.h, D.top.d, S.teamPaint, { base: true, y: y0 + H.h, z: D.top.z, detail: 2 });   // team-painted upper block
   const roof = y0 + H.h;
   bands(c, H.w / 2, L.hallZ - H.d / 2, L.hallZ, H.d, y0 + L.band.y);
+  const Tm = TEAM.rounded;
+  for (const sx of [-1, 1]) {
+    for (const e of [-1, 1]) teamPanel(b, kit, Tm.side.w, Tm.side.h, { x: sx * H.w / 2, y: y0 + Tm.side.y, z: L.hallZ + e * Tm.side.dz, ry: sx * Math.PI / 2 });
+  }
+  roofMark(b, kit, { x: 0, y: roof, z: Tm.mark.z, w: Tm.mark.w, d: Tm.mark.d });
+  teamTrim(b, kit, { x: 0, y: roof, z: L.hallZ, w: H.w - 2 * Tm.trimInset, d: H.d - 2 * Tm.trimInset });
+  teamBanner(b, kit, { x: Tm.banner.x, y: roof, z: Tm.banner.z, h: Tm.banner.h });
   const W = D.win;
   for (const x of W.xs) {
     b.box(W.w + W.frame, W.h + W.frame, W.t, S.frame, { x, y: y0 + W.y, z: front + W.t / 2 });
@@ -230,9 +271,10 @@ BODIES.angular = (c) => {
   const H = D.hall;
   const front = L.hallZ + H.d / 2;
   const back = L.hallZ - H.d / 2;
-  b.taperedBox(H.w, H.topW, H.h, H.d, S.hull, { y: y0, z: L.hallZ }, H.topD);
+  b.taperedBox(H.w, H.topW, H.h, H.d, S.teamPaint, { y: y0, z: L.hallZ, detail: 2 }, H.topD);   // the whole armoured hall is team paint
   b.box(H.w, 0.6, H.d, S.lower, { base: true, y: y0, z: L.hallZ });
   const roof = y0 + H.h;
+  teamBanner(b, kit, { x: TEAM.angular.banner.x, y: roof, z: TEAM.angular.banner.z, h: TEAM.angular.banner.h });
   const leanX = (H.w - H.topW) / 2;
   const leanZ = (H.d - H.topD) / 2;
   const tiltX = Math.atan2(leanX, H.h);
@@ -278,7 +320,8 @@ BODIES.round = (c) => {
   const H = D.hall;
   const cz = L.hallZ;
   b.cylinder(1, 1, H.drumH, H.segments, S.hull, { y: y0 + H.drumH / 2, z: cz, sx: H.a, sz: H.b });
-  b.add(new THREE.SphereGeometry(1, H.segments, H.rings, 0, TAU, 0, Math.PI / 2), S.hull, { y: y0 + H.drumH, z: cz, sx: H.a, sy: H.domeH, sz: H.b });
+  b.add(new THREE.SphereGeometry(1, H.segments, H.rings, 0, TAU, 0, Math.PI / 2), S.teamPaint, { y: y0 + H.drumH, z: cz, sx: H.a, sy: H.domeH, sz: H.b, detail: 2 });   // team-painted dome
+  teamBanner(b, kit, { x: TEAM.round.banner.x, y: y0, z: TEAM.round.banner.z, h: TEAM.round.banner.h });
   const N = D.neonRing;
   b.cylinder(1, 1, N.h, H.segments, S.neon, { y: y0 + N.y, z: cz, sx: H.a + N.out, sz: H.b + N.out }, true);
   const peak = y0 + H.drumH + H.domeH;
@@ -320,6 +363,7 @@ BODIES.faceted = (c) => {
   const front = L.hallZ + C.d / 2;
   b.taperedBox(C.w, C.topW, C.h, C.d, S.hull, { y: y0, z: L.hallZ }, C.topD);
   const top = y0 + C.h;
+  teamBanner(b, kit, { x: TEAM.faceted.banner.x, y: y0, z: TEAM.faceted.banner.z, h: TEAM.faceted.banner.h });
   b.box(3.2, 1.0, 3.2, S.hullDark, { y: top + 0.5, z: L.hallZ, ry: Math.PI / 4 });
   neonStrip(b, kit, 3.4, 0.12, 3.4, { y: top + 1.06, z: L.hallZ, ry: Math.PI / 4 });
   spike(b, kit, { x: 0, y: top + 1.0, z: L.hallZ, h: 3.0, r: 0.5 });
@@ -334,7 +378,7 @@ BODIES.faceted = (c) => {
   decal(c, [0, y0 + D.decals.sideY, wallBack(D.decals.sideY)], [0, Math.sin(tiltZ), -Math.cos(tiltZ)], L.decalSize);
   const Wg = D.wing;
   for (const sx of [-1, 1]) {
-    b.taperedBox(Wg.w, Wg.topW, Wg.h, Wg.d, S.hull, { x: sx * Wg.x, y: y0, z: L.hallZ }, Wg.topD);
+    b.taperedBox(Wg.w, Wg.topW, Wg.h, Wg.d, S.teamPaint, { x: sx * Wg.x, y: y0, z: L.hallZ, detail: 2 }, Wg.topD);   // team-painted wings
     neonStrip(b, kit, Wg.neonH, Wg.neonH, Wg.topD, { x: sx * Wg.x, y: y0 + Wg.h + Wg.neonH / 2, z: L.hallZ });
     c.vents.push(ventUnit(b, glows, kit, { x: sx * Wg.x, y: y0 + Wg.h, z: L.hallZ, r: Wg.ventR }));
     const outer = Wg.x + Wg.w / 2 - ((Wg.w - Wg.topW) / 2) * (D.decals.sideY / Wg.h);
@@ -427,6 +471,7 @@ function buildShared(kit) {
   const y0 = LAYOUT.padH;
   const c = { kit, S: kit.S, b: new PartBuilder(), glows: new GlowSet(), decals: [], vents: [] };
   BODIES[sil](c);
+  yardInlay(c, sil, y0);
   yardFixtures(c, y0);
   obstacleCourse(c, y0);
   tower(c, D.tower, y0);

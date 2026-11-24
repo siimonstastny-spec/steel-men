@@ -1,4 +1,4 @@
-// Steel Mans – on-hit weapon effects (weapon.effects in stats.json): stun, knockback, burn.
+// Steel Men – on-hit weapon effects (weapon.effects in stats.json): stun, knockback, burn.
 // Each unit hit by an effect gets a UnitStatus (unit.status); World.update ticks all of them.
 // Balance numbers are in stats.json → rules.effects, visuals in config.js → VFX.
 import { getStats } from '../data/Stats.js';

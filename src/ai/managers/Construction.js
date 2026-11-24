@@ -1,4 +1,4 @@
-// Steel Mans AI – construction: the opening build order, reactive builds (power, supply), builders for unfinished
+// Steel Men AI – construction: the opening build order, reactive builds (power, supply), builders for unfinished
 // buildings and the base defence plan (towers, walls with turrets, a killbox on the hard difficulty).
 // Spots are searched in rings around the HQ with the same placement test as the UI (Construction.canPlace), with a
 // free gap around every building; the cone in front of the HQ stays free for the army and the defences.

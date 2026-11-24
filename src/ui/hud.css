@@ -1,4 +1,4 @@
-/* Steel Mans – in-game HUD. Faction tint: --hud-primary / --hud-accent are set by Hud.js from
+/* Steel Men – in-game HUD. Faction tint: --hud-primary / --hud-accent are set by Hud.js from
    stats.json → races[*].uiColor of the player's faction. Everything else derives from them. */
 :root {
   --hud-primary: #4cc38a;

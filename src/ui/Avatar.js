@@ -1,4 +1,4 @@
-// Steel Mans – generated avatar of a computer player (no image files): a geometric badge in the team colour with the
+// Steel Men – generated avatar of a computer player (no image files): a geometric badge in the team colour with the
 // monogram of the call sign and 1..N small bars, all derived from the avatar index (docs/notes/n6-ainames.md).
 //
 //   avatarHtml({ name, avatar, color, size })   inline <svg class="ai-avatar"> string (name and colour are escaped / validated)

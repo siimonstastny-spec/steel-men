@@ -1,4 +1,4 @@
-// Steel Mans – selection helpers (local UI only, never touches the simulation or its hash).
+// Steel Men – selection helpers (local UI only, never touches the simulation or its hash).
 //   unitTypeKey(unit)   same kind of entity: mechs = same legs + torso set, vehicles = same unit id, crews = same race
 //   isCombatUnit(unit)  every mech (also armless) and armed vehicles; builders, harvesters, unarmed crews and buildings not
 //   preferCombat(units) drag-select filter: when any combat unit is inside, only the combat units stay

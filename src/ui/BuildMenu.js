@@ -1,4 +1,4 @@
-// Steel Mans – economy pages of the option grid (left), a pure view of the simulation for the local player:
+// Steel Men – economy pages of the option grid (left), a pure view of the simulation for the local player:
 //   • selected own builder vehicle (construct ability) → buildings the faction may build (canProduce
 //     'structures', buildable, requires) → placement preview (Construction.PlacementGhost)
 //   • selected own building under construction → progress, builders, "cancel construction" (partial refund)

@@ -1,4 +1,4 @@
-// Steel Mans – victory conditions. A condition decides whether a team is eliminated; Match.js polls it a few times
+// Steel Men – victory conditions. A condition decides whether a team is eliminated; Match.js polls it a few times
 // per second. Add a condition by adding an entry here, its id to config.js VICTORY.conditions and the i18n keys
 // victory.<id> + victory.<id>.hint (e.g. 'kingOfTheHill' for the super node later).
 import { VICTORY } from '../config.js';

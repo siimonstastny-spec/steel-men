@@ -1,4 +1,4 @@
-// Steel Mans – procedural stealth bomber (roadmap U3). Broad flat fuselage, wide wings, two exhausts, a belly bomb bay
+// Steel Men – procedural stealth bomber (roadmap U3). Broad flat fuselage, wide wings, two exhausts, a belly bomb bay
 // with two doors and 4 bombs hidden inside. Ground attack only (no weapon barrel). Camouflage = owner calls
 // setCloaked(0..1); it may move while cloaked. Shape by style.silhouette, no faction names.
 //   dropBomb([index]) – visual only: the bay doors open (self-driven, setDeployed is overridden while bombs are in
@@ -9,6 +9,7 @@
 // update() runs only at LOD0 and while visible (kit); at far LOD the bombs stay in the bay (frozen rest pose).
 import { UnitBuilder, ProcUnit, UNIT_KIT, createUnitCache, registerProcUnit } from './UnitKit.js';
 import { fuselage, wings, tailFins, exhaust, statusLamp } from './UnitModules.js';
+import { teamAircraft } from './StealthJetUnit.js';   // team surfaces of aircraft: wing plates + fuselage cap / chevron
 
 const HALF_PI = Math.PI / 2;
 const BASE = { L: 8.4, W: 2.2, H: 1.0, span: 10.0, rc: 4.2, tc: 0.7, sweep: 2.2, fins: 2 };
@@ -51,6 +52,9 @@ function build(kit) {
   ub.meta.hull = { bone: 'hull', bank: true, bobAmp: JET.bobAmp, bobFreq: JET.bobFreq };
   fuselage(ub, { bone: 'hull', L, W, H });
   wings(ub, { bone: 'hull', y: H * JET.wingY, z: L * JET.wingZ, span: s.span, rc: s.rc, tc: s.tc, sweep: s.sweep });
+  teamAircraft(ub, {
+    bone: 'hull', L, W, H, wingY: H * JET.wingY, wingZ: L * JET.wingZ, span: s.span, rc: s.rc, tc: s.tc, sweep: s.sweep,
+  });
   if (s.fins) tailFins(ub, { bone: 'hull', y: H * JET.finY, z: L * JET.finZ, h: JET.finH, chord: JET.finChord, count: s.fins, tilt: JET.finTilt });
   for (let i = 0; i < JET.engines; i++) {
     const x = (i - (JET.engines - 1) / 2) * JET.engineSpacing;

@@ -1,4 +1,4 @@
-// Steel Mans – crew squad: N small figures (crew.squadSize) that operate one mech together.
+// Steel Men – crew squad: N small figures (crew.squadSize) that operate one mech together.
 // The squad shares one HP pool and is always complete – a mech needs all of them, so the squad
 // never shrinks; it dies as a whole at 0 HP. Experience belongs to the squad, not the mech.
 import * as THREE from 'three';

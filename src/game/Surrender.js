@@ -1,4 +1,4 @@
-// Steel Mans – [N5FIX] a surrendering team leaves the map: every unit and building of the team vanishes at once,
+// Steel Men – [N5FIX] a surrendering team leaves the map: every unit and building of the team vanishes at once,
 // inside the simulation tick in which the 'surrender' command runs (Match.surrender), so every client removes the same
 // entities. No explosion, no wreck, no loot, no ejected crew: the entities are only flagged the way their own death
 // flags them (dead / destroyed + removed) and World.update drops them from its lists (and the pathfinding boxes) later

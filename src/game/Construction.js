@@ -1,4 +1,4 @@
-// Steel Mans – construction rules: where a building may stand, starting / cancelling a construction (cost paid
+// Steel Men – construction rules: where a building may stand, starting / cancelling a construction (cost paid
 // in full at the start, a part refunded on cancel), the construction speed of N builders and the placement
 // preview that follows the cursor (CommandInput.placement).
 //

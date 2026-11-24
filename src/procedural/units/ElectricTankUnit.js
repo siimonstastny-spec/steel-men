@@ -1,10 +1,11 @@
-// Steel Mans – procedural electric tank (roadmap U3). Always a hover (glow under the pads), lightning gun in the turret
+// Steel Men – procedural electric tank (roadmap U3). Always a hover (glow under the pads), lightning gun in the turret
 // and two tesla pylons on the hull whose tips are bridged by flickering arcs ("lightning between the spikes"; they
 // flare up on every shot). Elevates to shoot air targets. Shape proportions by style.silhouette, never by faction name.
 // Sockets: muzzle, turret, aim, cargo, smoke, exhaust_1/2. Model units ≈ 6.4 long, 3.2 wide, ≈ 2.6 high (with pylons).
 // Registered as 'electricTank'. The arc bone is a kit arc (meta.arcs), driven by the ProcUnit; no code per frame here.
 import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
 import { hull, hover, turret, weapon, exhaust, statusLamp } from './UnitModules.js';
+import { skirtTeamRim, teamDeck } from './LightPlasmaTankUnit.js';   // shared team helpers (skirt rim, deck marks)
 import { makeRng } from '../ProcKit.js';
 
 const BASE = {
@@ -43,9 +44,12 @@ function build(kit) {
   const ub = new UnitBuilder(kit);
   ub.bone('hull', 'root', [0, L * HOVER.gap, 0]);
   const base = hover(ub, { bone: 'hull', L: L * HOVER.skirtL, W: W * HOVER.skirtW, skirtH: L * HOVER.skirtH, pads: HOVER.pads.map(([x, z]) => [x * W, z * L]) });
-  const hl = hull(ub, { bone: 'hull', y: base, L: L * HOVER.hullL, W, H });
+  // team colour: skirt rim, module layouts (team: true), deck marks on the rounded / angular hull; emblems on neutral plates
+  skirtTeamRim(ub, { y: base, w: W * HOVER.skirtW, d: L * HOVER.skirtL });
+  const hl = hull(ub, { bone: 'hull', y: base, L: L * HOVER.hullL, W, H, team: true });
+  teamDeck(ub, { top: hl.top, hullLen: L * HOVER.hullL, L, W });
   const t = s.turret;
-  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h });
+  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
   weapon(ub, 'lightning', {
     parent: 'turret', position: [0, tr.mid, tr.front * WEAPON_MOUNT], length: s.gun.length, caliber: s.gun.caliber, pitch: s.gun.pitch,
   });

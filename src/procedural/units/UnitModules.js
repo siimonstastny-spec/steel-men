@@ -1,16 +1,22 @@
-// Steel Mans – procedural unit modules (roadmap U0). Each module writes painted parts, glow parts, bones, sockets and
+// Steel Men – procedural unit modules (roadmap U0). Each module writes painted parts, glow parts, bones, sockets and
 // animation meta into a UnitBuilder (UnitKit.js); shapes follow style.silhouette (rounded | angular | round | faceted),
 // colours / surfaces come from the style kit (kit.S, unitStyle), never from faction names.
 //   chassis   tracks (moving cleats + sprockets), wheels (spin + steering), hover (skirt, glowing pads, bob)
 //   body      hull, turret (yaw bone), fuselage, wings, tailFins (aircraft)
 //   weapons   weapon(kind): cannon | missile | gun | laser | plasma | lightning (pitch bone, recoil, flash, sockets)
 //   effects   exhaust (flame by style: ion / rocket / plasma / beam), statusLamp, outriggers (deploy channels)
+//   team      teamStripe, teamPanel, teamTrim, roofMark (kit.S.teamPaint / teamShade vertices, no extra draw call),
+//             emblemPlate (sign decal on a neutral backing slab); hull / turret / tracks take `team: true` for a team
+//             layout by silhouette (docs/notes/proc-unit-teamcolor-kit.md)
 // Units of length = model units of the unit (see docs/notes/proc-unit-kit.md: light tank ≈ 6.2 long). Forward = +Z.
 // Construction time only – nothing here runs per frame.
 import * as THREE from 'three';
 import { makeRng } from '../ProcKit.js';
 import { marking } from '../ProcModules.js';
+import { PROC_EMBLEM } from '../../config.js';
 import { UNIT_KIT } from './UnitKit.js';
+
+export { teamPaintShare } from '../ProcModules.js';   // test / tuning: teamPaintShare(unit.shared.paint)
 
 const TAU = Math.PI * 2;
 const HALF_PI = Math.PI / 2;
@@ -117,6 +123,21 @@ export const UNIT_MODULES = {
   outrigger: { beamT: 0.15, spadeW: 0.5, spadeH: 0.06, spadeD: 0.4, fold: 2.95, out: 0.5 },
   // aviation navigation light colours (left / right) – physical convention, not faction
   navColors: ['#ff3020', '#30ff60'],
+  // team layouts of hull / turret / tracks (option team: true), shares of the module sizes; caps = polar angle (rad) of a
+  // sphere segment laid over the curved top × lift (just proud of the body), capSegH = its height segments
+  team: {
+    hull: {
+      rounded: { stripeY: 0.5, stripeH: 0.42, stripeL: 0.8, stripes: 1 },    // deck side stripes (shares of the deck height / deck length)
+      round: { cap: 0.85, capLift: 1.015, capSegH: 2 },                      // ellipsoid top cap (+ side plates / fins painted elsewhere)
+      faceted: { strakeShare: 0.55, strakeL: 0.75 },                         // strakes on the upper faces (share of the face width / body length)
+    },
+    turret: {
+      rounded: { roofW: 0.72, roofD: 0.6, roofZ: 0.06, emblemY: 0.26, emblemSide: 0.38 },   // band painted, roof mark, side emblems on plates under the band
+      angular: { emblemX: 0.2, emblemZ: -0.22, emblemShare: 0.7, chevronW: 0.8, chevronD: 0.34, chevronZ: 0.25 },   // shares of the roof (w × topW, d × topD), emblem × h, beside the hatch; bins + rear plate painted
+      round: { cap: 0.85, capLift: 1.012, capSegH: 2, emblemAt: 0.38, emblemShare: 0.45 },  // dome cap instead of the team ring; side emblems below it
+      faceted: { roof: 0.92, emblemAt: 0.5, emblemShare: 0.75 },                            // rhombus over the top diamond; emblems on the front flank faces
+    },
+  },
 };
 
 const M = UNIT_MODULES;
@@ -156,17 +177,219 @@ const neonLine = (b, kit, len, t) => b.box(M.neon.d, M.neon.h, len, kit.S.neon, 
 
 const shapeOf = (kit, table) => table[kit.style.silhouette] ?? table.rounded;
 
+// ---------------------------------------------------------------- team paint + emblem plate (construction time only)
+// Team colour of a unit = ordinary paint vertices with the team mask (kit.S.teamPaint, darker kit.S.teamShade) on any
+// bone's PartBuilder: no extra mesh / material / draw call, setTeamColor and the batcher's aInst repaint them. Wall
+// elements (stripe, panel) have their origin ON the wall, centred, and stick out toward local +Z; the placement t
+// ({ x, y, z, ry, detail }) puts them on any wall: ry 0 = +Z (front), π = −Z, +π/2 = +X, −π/2 = −X. Top elements
+// (roofMark, teamTrim) stand on y. Look by kit.team (style.teamPaint) and style.silhouette, never by faction names.
+
+const TPU = UNIT_KIT.teamPaint;
+const lodOf = (kind, t) => ({ detail: TPU.lod[kind], ...t });
+
+/** Box offset inside the element's own frame (lx, ly, lz), then placed with t */
+function teamBox(b, s, t, w, h, d, lx, ly, lz) {
+  return b.add(new THREE.BoxGeometry(w, h, d).translate(lx, ly, lz), s, t);
+}
+
+/** Flat rhombus slab (extent w × d on the XZ plane, height h, standing on y = 0), local offset y0 */
+function rhombusSlab(w, h, d, y0 = 0) {
+  return new THREE.BoxGeometry(1, h, 1).rotateY(Math.PI / 4).scale(w / Math.SQRT2, 1, d / Math.SQRT2).translate(0, y0 + h / 2, 0);
+}
+
+/** Free intervals of [−length/2, length/2] around `avoid` ([from, to] pairs in local x) + UNIT_KIT.teamPaint.emblemClear */
+function freeSpans(length, avoid) {
+  let spans = [[-length / 2, length / 2]];
+  if (avoid) {
+    for (const [a, c] of avoid) {
+      const lo = Math.min(a, c) - TPU.emblemClear;
+      const hi = Math.max(a, c) + TPU.emblemClear;
+      const next = [];
+      for (const [s0, s1] of spans) {
+        if (hi <= s0 || lo >= s1) { next.push([s0, s1]); continue; }
+        if (lo > s0) next.push([s0, lo]);
+        if (hi < s1) next.push([hi, s1]);
+      }
+      spans = next;
+    }
+  }
+  return spans.filter(([s0, s1]) => s1 - s0 >= TPU.stripe.minSegment);
+}
+
+/**
+ * Team stripe on a wall of `bone`: strip `length` (local x) × `height` (local y), kind by style.teamPaint.stripeKind –
+ * 'band' (min(count, maxBands) team bands), 'slash' (team band over a darker team band), 'fine' (fineLines thin lines,
+ * team / shade alternating). count defaults to style.teamPaint.stripes. avoid = [[x0, x1], …] local x intervals kept free
+ * (+ emblemClear each side; e.g. [-half, half] from emblemPlate) – team paint never touches an emblem.
+ */
+export function teamStripe(ub, bone, length, height, t = {}, { avoid, count = ub.kit.team.stripes } = {}) {
+  const S = ub.kit.S;
+  const K = TPU.stripe;
+  const kind = ub.kit.team.stripeKind;
+  const b = ub.paint(bone);
+  const tt = lodOf('stripe', t);
+  let lines, thick, step, lift;
+  if (kind === 'fine') {
+    lines = K.fineLines; step = height / lines; thick = step * K.fineShare; lift = (step - thick) / 2;
+  } else if (kind === 'slash') {
+    lines = 2; thick = height / 2; step = thick; lift = 0;
+  } else {
+    lines = Math.max(1, Math.min(K.maxBands, count)); thick = height / (lines + (lines - 1) * K.gap); step = thick * (1 + K.gap); lift = 0;
+  }
+  for (const [s0, s1] of freeSpans(length, avoid)) {
+    for (let i = 0; i < lines; i++) {
+      const shade = kind === 'fine' ? i % 2 === 1 : kind === 'slash' && i === 0;
+      teamBox(b, shade ? S.teamShade : S.teamPaint, tt, s1 - s0, thick, K.depth, (s0 + s1) / 2, -height / 2 + thick / 2 + i * step + lift, K.depth / 2);
+    }
+  }
+  return ub;
+}
+
+/**
+ * Team panel on a wall of `bone` (w × h, centred on the placement), kind by style.teamPaint.panelKind: 'inset' (metal
+ * frame round a team core), 'plate' (team plate + darker lower strip), 'pearl' (oval), 'blade' (rhombus + darker core).
+ */
+export function teamPanel(ub, bone, w, h, t = {}) {
+  const S = ub.kit.S;
+  const K = TPU.panel;
+  const b = ub.paint(bone);
+  const tt = lodOf('panel', t);
+  const d = K.depth;
+  switch (ub.kit.team.panelKind) {
+    case 'plate': {
+      const lowH = h * K.lowerShare;
+      teamBox(b, S.teamPaint, tt, w, h, d, 0, 0, d / 2);
+      teamBox(b, S.teamShade, tt, w, lowH, d * K.lowerDepth, 0, -h / 2 + lowH / 2, (d * K.lowerDepth) / 2);
+      break;
+    }
+    case 'pearl':
+      b.add(new THREE.CylinderGeometry(1, 1, d, K.segments).rotateX(HALF_PI).scale(w / 2, h / 2, 1).translate(0, 0, d / 2), S.teamPaint, tt);
+      break;
+    case 'blade':
+      // rhombusSlab stands on y = 0; rotateX(π/2) turns its thickness to local +Z (0..depth), its d extent to y
+      b.add(rhombusSlab(w, d, h).rotateX(HALF_PI), S.teamPaint, tt);
+      b.add(rhombusSlab(w * K.coreShare, d * K.coreDepth, h * K.coreShare).rotateX(HALF_PI), S.teamShade, tt);
+      break;
+    default: {
+      const f = Math.min(K.frame, w / 4, h / 4);
+      teamBox(b, S.frame, tt, w, h, d * K.frameDepth, 0, 0, (d * K.frameDepth) / 2);
+      teamBox(b, S.teamPaint, tt, w - 2 * f, h - 2 * f, d, 0, 0, d / 2);
+    }
+  }
+  return ub;
+}
+
+/**
+ * Low team rim standing on y (bottom) of `bone`: round a w × d rectangle (4 bars, centre x z), or an open ring of radius
+ * r / an ellipse w × d (`round: true`). Height h (default UNIT_KIT.teamPaint.trim.h) × style.teamPaint.trim (0 = none).
+ */
+export function teamTrim(ub, bone, { x = 0, y = 0, z = 0, w, d, r, h, round = false }, t = {}) {
+  const k = ub.kit.team.trim;
+  if (k <= 0) return ub;
+  const K = TPU.trim;
+  const th = (h ?? K.h) * k;
+  const s = ub.kit.S.teamPaint;
+  const b = ub.paint(bone);
+  const tt = lodOf('trim', t);
+  if (r !== undefined || round) {
+    const sx = r !== undefined ? r : w / 2;
+    const sz = r !== undefined ? r : d / 2;
+    b.add(new THREE.CylinderGeometry(1, 1, th, K.segments, 1, true).scale(sx, 1, sz).translate(x, y + th / 2, z), s, tt);
+    return ub;
+  }
+  for (const e of [1, -1]) {
+    teamBox(b, s, tt, w + K.t, th, K.t, x, y + th / 2, z + e * d / 2);
+    teamBox(b, s, tt, K.t, th, d - K.t, x + e * w / 2, y + th / 2, z);
+  }
+  return ub;
+}
+
+const ROOF_MARKS = { rounded: 'plate', angular: 'chevron', round: 'disc', faceted: 'rhombus' };   // by style.silhouette
+
+/**
+ * Team mark lying on a top surface of `bone` (y = the surface), footprint w × d (× style.teamPaint.roofMark, 0 = none),
+ * turned by ry; shape by silhouette: rounded = plate with a darker stripe, angular = chevron pointing to +Z, round =
+ * elliptic disc with a darker core, faceted = rhombus with a darker core. The most readable team surface from the RTS camera.
+ */
+export function roofMark(ub, bone, { x = 0, y = 0, z = 0, w, d, ry = 0 }, t = {}) {
+  const k = ub.kit.team.roofMark;
+  if (k <= 0) return ub;
+  const S = ub.kit.S;
+  const K = TPU.roofMark;
+  const b = ub.paint(bone);
+  const tt = lodOf('roofMark', { x, y, z, ry, ...t });
+  const W = w * k;
+  const D = d * k;
+  const top = K.h;
+  switch (ROOF_MARKS[ub.kit.style.silhouette] ?? ROOF_MARKS.rounded) {
+    case 'chevron': {
+      const armW = D * K.chevronArm;
+      const len = Math.hypot(W / 2, D - armW);
+      for (const s of [1, -1]) {
+        const phi = Math.atan2(D - armW, s * (W / 2));   // arm from the apex (0, +D/2) back to (±W/2, −D/2)
+        b.add(new THREE.BoxGeometry(len, top, armW).rotateY(phi).translate((s * W) / 4, top / 2, 0), S.teamPaint, tt);
+      }
+      break;
+    }
+    case 'disc':
+      b.add(new THREE.CylinderGeometry(1, 1, top, K.segments).scale(W / 2, 1, D / 2).translate(0, top / 2, 0), S.teamPaint, tt);
+      b.add(new THREE.CylinderGeometry(1, 1, top * K.coreLift, K.segments).scale((W / 2) * K.discCore, 1, (D / 2) * K.discCore).translate(0, (top * K.coreLift) / 2, 0), S.teamShade, tt);
+      break;
+    case 'rhombus':
+      b.add(rhombusSlab(W, top, D), S.teamPaint, tt);
+      b.add(rhombusSlab(W * K.rhombusCore, top * K.coreLift, D * K.rhombusCore), S.teamShade, tt);
+      break;
+    default:
+      teamBox(b, S.teamPaint, tt, W, top, D, 0, top / 2, 0);
+      teamBox(b, S.teamShade, tt, W * K.stripeShare, top * K.coreLift, D * K.stripeD, 0, (top * K.coreLift) / 2, 0);
+  }
+  return ub;
+}
+
+const _pn = new THREE.Vector3();
+const _pu = new THREE.Vector3();
+const _po = new THREE.Vector3();
+const _pm = new THREE.Matrix4();
+
+/**
+ * Faction emblem on `bone`: the sign decal (faction colour on its neutral plate, PROC_EMBLEM) at `position` on a wall
+ * with `normal`, side `size`; with `backing` (flat walls) a neutral slab (kit.S[UNIT_KIT.emblemPlate.surface], never
+ * team-masked) slightly larger than the decal lifts it off the wall, so no team paint can show through or overlap.
+ * Leave backing off on curved surfaces (domes). Returns the half side of the plate → teamStripe avoid [−half, half].
+ */
+export function emblemPlate(ub, bone, { position, normal, size, up, backing = true }) {
+  const E = UNIT_KIT.emblemPlate;
+  const quad = size * PROC_EMBLEM.plate.grow;
+  if (!backing) {
+    ub.emblem(bone, [{ position, normal, size, up }]);
+    return quad / 2;
+  }
+  const side = quad * E.grow;
+  _pn.fromArray(normal).normalize();
+  if (up) _pu.fromArray(up); else _pu.set(0, Math.abs(_pn.y) > 0.99 ? 0 : 1, Math.abs(_pn.y) > 0.99 ? -1 : 0);   // as emblemDecalGeometry
+  _pm.lookAt(_pn, _po.set(0, 0, 0), _pu).setPosition(position[0], position[1], position[2]);   // local +Z → normal
+  const slab = new THREE.BoxGeometry(side, side, E.depth).translate(0, 0, E.depth / 2).applyMatrix4(_pm);
+  ub.paint(bone).add(slab, ub.kit.S[E.surface], { detail: E.lod });
+  ub.emblem(bone, [{
+    position: [position[0] + _pn.x * E.depth, position[1] + _pn.y * E.depth, position[2] + _pn.z * E.depth], normal, size, up,
+  }]);
+  return side / 2;
+}
+
 // ---------------------------------------------------------------- hull
 
 /**
  * Hull body on `bone` (bottom at y = o.y), length L, width W, height H. Shape by silhouette. Adds headlights (paint +
- * glow) and a rear marking. Returns { top (y of the deck), frontZ, rearZ, halfW }.
+ * glow) and a rear marking. team: true = team layout (UNIT_MODULES.team.hull): rounded side stripes, angular side
+ * armour plates, round ellipsoid cap, faceted strakes + fins + tail cone in the team colour.
+ * Returns { top (y of the deck), frontZ, rearZ, halfW }.
  */
-export function hull(ub, { bone = 'hull', y = 0, L, W, H }) {
+export function hull(ub, { bone = 'hull', y = 0, L, W, H, team = false }) {
   const kit = ub.kit;
   const S = kit.S;
   const b = ub.paint(bone);
   const sil = kit.style.silhouette;
+  const TH = M.team.hull;
   let top = y + H;
   if (sil === 'angular') {
     const A = M.hull.angular;
@@ -175,7 +398,7 @@ export function hull(ub, { bone = 'hull', y = 0, L, W, H }) {
     b.taperedBox(W * A.deckW, W * A.deckTopW, H - lowH, L * A.deckL, S.hullDark, { y: y + lowH, z: L * A.deckZ }, L * A.deckTopL);
     for (const side of [1, -1]) {
       const px = side * (W / 2 + A.plateT / 2);
-      b.box(A.plateT, H * A.plateH, L * A.plateL, S.lower, { x: px, y: y + (H * A.plateH) / 2 });
+      b.box(A.plateT, H * A.plateH, L * A.plateL, team ? S.teamPaint : S.lower, { x: px, y: y + (H * A.plateH) / 2, detail: team ? TPU.lod.panel : undefined });
       for (let z = -L * A.plateL / 2 + A.rivetStep / 2; z < L * A.plateL / 2; z += A.rivetStep) {
         b.cylinder(A.rivetR, A.rivetR, A.rivetR * 2, A.rivetSeg, S.trim, { rz: HALF_PI, x: px + side * A.plateT / 2, y: y + H * A.plateH * A.rivetY, z, detail: 0 });
       }
@@ -186,6 +409,12 @@ export function hull(ub, { bone = 'hull', y = 0, L, W, H }) {
     b.sphere(1, R.segW, R.segH, S.hull, { sx: W / 2, sy: H * R.bodyH, sz: L / 2, y: y + H * R.bodyY });
     b.sphere(1, R.domeSegW, R.domeSegH, S.hullDark, { sx: W * R.domeW, sy: H * R.domeH, sz: L * R.domeL, y: y + H * R.domeY, z: L * R.domeZ });
     b.torus(1, R.ringT, M.ring.radial, M.ring.tubular, TAU, S.neon, { rx: HALF_PI, sx: W / 2 + R.ringT, sy: L / 2 + R.ringT, y: y + H * R.bodyY });
+    if (team) {
+      const C = TH.round;
+      b.add(new THREE.SphereGeometry(1, R.segW, C.capSegH, 0, TAU, 0, C.cap), S.teamPaint, {
+        sx: (W / 2) * C.capLift, sy: H * R.bodyH * C.capLift, sz: (L / 2) * C.capLift, y: y + H * R.bodyY, detail: TPU.lod.roofMark,
+      });
+    }
     top = y + H * (R.bodyY + R.bodyH) * R.topShare;
   } else if (sil === 'faceted') {
     const F = M.hull.faceted;
@@ -195,12 +424,25 @@ export function hull(ub, { bone = 'hull', y = 0, L, W, H }) {
     const frontZ = L * F.bodyZ + bodyL / 2;
     noseCone(b, 4, W, H * F.bodyH, L * F.noseL, S.hull, { y: cy, z: frontZ + (L * F.noseL) / 2 });
     const rearL = L * F.noseL * F.rearL;
-    noseCone(b, 4, W * F.rearShare, H * F.bodyH * F.rearShare, rearL, S.hullDark, { y: cy, z: L * F.bodyZ - bodyL / 2 - rearL / 2, rx: -HALF_PI });
+    noseCone(b, 4, W * F.rearShare, H * F.bodyH * F.rearShare, rearL, team ? S.teamShade : S.hullDark, { y: cy, z: L * F.bodyZ - bodyL / 2 - rearL / 2, rx: -HALF_PI });
     for (const side of [1, -1]) neonLine(b, kit, bodyL * F.neonL, { x: side * (W / 2 + M.neon.out), y: cy, z: L * F.bodyZ });
     // diamond section: at |x| = finX·W the top surface is (1 − 2·finX) of the half height above the centre
     const finBase = cy + ((H * F.bodyH) / 2) * (1 - 2 * F.finX) - F.finSink;
     for (const side of [1, -1]) {
-      b.box(F.finT, H * F.finH, L * F.finL, S.hullDark, { x: side * W * F.finX, y: finBase + (H * F.finH) / 2, z: L * F.bodyZ - bodyL * F.finZ });
+      b.box(F.finT, H * F.finH, L * F.finL, team ? S.teamPaint : S.hullDark, { x: side * W * F.finX, y: finBase + (H * F.finH) / 2, z: L * F.bodyZ - bodyL * F.finZ });
+    }
+    if (team) {
+      // strakes on the two upper faces: face from (±W/2, cy) to (0, cy + hb/2), outward normal (±sin β, cos β)
+      const C = TH.faceted;
+      const hb = H * F.bodyH;
+      const beta = Math.atan2(hb / 2, W / 2);
+      const faceW = Math.hypot(W / 2, hb / 2);
+      const d = TPU.panel.depth;
+      for (const side of [1, -1]) {
+        b.box(faceW * C.strakeShare, d, bodyL * C.strakeL, S.teamPaint, {
+          rz: -side * beta, x: side * (W / 4 + Math.sin(beta) * d / 2), y: cy + hb / 4 + Math.cos(beta) * d / 2, z: L * F.bodyZ, detail: TPU.lod.panel,
+        });
+      }
     }
     top = cy + (H * F.bodyH) / 2;
   } else {
@@ -211,6 +453,13 @@ export function hull(ub, { bone = 'hull', y = 0, L, W, H }) {
     unitBox(b, kit, W * R.deckW, H - lowH, deckL, S.hull, { y: y + lowH + (H - lowH) / 2, z: L * R.deckZ });
     b.wedge(L * R.glacisD, H - lowH, W * R.deckW, S.hull, { ry: HALF_PI, y: y + lowH, z: L * R.deckZ + deckL / 2 + (L * R.glacisD) / 2 });
     for (const side of [1, -1]) neonLine(b, kit, L * R.neonL, { x: side * (W / 2 + M.neon.out), y: y + H * R.neonY });
+    if (team) {
+      const C = TH.rounded;
+      for (const side of [1, -1]) {
+        // on the deck sides (the lower box sides are inside the track skirts)
+        teamStripe(ub, bone, deckL * C.stripeL, (H - lowH) * C.stripeH, { x: (side * W * R.deckW) / 2, y: y + lowH + (H - lowH) * C.stripeY, z: L * R.deckZ, ry: side * HALF_PI }, { count: C.stripes });
+      }
+    }
   }
   // headlights
   const Lt = M.hull.lights;
@@ -235,14 +484,17 @@ const frontAt = (sil, L) => L * (Object.hasOwn(M.hull.front, sil) ? M.hull.front
 /**
  * Two tracks (gauge = centre distance, width tw, height th, length L) on `parent` with a belly between them, moving
  * cleats (upper / lower runs) and front / rear sprockets as bones; skirts by silhouette. Sets meta.tracks and the hull
- * lean (meta.hull is set by the model: { bone: 'hull' }).
+ * lean (meta.hull is set by the model: { bone: 'hull' }). team: true = the big skirt parts (rounded skirts, angular
+ * top plates, round pods, faceted blades) in the team colour.
  */
-export function tracks(ub, { parent = 'root', L, gauge, tw, th }) {
+export function tracks(ub, { parent = 'root', L, gauge, tw, th, team = false }) {
   const kit = ub.kit;
   const S = kit.S;
   const T = M.track;
   const b = ub.paint(parent);
   const r = th / 2;
+  const skin = team ? S.teamPaint : null;   // team layout: replaces the skirt surface below
+  const tDetail = team ? TPU.lod.panel : undefined;
   const sil = kit.style.silhouette;
   b.box(gauge - tw, th * T.bellyShare, L * T.bellyL, S.hullDark, { y: th * T.bellyY });
   for (const side of [1, -1]) {
@@ -275,19 +527,19 @@ export function tracks(ub, { parent = 'root', L, gauge, tw, th }) {
     const sx = side * (gauge / 2 + tw / 2);
     if (sil === 'angular') {
       b.box(T.plateT, th * T.plateH, L * T.plateL, S.lower, { x: sx + side * T.plateT / 2, y: th * T.plateY });
-      b.box(tw + T.skirtOver * 2, T.plateT, L * T.topPlateL, S.hullDark, { x, y: th + T.plateT / 2 + T.cleatH });
+      b.box(tw + T.skirtOver * 2, T.plateT, L * T.topPlateL, skin ?? S.hullDark, { x, y: th + T.plateT / 2 + T.cleatH, detail: tDetail });
       for (let z = -L * T.rivetSpan + T.rivetStep / 2; z < L * T.rivetSpan; z += T.rivetStep) {
         b.cylinder(T.rivetR, T.rivetR, T.rivetR * 2, T.rivetSeg, S.trim, { rz: HALF_PI, x: sx + side * T.plateT, y: th * T.rivetY, z, detail: 0 });
       }
     } else if (sil === 'round') {
-      b.sphere(1, T.podSeg[0], T.podSeg[1], S.hull, { sx: tw / 2 + T.skirtOver, sy: th * T.podH, sz: L / 2 - th * T.podInset, x, y: th * T.podY });
+      b.sphere(1, T.podSeg[0], T.podSeg[1], skin ?? S.hull, { sx: tw / 2 + T.skirtOver, sy: th * T.podH, sz: L / 2 - th * T.podInset, x, y: th * T.podY, detail: tDetail });
       neonLine(b, kit, L * T.podNeonL, { x: sx + side * (T.skirtOver + M.neon.out), y: th * T.podY });
     } else if (sil === 'faceted') {
-      b.box(T.bladeT, th * T.bladeH, L * T.bladeL, S.hullDark, { x: sx + side * T.bladeT, y: th * T.bladeY });
+      b.box(T.bladeT, th * T.bladeH, L * T.bladeL, skin ?? S.hullDark, { x: sx + side * T.bladeT, y: th * T.bladeY, detail: tDetail });
       neonLine(b, kit, L * T.bladeNeonL, { x: sx + side * (T.bladeT * 1.5 + M.neon.out), y: th * T.bladeY });
     } else {
       const skirtY = th + T.cleatH + T.skirtH / 2;   // above the upper cleat run
-      unitBox(b, kit, tw + T.skirtOver, T.skirtH, L - th * 2, S.hull, { x, y: skirtY });
+      unitBox(b, kit, tw + T.skirtOver, T.skirtH, L - th * 2, skin ?? S.hull, { x, y: skirtY, detail: tDetail });
       marking(b, kit, L * T.markL, T.skirtH * T.markH, { x: sx + side * (T.skirtOver / 2 + T.markOut), y: skirtY, z: L * T.markZ, ry: side * HALF_PI });
     }
   }
@@ -360,12 +612,14 @@ export function hover(ub, { bone = 'hull', L, W, skirtH, pads }) {
 
 /**
  * Turret on `parent` at [0, y, z] (bone 'turret', its own far LOD group, yaw = rotation.y). Shape by silhouette, team
- * band, emblem decals. Returns { top, front, mid } in turret space.
+ * band, emblem decals. team: true = team layout (UNIT_MODULES.team.turret): roof mark / cap in the team colour, painted
+ * band / bins / rear plate, emblems on neutral plates kept clear of the team paint. Returns { top, front, mid } in turret space.
  */
-export function turret(ub, { parent = 'hull', y, z = 0, w, d, h }) {
+export function turret(ub, { parent = 'hull', y, z = 0, w, d, h, team = false }) {
   const kit = ub.kit;
   const S = kit.S;
   const T = M.turret;
+  const TT = M.team.turret;
   const bone = ub.bone('turret', parent, [0, y, z], { far: true });
   ub.meta.turret = bone;
   const b = ub.paint(bone);
@@ -376,29 +630,75 @@ export function turret(ub, { parent = 'hull', y, z = 0, w, d, h }) {
     const A = T.angular;
     b.taperedBox(w, w * A.topW, h, d, S.hull, {}, d * A.topD);
     for (const side of [1, -1]) {
-      b.box(w * T.binShare, h * A.binH, d * A.binD, S.hullDark, { x: side * (w / 2 - w * T.binShare * A.binInset), y: h * A.binY, z: d * A.binZ });
+      b.box(w * T.binShare, h * A.binH, d * A.binD, team ? S.teamPaint : S.hullDark, { x: side * (w / 2 - w * T.binShare * A.binInset), y: h * A.binY, z: d * A.binZ, detail: team ? TPU.lod.panel : undefined });
     }
-    b.box(w * A.plateW, h * A.plateH, A.plateD, S.team, { y: h * A.plateY, z: -d / 2 - A.plateOut });
-    emblems = [{ position: [0, h + T.emblemOut, d * A.emblemZ], normal: [0, 1, 0], up: [0, 0, 1], size: h * A.emblemSize }];
+    b.box(w * A.plateW, h * A.plateH, A.plateD, team ? S.teamPaint : S.team, { y: h * A.plateY, z: -d / 2 - A.plateOut });
+    if (team) {
+      // roof (top of the tapered box): emblem on a plate at the back, +x side (the hatch is at -x), chevron in front
+      const C = TT.angular;
+      const roofW = w * A.topW;
+      const roofD = d * A.topD;
+      emblemPlate(ub, bone, { position: [roofW * C.emblemX, h, roofD * C.emblemZ], normal: [0, 1, 0], up: [0, 0, 1], size: h * C.emblemShare });
+      roofMark(ub, bone, { y: h, z: roofD * C.chevronZ, w: roofW * C.chevronW, d: roofD * C.chevronD });
+      emblems = [];
+    } else {
+      emblems = [{ position: [0, h + T.emblemOut, d * A.emblemZ], normal: [0, 1, 0], up: [0, 0, 1], size: h * A.emblemSize }];
+    }
   } else if (sil === 'round') {
     const R = T.round;
     b.add(new THREE.SphereGeometry(1, T.domeSegW, T.domeSegH, 0, TAU, 0, HALF_PI), S.hull, { sx: w / 2, sy: h, sz: d / 2 });
     b.torus(1, T.ringT, M.ring.radial, M.ring.tubular, TAU, S.neon, { rx: HALF_PI, sx: w / 2 + T.ringT * R.ringInset, sy: d / 2 + T.ringT * R.ringInset, y: T.ringT });
-    const k = Math.sqrt(1 - T.ringY * T.ringY);
-    b.torus(1, T.ringT, M.ring.radial, M.ring.tubular, TAU, S.team, { rx: HALF_PI, sx: (w / 2) * k + T.ringT * R.teamInset, sy: (d / 2) * k + T.ringT * R.teamInset, y: h * T.ringY });
-    const sideX = (w / 2) * Math.sqrt(1 - R.emblemAt * R.emblemAt);
-    emblems = [1, -1].map((s) => ({ position: [s * sideX, h * R.emblemAt, d * T.emblemZ], normal: [s, R.emblemTilt, 0], size: h * T.emblemShare }));
+    let at = R.emblemAt;
+    let share = T.emblemShare;
+    if (team) {
+      // team cap over the top of the dome instead of the team ring (the ring would run through the side emblems)
+      const C = TT.round;
+      b.add(new THREE.SphereGeometry(1, T.domeSegW, C.capSegH, 0, TAU, 0, C.cap), S.teamPaint, {
+        sx: (w / 2) * C.capLift, sy: h * C.capLift, sz: (d / 2) * C.capLift, detail: TPU.lod.roofMark,
+      });
+      at = C.emblemAt;
+      share = C.emblemShare;
+    } else {
+      const k = Math.sqrt(1 - T.ringY * T.ringY);
+      b.torus(1, T.ringT, M.ring.radial, M.ring.tubular, TAU, S.team, { rx: HALF_PI, sx: (w / 2) * k + T.ringT * R.teamInset, sy: (d / 2) * k + T.ringT * R.teamInset, y: h * T.ringY });
+    }
+    const sideX = (w / 2) * Math.sqrt(1 - at * at);
+    emblems = [1, -1].map((s) => ({ position: [s * sideX, h * at, d * T.emblemZ], normal: [s, R.emblemTilt, 0], size: h * share }));
     hatchY = h * T.domeHatch;
   } else if (sil === 'faceted') {
     const F = T.faceted;
     b.add(flat(new THREE.CylinderGeometry(T.faceTop, 1, 1, 4)), S.hull, { sx: w / 2, sy: h, sz: d / 2, y: h / 2 });
-    b.box(w * F.bandW, F.bandH, d * F.bandD, S.team, { y: h + F.bandH / 2, z: d * F.bandZ });
     for (const side of [1, -1]) b.box(F.finT, h * F.finH, d * F.finD, S.hullDark, { x: side * w * F.finX, y: h * F.finY, z: d * F.finZ });
-    emblems = [{ position: [0, h + F.emblemOut, d * F.emblemZ], normal: [0, 1, 0], up: [0, 0, 1], size: h * F.emblemSize }];
+    if (team) {
+      // rhombus over the top diamond; emblems on plates on the two front flank faces (planes through the +x / +z
+      // edges: x/a + z/b + (1 − k)·y/h = 1 → normal (1/a, (1 − k)/h, 1/b))
+      const C = TT.faceted;
+      const a = w / 2;
+      const c = d / 2;
+      const k = T.faceTop;
+      roofMark(ub, bone, { y: h, w: 2 * a * k * C.roof, d: 2 * c * k * C.roof });
+      const r = 1 - (1 - k) * C.emblemAt;
+      for (const s of [1, -1]) {
+        emblemPlate(ub, bone, { position: [(s * r * a) / 2, h * C.emblemAt, (r * c) / 2], normal: [s / a, (1 - k) / h, 1 / c], size: h * C.emblemShare });
+      }
+      emblems = [];
+    } else {
+      b.box(w * F.bandW, F.bandH, d * F.bandD, S.team, { y: h + F.bandH / 2, z: d * F.bandZ });
+      emblems = [{ position: [0, h + F.emblemOut, d * F.emblemZ], normal: [0, 1, 0], up: [0, 0, 1], size: h * F.emblemSize }];
+    }
   } else {
     unitBox(b, kit, w, h, d, S.hull, { y: h / 2 });
-    b.box(w * T.bandOver, h * T.bandShare, d * T.bandOver, S.team, { y: h * T.bandY });
-    emblems = [1, -1].map((s) => ({ position: [s * (w / 2 * T.bandOver + T.emblemOut), h * T.emblemY, d * T.emblemZ], normal: [s, 0, 0], size: h * T.emblemSide }));
+    b.box(w * T.bandOver, h * T.bandShare, d * T.bandOver, team ? S.teamPaint : S.team, { y: h * T.bandY, detail: team ? TPU.lod.panel : undefined });
+    if (team) {
+      const C = TT.rounded;
+      roofMark(ub, bone, { y: h, z: d * C.roofZ, w: w * C.roofW, d: d * C.roofD });
+      for (const s of [1, -1]) {
+        emblemPlate(ub, bone, { position: [(s * w) / 2, h * C.emblemY, d * T.emblemZ], normal: [s, 0, 0], size: h * C.emblemSide });
+      }
+      emblems = [];
+    } else {
+      emblems = [1, -1].map((s) => ({ position: [s * (w / 2 * T.bandOver + T.emblemOut), h * T.emblemY, d * T.emblemZ], normal: [s, 0, 0], size: h * T.emblemSide }));
+    }
   }
   // hatch + antenna (all shapes)
   const hr = w * T.hatchShare;

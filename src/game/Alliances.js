@@ -1,4 +1,4 @@
-// Steel Mans – alliances of the running match (docs/notes/n5-contract.md, docs/notes/n5a-sim.md).
+// Steel Men – alliances of the running match (docs/notes/n5-contract.md, docs/notes/n5a-sim.md).
 //
 // Seat = team index (unit.team). alliances[team] = alliance id (any integer); teams with the same id are allies:
 // they never shoot each other (Combat.areEnemies), share the fog of war (FogOfWar) and win together (Match).

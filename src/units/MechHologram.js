@@ -1,4 +1,4 @@
-// Steel Mans – 3D "hologram" of a mech standing in an assembly bay: the assembly preview and the mech being
+// Steel Men – 3D "hologram" of a mech standing in an assembly bay: the assembly preview and the mech being
 // assembled. Static models (no animation, no stats, not pickable) put together like ModularMech (legs → torso
 // socket → arm sockets). Each slot shows either its real part or a Frame placeholder (parts not installed yet);
 // a slot without a model stays empty. Look: HOLOGRAM in config.js.

@@ -1,4 +1,4 @@
-// Steel Mans – procedural Recon Tower (stealth detection: sonar / radar scanner on a tower; new building shared by all
+// Steel Men – procedural Recon Tower (stealth detection: sonar / radar scanner on a tower; new building shared by all
 // styles, data added by the coordinator). Built in code from the style modules (ProcModules.js):
 //   • small footprint like a solar panel up to a tower: pad ±5.2 × ±5.2 (front = +Z), height about 20–25 units
 //   • tower by style.silhouette (rounded: cabinet + column with a railed platform and a radar dish · angular: armoured
@@ -15,6 +15,7 @@ import { PartBuilder, GlowBuilder, Blinker } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   spike, pipeRun, chimney, plasmaCoil, laserLink, arcGeometry, ArcFlicker, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES,
+  teamTrim, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -46,6 +47,19 @@ export const RECON_ANIM = {
 const LAYOUT = {
   padHalf: 5.2, padH: 0.3, padSegments: 32, padRing: { inset: 0.35, tube: 0.06, lift: 0.04 },
   neonMin: 0.3,           // style.neon from which neon rings / strips are added
+};
+
+/**
+ * Team paint (large surfaces, docs/notes/proc-teampaint-d.md; S.teamPaint / S.teamShade = team = 1 vertices, detail 2 = kept
+ * in LOD2): rounded = belt round the cabinet + team lower column + lip + roof mark, angular = team tapered base, round = two
+ * team saucers + pad lip, faceted = team base + shaded outriggers. Heads (they turn): team plate / bar / rings / discs.
+ */
+const TEAM = {
+  detail: 2,
+  rounded: { beltH: 0.8, beltOut: 0.02, lipInset: 0.15, mark: { z: 2.6, w: 2.6, d: 1.4 }, columnShare: 0.35 },
+  round: { teamSaucers: [0, 1, 2], lipInset: 0.12, stemShare: 0.72 },   // stemShare: lower part of the stem is team paint
+  dishPlate: [0.9, 0.6, 0.05],   // × head scale: back plate of the dish (was a thin neutral plate)
+  latticeBar: 0.45,              // lattice head: share of the bar length that is team paint (centre section)
 };
 
 /** Dish geometry (radar head; sizes × head.scale) */
@@ -163,16 +177,21 @@ BODIES.rounded = (c) => {
   const C = D.cabinet;
   const y1 = L.padH + C.h;
   styledBox(b, kit, C.w, C.h, C.w, S.hull, { base: true, y: L.padH });
+  const Tm = TEAM.rounded;
+  b.box(C.w + 2 * Tm.beltOut, Tm.beltH, C.w + 2 * Tm.beltOut, S.teamPaint, { y: L.padH + Tm.beltH / 2, detail: TEAM.detail });   // belt below the emblem decals
+  teamTrim(b, kit, { y: y1, w: C.w - Tm.lipInset, d: C.w - Tm.lipInset }, { detail: TEAM.detail });
+  roofMark(b, kit, { y: y1, z: Tm.mark.z, w: Tm.mark.w, d: Tm.mark.d }, { detail: TEAM.detail });
   for (const e of [-1, 1]) {
-    b.box(C.w * D.band.w, D.band.h, D.band.t, S.team, { y: L.padH + D.band.y, z: e * (C.w / 2 + D.band.t / 2) });
-    b.box(D.band.t, D.band.h, C.w * D.band.w, S.team, { x: e * (C.w / 2 + D.band.t / 2), y: L.padH + D.band.y });
     wallDecal(c, [0, L.padH + D.decal.y, e * C.w / 2], 0, e, D.decal.size);
     wallDecal(c, [e * C.w / 2, L.padH + D.decal.y, 0], e, 0, D.decal.size);
   }
   marking(b, kit, D.mark.len, D.mark.h, { y: L.padH + D.mark.y, z: C.w / 2 + D.mark.out });
   const K = D.column;
   const y2 = y1 + K.h;
-  b.cylinder(K.rTop, K.rBottom, K.h, K.seg, S.hull, { y: y1 + K.h / 2 });
+  const kt = Tm.columnShare;   // lower part of the column = team paint
+  const rSplit = K.rBottom + (K.rTop - K.rBottom) * kt;
+  b.cylinder(rSplit, K.rBottom, K.h * kt, K.seg, S.teamPaint, { y: y1 + (K.h * kt) / 2, detail: TEAM.detail });
+  b.cylinder(K.rTop, rSplit, K.h * (1 - kt), K.seg, S.hull, { y: y1 + K.h * kt + (K.h * (1 - kt)) / 2 });
   if (kit.style.neon >= L.neonMin) {
     for (const k of D.neonRings.ys) {
       const r = K.rBottom + (K.rTop - K.rBottom) * k + D.neonRings.over;
@@ -207,12 +226,8 @@ BODIES.angular = (c) => {
   const Sk = D.skirt;
   const y0 = L.padH + Sk.h;
   b.box(Sk.w, Sk.h, Sk.w, S.hullDark, { base: true, y: L.padH });
-  for (const e of [-1, 1]) {
-    b.box(Sk.w * 0.98, Sk.bandH, Sk.bandT, S.team, { y: L.padH + Sk.h / 2, z: e * (Sk.w / 2 + Sk.bandT / 2) });
-    b.box(Sk.bandT, Sk.bandH, Sk.w * 0.98, S.team, { x: e * (Sk.w / 2 + Sk.bandT / 2), y: L.padH + Sk.h / 2 });
-  }
   const Ba = D.base;
-  b.taperedBox(Ba.w, Ba.topW, Ba.h, Ba.w, S.hull, { y: y0 }, Ba.topW);
+  b.taperedBox(Ba.w, Ba.topW, Ba.h, Ba.w, S.teamPaint, { y: y0, detail: TEAM.detail }, Ba.topW);   // armoured base = team paint
   const y1 = y0 + Ba.h;
   const Pi = D.pillar;
   b.taperedBox(Pi.w, Pi.topW, Pi.h, Pi.w, S.hull, { y: y1 }, Pi.topW);
@@ -244,6 +259,7 @@ BODIES.round = (c) => {
   const { b, S, kit, glows } = c;
   const L = LAYOUT;
   foundation(c, 'round');
+  teamTrim(b, kit, { y: L.padH, r: L.padHalf - TEAM.round.lipInset }, { detail: TEAM.detail });
   const Ba = D.base;
   const y1 = L.padH + Ba.h;
   b.cylinder(Ba.rTop, Ba.rBottom, Ba.h, Ba.seg, S.hull, { y: L.padH + Ba.h / 2 });
@@ -255,10 +271,14 @@ BODIES.round = (c) => {
   }
   const St = D.stem;
   const y2 = y1 + St.h;
-  b.cylinder(St.rTop, St.rBottom, St.h, St.seg, S.hull, { y: y1 + St.h / 2 });
+  const stemShare = TEAM.round.stemShare;
+  const stemSplit = St.rBottom + (St.rTop - St.rBottom) * stemShare;
+  b.cylinder(stemSplit, St.rBottom, St.h * stemShare, St.seg, S.teamPaint, { y: y1 + (St.h * stemShare) / 2, detail: TEAM.detail });
+  b.cylinder(St.rTop, stemSplit, St.h * (1 - stemShare), St.seg, S.hull, { y: y1 + St.h * stemShare + (St.h * (1 - stemShare)) / 2 });
   const Sa = D.saucers;
   for (const y of Sa.ys) {
-    b.sphere(Sa.r, 20, 10, S.hullDark, { y: y1 + y, sy: Sa.flat });
+    const teamed = TEAM.round.teamSaucers.includes(Sa.ys.indexOf(y));
+    b.sphere(Sa.r, 20, 10, teamed ? S.teamPaint : S.hullDark, { y: y1 + y, sy: Sa.flat, ...(teamed ? { detail: TEAM.detail } : {}) });
     if (kit.rich) b.torus(Sa.r, Sa.neonTube, 4, 28, TAU, S.neon, { rx: Math.PI / 2, y: y1 + y });
   }
   const Cr = D.cradle;
@@ -283,7 +303,7 @@ BODIES.faceted = (c) => {
   foundation(c, 'octagon');
   const Ba = D.base;
   const y1 = L.padH + Ba.h;
-  styledBox(b, kit, Ba.w, Ba.h, Ba.w, S.hull, { base: true, y: L.padH });
+  styledBox(b, kit, Ba.w, Ba.h, Ba.w, S.teamPaint, { base: true, y: L.padH, detail: TEAM.detail });   // base = team paint
   const M = D.mast;
   const y2 = y1 + M.h;
   b.taperedBox(M.w, M.topW, M.h, M.w, S.hullDark, { y: y1, ry: Math.PI / 4 }, M.topW);
@@ -307,7 +327,7 @@ BODIES.faceted = (c) => {
     for (const sz of [-1, 1]) {
       const x = sx * O.x;
       const z = sz * O.z;
-      b.taperedBox(O.w, O.topW, O.h, O.w, S.hullDark, { x, y: L.padH });
+      b.taperedBox(O.w, O.topW, O.h, O.w, S.teamShade, { x, y: L.padH, detail: TEAM.detail });
       for (const ly of O.linkYs) laserLink(b, laser, kit, [x, L.padH + ly, z], [sx * O.target, L.padH + ly, sz * O.target]);
     }
   }
@@ -335,8 +355,8 @@ function dishHead(kit, H) {
   b.cylinder(D.rod[0] * k, D.rod[0] * k, D.rod[1] * k, 6, S.frame, {
     rx: D.tilt, y: (D.dishY + Math.cos(D.tilt) * D.rod[1] / 2) * k, z: (D.dishZ + Math.sin(D.tilt) * D.rod[1] / 2) * k,
   });
-  b.box(D.back[0] * k, D.back[1] * k, D.back[2] * k, S.hullDark, { y: (D.dishY - 0.05) * k, z: -D.back[0] * k });
-  b.box(D.plate[0] * k, D.plate[1] * k, D.plate[2] * k, S.team, { y: (D.dishY + 0.1) * k, z: -(D.back[0] + 0.16) * k });
+  b.box(D.back[0] * k, D.back[1] * k, D.back[2] * k, S.teamPaint, { y: (D.dishY - 0.05) * k, z: -D.back[0] * k });
+  b.box(TEAM.dishPlate[0] * k, TEAM.dishPlate[1] * k, TEAM.dishPlate[2] * k, S.teamShade, { y: (D.dishY - 0.05) * k, z: -(D.back[0] + D.back[2] / 2 + TEAM.dishPlate[2] / 2) * k });
   return b.build();
 }
 
@@ -347,6 +367,7 @@ function latticeHead(kit) {
   b.cylinder(Lt.turn[0], Lt.turn[1], Lt.turn[2], 8, S.hullDark, { y: Lt.turn[2] / 2 });
   b.box(Lt.mast[0], Lt.mast[1], Lt.mast[2], S.frame, { y: Lt.turn[2] + Lt.mast[1] / 2 });
   b.box(Lt.bar[0], Lt.bar[1], Lt.bar[2], S.hullDark, { y: Lt.barY });
+  b.box(Lt.bar[0] * TEAM.latticeBar, Lt.bar[1] * 1.1, Lt.bar[2] * 1.1, S.teamPaint, { y: Lt.barY });   // team centre section of the bar
   b.box(Lt.plate[0], Lt.plate[1], Lt.plate[2], S.dark, { y: Lt.barY, z: Lt.plateZ });
   const dx = Lt.armX;
   const dy = Lt.barY - Lt.braceY;
@@ -364,7 +385,7 @@ function gyroHead(kit, H) {
   const b = new PartBuilder();
   b.sphere(H.core, 16, 10, S.plasma, {});
   b.torus(H.r, H.tube, 6, 28, TAU, S.trim, { rx: Math.PI / 2 });
-  b.torus(H.r, H.tube, 6, 28, TAU, S.trim, {});
+  b.torus(H.r, H.tube, 6, 28, TAU, S.teamPaint, {});
   b.torus(H.r, H.tube, 6, 28, TAU, S.trim, { ry: Math.PI / 2 });
   return b.build();
 }
@@ -375,7 +396,7 @@ function crystalHead(kit, H) {
   const g = new THREE.OctahedronGeometry(H.size, 0);
   g.scale(1, H.stretch, 1);
   b.add(g, S.plasma);
-  for (const s of [-1, 1]) b.box(H.discR * 2, H.discH, H.discR * 2, S.trim, { y: s * H.discDy, ry: Math.PI / 4 });
+  for (const s of [-1, 1]) b.box(H.discR * 2, H.discH, H.discR * 2, S.teamPaint, { y: s * H.discDy, ry: Math.PI / 4 });
   b.cylinder(H.lensR, H.lensR, H.lensR * 2, 8, S.lens, { x: H.discR + H.lensR, rz: Math.PI / 2 });
   return b.build();
 }

@@ -1,4 +1,4 @@
-// Steel Mans – procedural aircraft hangar (night model batch, docs/night_plan_models.md #4). A drop-in alternative to
+// Steel Men – procedural aircraft hangar (night model batch, docs/night_plan_models.md #4). A drop-in alternative to
 // models/3DStructures{race}/AircraftHanger{race}_Anim.glb built in code from the style modules (ProcModules.js):
 //   • footprint inside the GLB's (GLB box of the angular / rounded / faceted races: x −20…13.13, z −10.07…5.07, front = +Z;
 //     GLB box of the round race: x ±3.5, z −19.4…3.0) – each body keeps inside the box of its own silhouette
@@ -15,6 +15,7 @@ import { PartBuilder, Spinner, Blinker, TrackMover, smootherstep } from './ProcK
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   spike, plasmaCoil, laserLink, emblemDecalGeometry, Levitator, pulseWave, PROC_MODULES,
+  teamStripe, teamPanel, teamTrim, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -67,6 +68,24 @@ const LAYOUT = {
   lowerPlate: { h: 2.4, over: 0.1 },
 };
 
+/**
+ * Team paint (large surfaces, visible from the RTS camera down to LOD2; see docs/notes/proc-teampaint-c.md):
+ * belts round the walls, a team back panel, painted door frame, roof lip and marks, sloped roof "hat" / buttresses by shape.team.
+ * Tower body: a thick ring, a painted dome, flank panels and a lip round the pad.
+ */
+const TEAM = {
+  detail: 2,              // coarsest LOD the team surfaces still appear in
+  depth: 0.05, shadeShare: 0.25, shadeDepth: 1.4,   // solid belt (thin-line styles): slab depth, darker lower share, its extra depth
+  cut: 0.2,               // belt ends kept off the wall corners (+ the style's edge radius)
+  backInset: 1.5,         // back panel: each end shorter than the wall by this
+  headerMargin: 0.05,     // belts above this clearance over the door header span the whole front
+  trimH: 0.9,             // roof lip height (× style.teamPaint.trim)
+  padTrimH: 0.4,          // lip round the tower pad
+  ring: { h: 2.4, y: 0.1, out: 0.12 },                          // thick team ring round the tower body (y above the plinth top; below the emblems)
+  upperBand: { h: 2.3, y: 5.9, out: 0.06 },                     // second team band round the tower body above the emblems (y above the plinth top)
+  flank: { w: 1.3, h: 5.0, x: 2.4, y: 2.9 },                    // panels beside the tower door
+};
+
 /** Round body (slim tower + launch tunnel; x ±3.5, z −19.4…3.0 in the GLB) */
 const TOWER = {
   pad: { x: 0, z0: -19.3, z1: 2.9, w: 6.8 },
@@ -89,11 +108,16 @@ const TOWER = {
 /** Hall bodies by style.silhouette (code knows shapes, the style data picks one; unknown → rounded) */
 const SHAPES = {
   rounded: { kind: 'hall', body: 'rounded', halfW: 12.9, straightH: 14, taperH: 0, topW: 0, topD: 0, doorH: 10, leaf: { surface: 'hull', ribs: 3 },
-    tower: 'rounded', sideDecal: 5.5, frontDecal: 3.8, windows: true },
+    tower: 'rounded', sideDecal: 5.5, frontDecal: 3.8, windows: true,
+    // team: belts = [{ y, h }] (absolute y, below / above the emblems), back panel, roof lip inset, roof marks [{ x, z, w, d }]
+    team: { belts: [{ y: 2.25, h: 3.3 }, { y: 12.7, h: 2.2 }], back: { y: 7.3, h: 4.4 }, hat: false, buttress: false, trimInset: 0.5,
+      marks: [{ x: -10.4, z: -3, w: 3.4, d: 9 }, { x: 9.5, z: 0.3, w: 5, d: 6 }] } },
   angular: { kind: 'hall', body: 'armored', halfW: 11.8, straightH: 9.5, taperH: 4.5, topW: 21.4, topD: 11.8, doorH: 8.2, leaf: { surface: 'hullDark', ribs: 4 },
-    tower: 'armored', sideDecal: 5.0, frontDecal: 3.2, windows: false },
+    tower: 'armored', sideDecal: 5.0, frontDecal: 3.2, windows: false,
+    team: { belts: [], back: { y: 5.6, h: 5.0 }, hat: true, buttress: true, trimInset: 1.0, marks: [{ x: 8.4, z: -0.2, w: 3.4, d: 5 }] } },
   faceted: { kind: 'hall', body: 'faceted', halfW: 12.4, straightH: 9.5, taperH: 3.5, topW: 19, topD: 10.6, doorH: 8.2, leaf: null, curtain: true,
-    tower: 'faceted', sideDecal: 5.0, frontDecal: 3.4, windows: true },
+    tower: 'faceted', sideDecal: 5.0, frontDecal: 3.4, windows: true,
+    team: { belts: [{ y: 1.5, h: 1.8 }], back: { y: 5.8, h: 4.2 }, hat: true, buttress: false, trimInset: 2.0, marks: [{ x: 7.3, z: 0.9, w: 2.4, d: 2.8 }] } },
   round: { kind: 'tower' },
 };
 
@@ -103,6 +127,51 @@ const HANGAR_GLB_CENTRE = { hall: { x: -3.435, z: -2.5 }, tower: { x: 0, z: -8.2
 const shapeOf = (style) => SHAPES[style.silhouette] ?? SHAPES.rounded;
 
 // ---------------------------------------------------------------- static parts (construction time only)
+
+/** Team belt on a wall (origin on the wall, centred, sticks out +Z): the kit stripes, or a solid slab with a darker lower part for thin-line styles */
+function teamBelt(b, kit, length, height, t) {
+  const K = TEAM;
+  const place = { detail: K.detail, ...t };
+  if (kit.team.stripeKind !== 'fine') { teamStripe(b, kit, length, height, place); return; }
+  const lowH = height * K.shadeShare;
+  const lowD = K.depth * K.shadeDepth;
+  b.add(new THREE.BoxGeometry(length, height, K.depth).translate(0, 0, K.depth / 2), kit.S.teamPaint, place);
+  b.add(new THREE.BoxGeometry(length, lowH, lowD).translate(0, -height / 2 + lowH / 2, lowD / 2), kit.S.teamShade, place);
+}
+
+/** Belts round the hall walls (front: flanks, or the whole width above the door header) and the team panel on the back wall */
+function teamWalls(c, sh) {
+  const L = LAYOUT;
+  const H = L.hall;
+  const { b, kit } = c;
+  const K = TEAM;
+  const tm = sh.team;
+  const d = H.z1 - H.z0;
+  const cz = (H.z1 + H.z0) / 2;
+  const cut = (kit.style.edges?.radius ?? 0) + K.cut;
+  const wallLen = sh.halfW * 2 - 2 * cut;
+  const headerTop = L.padH + sh.doorH + L.door.headerH + K.headerMargin;
+  const flankX0 = L.door.halfW + L.door.jambW;
+  const flankLen = sh.halfW - cut - flankX0;
+  for (const { y, h } of tm.belts) {
+    if (y - h / 2 >= headerTop) teamBelt(b, kit, wallLen, h, { y, z: H.z1 });
+    else for (const e of [-1, 1]) teamBelt(b, kit, flankLen, h, { x: e * (flankX0 + flankLen / 2), y, z: H.z1 });
+    teamBelt(b, kit, wallLen, h, { y, z: H.z0, ry: Math.PI });
+    for (const s of [-1, 1]) teamBelt(b, kit, d - 2 * cut, h, { x: s * sh.halfW, y, z: cz, ry: (s * Math.PI) / 2 });
+  }
+  teamPanel(b, kit, wallLen - 2 * K.backInset, tm.back.h, { y: tm.back.y, z: H.z0, ry: Math.PI, detail: K.detail });
+}
+
+/** Roof lip along the top edge and the marks on the free roof */
+function teamRoof(c, sh, roof) {
+  const H = LAYOUT.hall;
+  const { b, kit } = c;
+  const tm = sh.team;
+  const rw = sh.topW > 0 ? sh.topW : sh.halfW * 2;
+  const rd = sh.topD > 0 ? sh.topD : H.z1 - H.z0;
+  teamTrim(b, kit, { y: roof, z: (H.z1 + H.z0) / 2, w: rw - 2 * tm.trimInset, d: rd - 2 * tm.trimInset, h: TEAM.trimH });
+  for (const m of tm.marks) roofMark(b, kit, { x: m.x, y: roof, z: m.z, w: m.w, d: m.d });
+}
 
 /** Door leaf (shared by both leaves): a plate with ribs, a marking along the foot and a neon line */
 function leafGeometry(kit, w, h, d, spec) {
@@ -125,11 +194,11 @@ function doorFrame(c, sh) {
   b.box(D.halfW * 2, sh.doorH, D.interiorT, S.interior, { base: true, y: y0, z: H.z1 + D.interiorT / 2 });
   for (const s of [-1, 1]) {
     const x = s * (D.halfW + D.jambW / 2);
-    b.box(D.jambW, sh.doorH + D.headerH, D.jambD, S.frame, { base: true, x, y: y0, z: H.z1 + D.jambD / 2 });
+    b.box(D.jambW, sh.doorH + D.headerH, D.jambD, S.teamPaint, { base: true, x, y: y0, z: H.z1 + D.jambD / 2, detail: TEAM.detail });
     marking(b, kit, sh.doorH, D.markH, { rz: Math.PI / 2, x, y: y0 + sh.doorH / 2, z: H.z1 + D.jambD + 0.02 });
     beacon(b, glows.get('beaconA'), kit, [x, y0 + sh.doorH + D.headerH, H.z1 + D.jambD / 2]);
   }
-  b.box((D.halfW + D.jambW) * 2, D.headerH, D.jambD, S.frame, { base: true, y: y0 + sh.doorH, z: H.z1 + D.jambD / 2 });
+  b.box((D.halfW + D.jambW) * 2, D.headerH, D.jambD, S.teamPaint, { base: true, y: y0 + sh.doorH, z: H.z1 + D.jambD / 2, detail: TEAM.detail });
   if (kit.style.neon >= LAYOUT.neonMin) neonStrip(b, kit, D.halfW * 2, D.neonH, D.neonT, { y: y0 + sh.doorH + D.headerH / 2, z: H.z1 + D.jambD + D.neonT / 2 });
   if (sh.curtain) {
     const z = H.z1 + D.leafGap + D.leafD;
@@ -149,15 +218,17 @@ function hallBody(c, sh) {
   const w = sh.halfW * 2;
   const roof = y0 + sh.straightH + sh.taperH;
   const neon = kit.style.neon >= L.neonMin;
+  const hatS = sh.team.hat ? S.teamPaint : S.hull;   // the sloped top part carries the team colour (silhouette-driven shape data)
+  const buttressS = sh.team.buttress ? S.teamPaint : S.hullDark;
   switch (sh.body) {
     case 'armored': {   // block + sloped top, rusty lower plates, buttresses and spikes
       b.box(w, sh.straightH, d, S.hull, { base: true, y: y0, z: cz });
-      b.taperedBox(w, sh.topW, sh.taperH, d, S.hull, { y: y0 + sh.straightH, z: cz }, sh.topD);
+      b.taperedBox(w, sh.topW, sh.taperH, d, hatS, { y: y0 + sh.straightH, z: cz, detail: TEAM.detail }, sh.topD);
       b.box(w + L.lowerPlate.over, L.lowerPlate.h, d + L.lowerPlate.over, S.lower, { base: true, y: y0, z: cz });
       const B = L.buttress;
       for (const s of [-1, 1]) {
         for (const p of B.zs) {
-          b.box(B.w, B.h, B.d, S.hullDark, { base: true, x: s * (sh.halfW + B.w / 2), y: y0, z: cz + p });
+          b.box(B.w, B.h, B.d, buttressS, { base: true, x: s * (sh.halfW + B.w / 2), y: y0, z: cz + p, detail: TEAM.detail });
           b.box(B.footW, B.footH, B.footD, S.frame, { base: true, x: s * (sh.halfW + B.footW / 2 - 0.6), y: y0, z: cz + p });
         }
         for (const e of [-1, 1]) spike(b, kit, { x: s * (sh.topW / 2 - L.roofSpike.inset), y: roof, z: cz + e * (sh.topD / 2 - L.roofSpike.inset), h: L.roofSpike.h, r: L.roofSpike.r });
@@ -166,7 +237,7 @@ function hallBody(c, sh) {
     }
     case 'faceted': {   // chamfered block under a sloped top with spikes joined by a laser line
       styledBox(b, kit, w, sh.straightH, d, S.hull, { base: true, y: y0, z: cz });
-      b.taperedBox(w, sh.topW, sh.taperH, d, S.hull, { y: y0 + sh.straightH, z: cz }, sh.topD);
+      b.taperedBox(w, sh.topW, sh.taperH, d, hatS, { y: y0 + sh.straightH, z: cz, detail: TEAM.detail }, sh.topD);
       const sz = cz + sh.topD / 2 - L.roofSpike.inset;
       const ex = sh.topW / 2 - L.roofSpike.inset;
       for (const s of [-1, 1]) spike(b, kit, { x: s * ex, y: roof, z: sz, h: L.roofSpike.h, r: L.roofSpike.r });
@@ -177,13 +248,13 @@ function hallBody(c, sh) {
     default: styledBox(b, kit, w, sh.straightH, d, S.hull, { base: true, y: y0, z: cz });
   }
 
-  // team band and neon lines on the side walls; neon lines on the front flanks
+  // team belts / back panel, neon lines on the side walls; neon lines on the front flanks
+  teamWalls(c, sh);
   const N = L.neonLine;
   const ny = y0 + sh.straightH - N.drop;
   const flankA = L.door.halfW + L.door.jambW + N.flankInset;
   const flankLen = sh.halfW - N.flankEnd - flankA;
   for (const s of [-1, 1]) {
-    b.box(L.band.t, L.band.h, d - L.band.inset, S.team, { x: s * (sh.halfW + L.band.t / 2), y: y0 + L.band.y, z: cz });
     if (neon) {
       neonStrip(b, kit, N.t, N.h, d - 1, { x: s * (sh.halfW + N.t / 2), y: ny, z: cz });
       neonStrip(b, kit, flankLen, N.h, N.t, { x: s * (flankA + flankLen / 2), y: ny, z: H.z1 + N.t / 2 });
@@ -283,6 +354,7 @@ function catapult(c, sh) {
 
 function buildHall(c, sh) {
   const roof = hallBody(c, sh);
+  teamRoof(c, sh, roof);
   const L = LAYOUT;
   const P = L.pad;
   c.b.box(P.x1 - P.x0, L.padH, P.z1 - P.z0, c.S.ground, { base: true, x: (P.x0 + P.x1) / 2, z: (P.z0 + P.z1) / 2 });
@@ -311,12 +383,15 @@ function buildTower(c) {
   b.box(T.pad.w, L.padH, T.pad.z1 - T.pad.z0, S.ground, { base: true, x: T.pad.x, z: (T.pad.z0 + T.pad.z1) / 2 });
   b.cylinder(T.plinthR, T.plinthR, T.plinthH, T.segments, S.hullDark, { y: y0 + T.plinthH / 2, z: zc });
   b.cylinder(R, R, T.hallH, T.segments, S.hull, { y: yb + T.hallH / 2, z: zc });
-  b.add(new THREE.SphereGeometry(R, T.dome.segments, T.dome.rings, 0, TAU, 0, Math.PI / 2), S.hull, { y: y1, z: zc, sy: T.dome.sy });
+  b.add(new THREE.SphereGeometry(R, T.dome.segments, T.dome.rings, 0, TAU, 0, Math.PI / 2), S.teamPaint, { y: y1, z: zc, sy: T.dome.sy, detail: TEAM.detail });
   const peak = y1 + R * T.dome.sy;
   const N = T.neonRings;
   b.torus(R + N.out, N.tube, 4, T.segments, TAU, S.neon, { rx: Math.PI / 2, y: y1 - N.topDrop, z: zc });
   b.torus(R + N.out, N.tube, 4, T.segments, TAU, S.neon, { rx: Math.PI / 2, y: yb + N.lowY, z: zc });
-  b.torus(R + T.band.out, T.band.tube, 4, T.segments, TAU, S.team, { rx: Math.PI / 2, y: yb + T.band.y, z: zc });
+  teamTrim(b, kit, { z: zc, y: yb + TEAM.ring.y, r: R + TEAM.ring.out, h: TEAM.ring.h });   // thick team ring round the body
+  const U2 = TEAM.upperBand;
+  b.cylinder(R + U2.out, R + U2.out, U2.h, T.segments, S.teamPaint, { y: yb + U2.y + U2.h / 2, z: zc, detail: TEAM.detail });   // upper band, above the emblems
+  teamTrim(b, kit, { x: T.pad.x, z: (T.pad.z0 + T.pad.z1) / 2, y: L.padH, w: T.pad.w, d: T.pad.z1 - T.pad.z0, h: TEAM.padTrimH });   // lip round the pad
   if (kit.rich) {
     const V = T.veins;
     for (let i = 0; i < V.count; i++) {
@@ -332,6 +407,7 @@ function buildTower(c) {
   b.box(T.door.halfW * 2, T.door.h, Pc.interiorT, S.interior, { base: true, y: yb, z: Pc.frontZ + Pc.interiorT / 2 });
   for (const s of [-1, 1]) beacon(b, glows.get('beaconA'), kit, [s * T.beaconX, yb + Pc.h, Pc.frontZ - Pc.d / 2]);
   marking(b, kit, T.door.halfW * 2, 0.5, { y: yb + T.door.h + 0.25, z: Pc.frontZ + 0.02 });
+  for (const s of [-1, 1]) teamPanel(b, kit, TEAM.flank.w, TEAM.flank.h, { x: s * TEAM.flank.x, y: yb + TEAM.flank.y, z: Pc.frontZ });
   c.emblems.push({ position: [0, yb + T.decal.frontY, Pc.frontZ], normal: [0, 0, 1], size: T.decal.front });
   for (const s of [-1, 1]) c.emblems.push({ position: [s * R, yb + T.decal.sideY, zc], normal: [s, 0, 0], size: T.decal.side });
 

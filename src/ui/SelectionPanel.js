@@ -1,4 +1,4 @@
-// Steel Mans – bottom centre panel (HUD v2), a dispatcher:
+// Steel Men – bottom centre panel (HUD v2), a dispatcher:
 //   nothing selected (and no wreck) → hidden;  exactly one mech → RobotPanel;
 //   everything else (group, single non-mech unit, building, wreck) → CenterPanel.
 // The element is hidden through its `hidden` attribute and the class `sp-empty`; the owner of the layout container

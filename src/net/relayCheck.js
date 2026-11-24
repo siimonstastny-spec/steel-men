@@ -1,4 +1,4 @@
-// Steel Mans – console check of the signalling relays (NET.p2p.relayUrls). Not used by the game.
+// Steel Men – console check of the signalling relays (NET.p2p.relayUrls). Not used by the game.
 //   const { checkRelays } = await import('./src/net/relayCheck.js');
 //   console.table(await checkRelays());   // [{ url, ok, ms, note }]
 // A relay is OK when its WebSocket opens and it answers a REQ with EOSE within NET.p2p.relayCheckTimeoutMs.

@@ -1,4 +1,4 @@
-// Steel Mans – procedural wall post (roadmap 18, walls). Drop-in alternative to
+// Steel Men – procedural wall post (roadmap 18, walls). Drop-in alternative to
 // models/3DStructures{race}/MobileWall{race}_Anim.glb built from the style modules (ProcModules.js):
 //   • footprint inside the GLB's (ground box ±5.2, post height 12.65, turret socket on top); built in GLB units, the
 //     structure scales it by stats.modelScale (1.5) like the GLB
@@ -12,10 +12,11 @@
 // Also exports the shared wall constants (WALL_SPAN, WALL_LAYOUT, WALL_ANIM, nextWallInstance) the segment, turret and gate
 // models use. Visual only: update() takes the frame delta, nothing here is read by the simulation. No allocations in update().
 import * as THREE from 'three';
+import { PROC_TEAM_PAINT } from '../config.js';
 import { PartBuilder, Blinker } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, beacon, fanHousing, radiator, spike, ringGeometry,
-  emblemDecalGeometry, Levitator, pulseWave, PROC_MODULES,
+  emblemDecalGeometry, Levitator, pulseWave, PROC_MODULES, teamTrim,
 } from './ProcModules.js';
 
 export const TAU = Math.PI * 2;
@@ -54,6 +55,19 @@ export function addPickBox(model, geometry) {
 /** Name of the turret socket node (stats.json structures.mobileWall.turretSocket – the GLB node name) */
 export const POST_SOCKET = 'socket_c6e5475c';
 
+/**
+ * Team paint of the wall models (S.teamPaint / S.teamShade = vertices of the static geometry with team = 1: no extra draw
+ * call, batching and setTeamColor unchanged). `detail` = coarsest LOD the painted parts appear in (2 = far silhouette).
+ * Posts: the head / crown / a wide band is painted; segments, gates and turrets import this too (WallSegmentProc etc.).
+ */
+export const WALL_TEAM = {
+  detail: PROC_TEAM_PAINT.lod.panel,
+  post: {
+    band: { y: 3.4, h: 2.0, over: 0.06 },        // rounded: team band round the column (centre height, height, offset off the surface)
+    upper: { y0: 7.4, y1: 10.2, over: 0.1 },     // angular: team part of the sloped pillar (from … to, offset off the faces)
+  },
+};
+
 /** Animation tuning (visual only; style.anim multiplies the speeds) */
 export const WALL_ANIM = {
   blinkDuty: 0.5,
@@ -86,7 +100,7 @@ export const radiusAt = (c, y) => c.rBottom + (c.rTop - c.rBottom) * ((y - c.y0)
 const column = (b, c, s, t = {}) => b.cylinder(c.rTop, c.rBottom, c.h, c.seg, s, { y: c.y0 + c.h / 2, ry: c.seg === 4 ? QUARTER_PI : 0, ...t });
 
 /** Horizontal team ring round a round column */
-const teamRing = (b, kit, r, y, tube) => b.torus(r, tube, RING.radial, RING.segments, TAU, kit.S.team, { rx: HALF_PI, y });
+const teamRing = (b, kit, r, y, tube) => b.torus(r, tube, RING.radial, RING.segments, TAU, kit.S.teamShade, { rx: HALF_PI, y, detail: WALL_TEAM.detail });
 
 /** Markings (hazard stripes / light line) on the four faces of a square plinth of half size R: m = { len, h, y } */
 function faceMarkings(b, kit, R, m) {
@@ -101,7 +115,7 @@ function faceStrips(b, kit, R, s) {
   for (let k = 0; k < 4; k++) {
     const a = k * HALF_PI;
     const d = R + s.t / 2;
-    b.box(s.len, s.h, s.t, kit.S.team, { x: Math.sin(a) * d, y: s.y, z: Math.cos(a) * d, ry: a });
+    b.box(s.len, s.h, s.t, kit.S.teamPaint, { x: Math.sin(a) * d, y: s.y, z: Math.cos(a) * d, ry: a, detail: WALL_TEAM.detail });
   }
 }
 
@@ -158,7 +172,7 @@ export const POST_SHAPES = {
     mark: { len: 8.2, h: 0.9, y: 0.7 },
     column: { seg: 20, rTop: 3.3, rBottom: 3.9, y0: 1.4, h: 9.6 },
     flange: { r: 4.4, h: 0.5 }, capR: 4.2,
-    team: { y: 3.0, tube: 0.25 }, neonTube: 0.07, plateY: 6.5,
+    neonTube: 0.07, plateY: 6.5,
   },
   angular: {
     R: 5.1, skirtH: 1.0, vent: { x: 4.45, z: -4.45, r: 0.45 }, spikeAt: 4.6, crownLightAt: 3.1, crownSpikeAt: 3.1,
@@ -192,11 +206,14 @@ function buildRoundedPost(b, glows, kit, P, out) {
   faceMarkings(b, kit, P.R, P.mark);
   column(b, c, S.hull);
   const flangeY = c.y0 + c.h + P.flange.h / 2;
-  b.cylinder(P.flange.r, P.flange.r, P.flange.h, c.seg, S.hullDark, { y: flangeY });
+  const T = WALL_TEAM;
+  b.cylinder(P.flange.r, P.flange.r, P.flange.h, c.seg, S.teamShade, { y: flangeY, detail: T.detail });   // painted head: flange + cap
   const capY = c.y0 + c.h + P.flange.h;
   const capH = WALL_LAYOUT.postTop - capY;
-  b.cylinder(P.capR, P.capR, capH, c.seg, S.hullDark, { y: capY + capH / 2 });
-  teamRing(b, kit, radiusAt(c, P.team.y) + P.team.tube / 2, P.team.y, P.team.tube);
+  b.cylinder(P.capR, P.capR, capH, c.seg, S.teamPaint, { y: capY + capH / 2, detail: T.detail });
+  const bd = T.post.band;   // wide team band round the column
+  b.cylinder(radiusAt(c, bd.y + bd.h / 2) + bd.over, radiusAt(c, bd.y - bd.h / 2) + bd.over, bd.h, c.seg, S.teamPaint, { y: bd.y, detail: T.detail });
+  teamTrim(b, kit, { y: P.baseH, w: P.R * 2, d: P.R * 2 });
   if (kit.style.neon >= WALL_LAYOUT.neonMin) b.torus(P.capR + PLATE.out / 2, P.neonTube, RING.neonRadial, RING.segments, TAU, S.neon, { rx: HALF_PI, y: capY + capH / 2 });
   emblemPlates(b, kit, radiusAt(c, P.plateY - PLATE.size / 2), P.plateY, out.emblems);
   postLights(b, glows, kit, P.baseH, P.lightAt);
@@ -210,7 +227,11 @@ function buildAngularPost(b, glows, kit, P, out) {
   b.box(P.R * 2, P.skirtH, P.R * 2, S.hullDark, { base: true });
   b.taperedBox(bd.w, bd.topW, bd.h, bd.w, S.hull, { y: bd.y0 }, bd.topW);
   const crownY = bd.y0 + bd.h;
-  b.box(P.crown.w, P.crown.h, P.crown.w, S.hullDark, { base: true, y: crownY });
+  const T = WALL_TEAM;
+  b.box(P.crown.w, P.crown.h, P.crown.w, S.teamPaint, { base: true, y: crownY, detail: T.detail });   // painted crown
+  const up = T.post.upper;   // painted upper part of the sloped pillar (a slightly larger tapered slab over the body)
+  const wAt = (y) => 2 * faceAt(y) + 2 * up.over;
+  b.taperedBox(wAt(up.y0), wAt(up.y1), up.y1 - up.y0, wAt(up.y0), S.teamShade, { y: up.y0, detail: T.detail }, wAt(up.y1));
   faceStrips(b, kit, P.R, P.team);
   for (let k = 0; k < 4; k++) {   // rusty plate on the skirt, flush with the faces
     const a = k * HALF_PI;
@@ -232,10 +253,10 @@ function buildAngularPost(b, glows, kit, P, out) {
 function buildRoundPost(b, glows, kit, P, out) {
   const S = kit.S;
   const c = P.column;
-  b.cylinder(P.base.rTop, P.base.rBottom, P.baseH, P.base.seg, S.hull, { y: P.baseH / 2 });
+  b.cylinder(P.base.rTop, P.base.rBottom, P.baseH, P.base.seg, S.teamPaint, { y: P.baseH / 2, detail: WALL_TEAM.detail });   // painted base disc + collar bulb
   teamRing(b, kit, P.team.r, P.baseH / 2, P.team.tube);
   column(b, c, S.hull);
-  b.sphere(P.collar.r, P.collar.seg, P.collar.rows, S.hull, { y: P.collar.y, sy: P.collar.flat });
+  b.sphere(P.collar.r, P.collar.seg, P.collar.rows, S.teamPaint, { y: P.collar.y, sy: P.collar.flat, detail: WALL_TEAM.detail });
   const sy0 = P.seat.y0;
   const seatH = WALL_LAYOUT.postTop - sy0;
   b.cylinder(P.seat.rTop, P.seat.rBottom, seatH, c.seg, S.hullDark, { y: sy0 + seatH / 2 });
@@ -256,8 +277,9 @@ function buildFacetedPost(b, glows, kit, P, out) {
   faceStrips(b, kit, P.R, P.team);
   column(b, c, S.hullDark);
   const crownY = c.y0 + c.h;
-  b.cylinder(P.crown.rTop, c.rTop, P.crown.h, c.seg, S.hull, { y: crownY + P.crown.h / 2, ry: QUARTER_PI });
-  b.box(P.seat.w, P.seat.h, P.seat.w, S.hullDark, { base: true, y: crownY + P.crown.h, ry: QUARTER_PI });
+  b.cylinder(P.crown.rTop, c.rTop, P.crown.h, c.seg, S.teamPaint, { y: crownY + P.crown.h / 2, ry: QUARTER_PI, detail: WALL_TEAM.detail });   // painted crown + seat
+  b.box(P.seat.w, P.seat.h, P.seat.w, S.teamShade, { base: true, y: crownY + P.crown.h, ry: QUARTER_PI, detail: WALL_TEAM.detail });
+  teamTrim(b, kit, { y: P.baseH, w: P.R * 2, d: P.R * 2 });
   // square emitter rings round the pylon at the heights of the barrier lines (halo layer + paint)
   const E = P.emitter;
   for (const y of WALL_LAYOUT.barrierYs) {

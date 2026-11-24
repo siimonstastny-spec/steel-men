@@ -1,4 +1,4 @@
-// Steel Mans – diplomacy menu (docs/notes/b4-diplomacy.md): overview of the players of the match (colour, avatar,
+// Steel Men – diplomacy menu (docs/notes/b4-diplomacy.md): overview of the players of the match (colour, avatar,
 // name, alliance, planet = faction, state) and sending ore / energy to a living ally (rules.diplomacy.tributeLoss is
 // lost on the way). Pick a resource and an amount, the row shows what really arrives, Send submits the command
 // DIPLOMACY.commandType through the commandBus (lockstep in multiplayer). UI only: never mutates the simulation.

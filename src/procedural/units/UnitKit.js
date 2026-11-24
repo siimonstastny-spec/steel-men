@@ -1,9 +1,11 @@
-// Steel Mans – procedural unit kit (roadmap U0): base of vehicles and aircraft generated in code, the unit analogue of
+// Steel Men – procedural unit kit (roadmap U0): base of vehicles and aircraft generated in code, the unit analogue of
 // ProcModules.ProcModel. A unit = ONE rigid "skeleton" (THREE.Bone per moving part: hull, turret, barrel, recoil,
 // sprockets, track cleats, wheels, exhaust flames, muzzle flash…) and at most three skinned meshes sharing it:
 //   • paint   – every painted part of the unit (ProcKit paint shader, vertex colour + aSurface), 1 draw call + shadow
 //   • glow    – additive glow parts (exhaust, hover pads, lenses, arcs, flash, status lamp): vertex colours, 1 draw call
-//   • emblem  – faction sign decals in the team colour (ProcModules emblem material), 1 draw call
+//   • emblem  – faction sign decals on a neutral plate (ProcModules emblem material, PROC_EMBLEM: faction colour), 1 draw call
+// Team colour = paint vertices with the team mask (kit.S.teamPaint / teamShade, UnitModules team paint writers): part of
+// the paint mesh, no extra draw call; setTeamColor and the batcher's aInst repaint them (proc-unit-teamcolor-kit.md).
 // Every vertex is weighted 1.0 to exactly one bone and authored in that bone's local space (bind matrix and bone
 // inverses = identity), so animating a part = setting a bone's position / rotation / scale – no per-part meshes, no
 // allocations. Geometry is built once per (style, variant) and shared (createUnitCache, ref-counted).
@@ -51,6 +53,19 @@ export const UNIT_KIT = {
     blink: { disabled: 0.5, attack: 0.3 },   // s period of blinking states
   },
   cloak: { minOpacity: 0.16, shadowCutoff: 0.35, emblemCutoff: 0.5, depthCutoff: 0.5, tint: 0.35 },
+  // Team paint writers of UnitModules (teamStripe, teamPanel, teamTrim, roofMark): kit.S.teamPaint / teamShade vertices
+  // of the paint geometry; look by kit.team (style.teamPaint), sizes in unit model units, kept cheap (boxes, ≤ 12 segments)
+  teamPaint: {
+    lod: { stripe: 1, panel: 2, trim: 2, roofMark: 2 },   // explicit coarsest LOD (2 = even the far silhouette: read from the RTS camera)
+    emblemClear: 0.06,       // gap kept between team paint and an emblem plate (teamStripe `avoid`)
+    stripe: { depth: 0.03, gap: 0.4, maxBands: 2, fineLines: 3, fineShare: 0.55, minSegment: 0.25 },   // 'band' ≤ maxBands, 'slash' = team over shade, 'fine' = fineLines alternating
+    panel: { depth: 0.035, frame: 0.08, frameDepth: 0.6, lowerShare: 0.25, lowerDepth: 1.3, coreShare: 0.55, coreDepth: 1.4, segments: 12 },
+    trim: { h: 0.07, t: 0.06, segments: 16 },
+    roofMark: { h: 0.035, stripeShare: 0.16, stripeD: 0.9, coreLift: 1.3, chevronArm: 0.36, chevronAngle: 0.62, discCore: 0.5, rhombusCore: 0.55, segments: 10 },
+  },
+  // emblemPlate(): neutral backing slab under an emblem decal (the decal texture already has its own plate; the slab
+  // lifts it off curved / team-painted parts). side = decal quad side × grow, never team-masked (kit.S[surface])
+  emblemPlate: { grow: 1.1, depth: 0.025, surface: 'dark', lod: 1 },
   exhaust: {
     flickerRate: 23,         // rad/s of the main flicker wave (a second wave runs at × flickerHarmonic)
     flickerHarmonic: 2.3,
@@ -69,7 +84,7 @@ export const UNIT_KIT = {
 
 /** Far LOD of units (UnitBatcher); distances camera → unit in world units, by the building quality level */
 export const UNIT_LOD = {
-  enabled: true,             // false = every unit keeps its own skinned meshes (window.steelMans.unitBatching = false too)
+  enabled: true,             // false = every unit keeps its own skinned meshes (window.steelMen.unitBatching = false too)
   quality: {
     high: { full: 170, mid: 380 },
     medium: { full: 120, mid: 280 },
@@ -465,7 +480,7 @@ function glowOnBeforeCompile(shader) {
     .replace('#include <common>', '#include <common>\nuniform vec3 uStatus;\nvarying float vGlowKind;')
     .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= mix(vec3(1.0), uStatus, vGlowKind);');
 }
-const glowProgramKey = () => 'steelMansUnitGlow';
+const glowProgramKey = () => 'steelMenUnitGlow';
 
 function createGlowMaterial() {
   const m = new THREE.MeshBasicMaterial({
@@ -912,7 +927,7 @@ export class ProcUnit extends THREE.Group {
 
   /** From now on tick() may hand the unit to the scene's UnitBatcher for far LODs (needs the model inside a scene) */
   enableBatching() {
-    const on = UNIT_LOD.enabled && globalThis.window?.steelMans?.unitBatching !== false;
+    const on = UNIT_LOD.enabled && globalThis.window?.steelMen?.unitBatching !== false;
     if (this.batch || !on || !this.shared?.far.length) return;
     this.batch = {
       registered: false, batcher: null, items: null, lod: -1, visible: true, dist2: 0, rank: 0,
@@ -1312,7 +1327,7 @@ export function unitBatcherFor(scene) {
   return b;
 }
 
-/** Console: `(await import('./src/procedural/units/UnitKit.js')).unitBatchStats(steelMans.scene)` */
+/** Console: `(await import('./src/procedural/units/UnitKit.js')).unitBatchStats(steelMen.scene)` */
 export const unitBatchStats = (scene) => batchers.get(scene)?.stats() ?? null;
 
 // ---------------------------------------------------------------- registry

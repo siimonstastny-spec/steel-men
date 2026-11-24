@@ -1,4 +1,4 @@
-// Steel Mans – building batcher (roadmap 18, phase P, docs/notes/proc-perf.md). The static body, the emblem decals and
+// Steel Men – building batcher (roadmap 18, phase P, docs/notes/proc-perf.md). The static body, the emblem decals and
 // the frozen "far" parts (e.g. the solar panel) of every finished procedural building are drawn as InstancedMesh:
 // one group per (geometry, material) – a group is one draw call whatever the number of buildings, so draw calls grow
 // with the number of building types / styles / LOD levels, not with buildings. Animated parts and glow meshes stay
@@ -345,5 +345,5 @@ export function batcherFor(scene) {
   return batcher;
 }
 
-/** Console: `(await import('./src/procedural/BuildingBatcher.js')).batchStats(steelMans.scene)` */
+/** Console: `(await import('./src/procedural/BuildingBatcher.js')).batchStats(steelMen.scene)` */
 export const batchStats = (scene) => batchers.get(scene)?.stats() ?? null;

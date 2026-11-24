@@ -1,4 +1,4 @@
-// Steel Mans – Settings screen (tabs: Controls, Audio, Graphics, Game). Edits go to a draft (SettingsDraft.js);
+// Steel Men – Settings screen (tabs: Controls, Audio, Graphics, Game). Edits go to a draft (SettingsDraft.js);
 // the Save button writes them to the player profile (src/core/Profile.js) and applies them. Leaving with unsaved
 // changes asks: Save / Discard / Back (ChoiceDialog.js). Works the same when opened from the game menu.
 import { graphicsPresetOf, graphicsPresetOptions } from '../core/Profile.js';

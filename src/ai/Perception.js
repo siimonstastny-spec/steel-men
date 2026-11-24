@@ -1,4 +1,4 @@
-// Steel Mans AI – what one team knows. Own units are read freely (the player sees them too); foreign units only
+// Steel Men AI – what one team knows. Own units are read freely (the player sees them too); foreign units only
 // while the team's fog of war shows them (fog.canTeamSee). Enemies that drop out of sight are remembered where
 // they were last seen; a memory is dropped when the team looks at that spot again and the unit is not there.
 // No other knowledge of the enemy is used (no cheating on any difficulty).

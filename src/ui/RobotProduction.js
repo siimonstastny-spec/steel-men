@@ -1,4 +1,4 @@
-// Steel Mans – option grid pages of the robot production buildings (BuildMenu shows them for a finished,
+// Steel Men – option grid pages of the robot production buildings (BuildMenu shows them for a finished,
 // selected own building). A pure view: state comes from world.production / the part stock, buttons submit
 // commands through BuildMenu.submit (src/game/commands/productionCommands.js):
 //   • part factory (stats.produces 'part'): slot tabs, one button per part the faction may make

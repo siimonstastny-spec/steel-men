@@ -1,12 +1,16 @@
-// Steel Mans – multiplayer lobby (docs/MULTIPLAYER.md, "Lobby"). The host creates a game with a short code; the
+// Steel Men – multiplayer lobby (docs/MULTIPLAYER.md, "Lobby"). The host creates a game with a short code; the
 // code is the room name. Everyone keeps their own wishes in PRESENCE (seat, nickname, race, colour, ready) – presence
 // is absolute state, re-sent by the platform and handed to newcomers, so nothing gets lost. The host is the
 // authority: it turns everybody's presence into the seat list and publishes it (its own presence field `lobby`
 // + a 'lobby' message on every change and every NET.lobbyResendMs). Clients only display the host's state.
 //
 //   const lobby = new Lobby(transport)
-//   await lobby.create({ name }) / await lobby.join(code, { name })
-//   lobby.state  { code, hostId, seats: [{ team, controller: 'human'|'ai'|'open', playerId, nickname, race, color, ready,
+//   await lobby.create({ name, avatarImg, gameName, visibility, password }) / await lobby.join(code, { name, avatarImg, password })
+//   [LOBBY_LIST] gameName = shown name of the game (state.name), visibility 'public' (announced in the game list,
+//   P2P only, src/net/LobbyDirectory.js) | 'code'; password = Trystero room password (P2P only, never stored or
+//   published). Host only: setVisibility(v), kick(playerId) (the id goes to state.kicked; that client leaves with
+//   lobby.error.kicked and cannot sit down again). lobby.visibility / lobby.locked / lobby.directoryActive() (host)
+//   lobby.state  { code, name, kicked?: [playerId], hostId, seats: [{ team, controller: 'human'|'ai'|'open', playerId, nickname, race, color, ready,
 //                  open (false = the seat is not in the game), alliance (id, equal = allies),
 //                  difficulty (AI seats only: 'easy'|'normal'|'hard'),
 //                  aiName + avatar (AI seats only [N6]: call sign and avatar index, chosen by the host) }],     [N5b] TEAMS.length seats
@@ -30,12 +34,16 @@
 //                      aiSeats: [{team, difficulty}],
 //                      channel, transport, selfId }   – channel stays open for the Lockstep
 //   lobby.leave()
-import { NET, TEAMS, LOBBY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, PREBUILD, UI_SMALL, MENU, ORE_MULTIPLIER, START_MULTIPLIER, START_RESEARCH, ECONOMY } from '../config.js';
+import { NET_SECURITY } from './netSecurity.js'; // [MP-SEC]
+import { NET, TEAMS, LOBBY, PROFILE, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, PREBUILD, UI_SMALL, MENU, ORE_MULTIPLIER, START_MULTIPLIER, START_RESEARCH, ECONOMY } from '../config.js';
 import { loadMapCatalog, validMapChoice, isRandomMap, pickRandomMap } from '../game/MapCatalog.js'; // [W5a] Random map
 import { colorsTooSimilar, firstDistinctColor } from '../core/ColorCheck.js'; // [MP-POLISH]
 import { aiIdentity, cleanAiIdentity, hashSeed, pickAiIndex, usedNameIndices } from '../ai/AiProfiles.js'; // [N6]
 import { hasEnoughAlliances, isAllianceId, normalizeAlliances } from '../core/AllianceSetup.js';
 import { cleanAvatarImage } from '../core/PlayerLabels.js'; // [UISMALL] picture of a human player (small data URL)
+import { LobbyAnnouncer } from './LobbyDirectory.js'; // [LOBBY_LIST]
+import { supportsDirectory } from './transports/index.js';
+import { cleanText } from './textClean.js';
 
 // [UISMALL] A message / presence of the room is at most NET.maxMessageBytes, and the lobby state already travels in the
 // host's presence, so pictures are NOT part of the state: everybody publishes a tiny thumbnail (UI_SMALL.humanAvatar.netMaxLength)
@@ -47,8 +55,16 @@ import { validConditionForSet } from '../game/Victory.js';
 import { t } from '../i18n/i18n.js';
 
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
-const NICK_MAX = 32;
+const NICK_MAX = PROFILE.nicknameMaxLength; // [LOBBY_LIST] same limit as the profile and the game list
 const RACE_MAX = 32;
+
+/** [LOBBY_LIST] Game name as shown / published: no control or bidi characters, trimmed, at most LOBBY.nameMaxLength */
+export function cleanGameName(name) {
+  return cleanText(name, LOBBY.nameMaxLength); // only invisible characters → '' → the caller uses the default name
+}
+
+/** [LOBBY_LIST] Password as handed to the transport ('' = none) */
+const cleanPassword = (pw) => (typeof pw === 'string' ? pw.slice(0, LOBBY.passwordMaxLength) : '');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const clone = (v) => JSON.parse(JSON.stringify(v ?? null));
@@ -135,6 +151,18 @@ export class Lobby {
     this.unsubs = [];
     this.resendTimer = null;
     this.stateWaiter = null;
+    // [MP-SEC] client: the host is pinned by the first valid state; a later claim of another peer is ignored
+    this.hostPin = null;
+    this.hostConflict = false;   // true once another peer claimed to be the host (UI may warn)
+    this.code = null;            // code this client joined with (a state with another code is ignored)
+    this.lastHelloAt = -Infinity;
+    // [LOBBY_LIST]
+    this.visibility = 'code';    // host: 'public' = announced in the game list (P2P only)
+    this.locked = false;         // host: the game has a password
+    this.announcer = null;       // host: LobbyAnnouncer while public
+    this.announcerPending = false;
+    this.banned = new Set();     // host: kicked player ids (in kick order; published as state.kicked)
+    this.kicked = false;         // client: the host kicked us
   }
 
   get selfId() { return this.transport?.selfId ?? null; }
@@ -153,13 +181,18 @@ export class Lobby {
   onStart(fn) { this.startListeners.add(fn); return () => this.startListeners.delete(fn); }
 
   /** Host: opens a new game under a fresh random code */
-  async create({ name, avatarImg } = {}) {
+  async create({ name, avatarImg, gameName, visibility, password } = {}) {
     this.mine.nick = String(name ?? '').slice(0, NICK_MAX);
     this.mine.img = netImage(avatarImg); // [UISMALL] own thumbnail, shown to the others in the seat list
+    const pw = cleanPassword(password); // [LOBBY_LIST] kept only inside the transport's room, never in the state
+    this.locked = !!pw && supportsDirectory(this.transport);
+    // only P2P has the game list: elsewhere the game is always 'code'
+    this.visibility = !supportsDirectory(this.transport) ? 'code' : LOBBY.visibilities.includes(visibility) ? visibility : LOBBY.defaultVisibility;
+    const title = cleanGameName(gameName) || cleanGameName(t('lobby.defaultName', { name: this.mine.nick || t('common.player') }));
     let code = null;
     for (let attempt = 0; attempt < 4 && !code; attempt++) {
       const candidate = randomCode();
-      const ch = await this.transport.join(roomName(candidate));
+      const ch = await this.transport.join(roomName(candidate), { password: pw });
       await sleep(NET.createProbeMs); // someone already in a room of this name? (codes are random, but be safe)
       if (ch.peers().some((p) => !p.isMe)) { await ch.leave(); continue; }
       this.channel = ch;
@@ -167,31 +200,50 @@ export class Lobby {
     }
     if (!code) throw new Error(t('lobby.error.generic'));
     this.isHost = true;
-    this.state = { code, hostId: this.selfId, seats: TEAMS.map((_, team) => newSeat(team)), settings: {}, v: 0 };
+    this.state = { code, name: title, hostId: this.selfId, seats: TEAMS.map((_, team) => newSeat(team)), settings: {}, v: 0 };
     this.#subscribe();
     this.mine.seat = 0;
     await this.#pushPresence();
     this.#recompute(true);
     this.resendTimer = setInterval(() => this.#publish(), NET.lobbyResendMs);
+    this.#syncAnnouncer();
   }
 
   /** Client: joins the game of a code; resolves once the host's lobby state arrived */
-  async join(code, { name, avatarImg } = {}) {
+  async join(code, { name, avatarImg, password } = {}) {
     const norm = normalizeCode(code);
     if (!norm || norm.length > LOBBY.codeMaxLength) throw new Error(t('lobby.error.badCode'));
     this.mine.nick = String(name ?? '').slice(0, NICK_MAX);
     this.mine.img = netImage(avatarImg); // [UISMALL]
-    this.channel = await this.transport.join(roomName(norm));
+    const pw = cleanPassword(password);
+    // watchPassword: P2P also detects a mismatch that Trystero reports only to the host (P2PSignalWatch)
+    this.channel = await this.transport.join(roomName(norm), { password: pw, watchPassword: true });
     this.isHost = false;
+    this.code = norm;
     const got = new Promise((resolve) => { this.stateWaiter = resolve; });
+    // [LOBBY_LIST] P2P: a peer used another password. Another joiner with a wrong password causes the same signal, so
+    // the host's state still has LOBBY.passwordGraceMs to arrive before we give up.
+    let pwTimer = null;
+    let unsubPw = null;
+    const wrongPw = new Promise((resolve) => {
+      const arm = () => { pwTimer ??= setTimeout(() => resolve(false), LOBBY.passwordGraceMs); };
+      unsubPw = this.transport?.onPasswordError?.(arm) ?? null;
+      if (this.transport?.passwordErrors > 0) arm(); // reported while transport.join still waited for a relay
+    });
     this.#subscribe();
     await this.#pushPresence();
     this.channel.send('lobby', { op: 'hello' });
     this.#scanPeers(this.channel.peers());
-    const ok = await Promise.race([got, sleep(this.transport?.joinTimeoutMs ?? NET.joinTimeoutMs).then(() => false)]);
+    const ok = await Promise.race([got, wrongPw, sleep(this.transport?.joinTimeoutMs ?? NET.joinTimeoutMs).then(() => false)]);
+    clearTimeout(pwTimer);
+    unsubPw?.();
+    this.channel?.stopPasswordWatch?.(); // [LOBBY_LIST] host state arrived (or we give up): stop the P2P watch
     this.stateWaiter = null;
     if (!ok || this.closed) {
-      const key = this.closed ? null : this.transport?.joinFailureKey?.(); // P2P: relays down / strict NAT / no host
+      // P2P: relays down / wrong password / strict NAT / no host
+      let key = this.kicked ? 'lobby.error.kicked' : this.closed ? null : this.transport?.joinFailureKey?.();
+      // [LOBBY_LIST] fallback: with a password typed, "nobody answered" may still be a password mismatch we did not see
+      if (key === 'net.p2p.error.hostNotFound' && pw && supportsDirectory(this.transport)) key = 'lobby.error.passwordOrGone';
       await this.leave();
       throw new Error(t(key ?? 'lobby.error.notFound'));
     }
@@ -353,10 +405,38 @@ export class Lobby {
     this.#begin(payload);
   }
 
+  /** [LOBBY_LIST] Host only: 'public' (in the game list, P2P only) or 'code' (join by code only) */
+  setVisibility(visibility) {
+    if (!this.isHost || !this.state || this.started) throw new Error(t('lobby.error.hostOnly'));
+    if (!LOBBY.visibilities.includes(visibility) || visibility === this.visibility) return;
+    if (visibility === 'public' && !supportsDirectory(this.transport)) return; // no game list outside P2P
+    this.visibility = visibility;
+    this.#syncAnnouncer();
+    this.#notify();
+  }
+
+  /** [LOBBY_LIST] Host: is the game being announced in the public list right now (or about to be)? */
+  directoryActive() { return !!(this.announcer || this.announcerPending); }
+
+  /**
+   * [LOBBY_LIST] Host only: removes a human player. The id goes to state.kicked (reliable through the host presence):
+   * that client leaves with lobby.error.kicked; its later seat claims are ignored for the rest of this lobby.
+   */
+  kick(playerId) {
+    if (!this.isHost || !this.state || this.started) throw new Error(t('lobby.error.hostOnly'));
+    if (typeof playerId !== 'string' || !playerId || playerId === this.selfId || playerId.length > NET_SECURITY.maxPeerIdLength) return;
+    this.banned.delete(playerId);
+    this.banned.add(playerId);
+    while (this.banned.size > LOBBY.kickedMax) this.banned.delete(this.banned.values().next().value);
+    this.state.kicked = [...this.banned];
+    this.#recompute(true);
+  }
+
   /** Leaves the lobby and the room (not after start: the match keeps the channel) */
   async leave() {
     const ch = this.channel;
     this.#stopListening();
+    this.#stopAnnouncer(); // [LOBBY_LIST] 'closed' to the game list
     this.closed = true;
     this.changeListeners.clear();
     this.startListeners.clear();
@@ -397,13 +477,17 @@ export class Lobby {
     this.unsubs.push(ch.on('lobby', ({ from, data }) => {
       if (!data || typeof data !== 'object') return;
       if (this.isHost) {
-        if (data.op === 'hello') this.#publish();
-      } else if (data.op === 'state' && data.state && from === data.state.hostId) {
+        if (data.op === 'hello') { // [MP-SEC] rate limited: a flood of hellos must not flood the room with full states
+          const now = Date.now();
+          if (now - this.lastHelloAt >= NET_SECURITY.helloMinIntervalMs) { this.lastHelloAt = now; this.#publish(); }
+        }
+      } else if (data.op === 'state' && data.state && typeof data.state === 'object' && from === data.state.hostId) {
         this.#applyState(data.state);
       }
     }));
     this.unsubs.push(ch.on('start', ({ from, data }) => {
-      if (!this.isHost && this.state && from === this.state.hostId) this.#begin(data);
+      // [MP-SEC] only from the pinned host, and only once a valid state of that host was accepted
+      if (!this.isHost && this.state && this.hostPin !== null && from === this.hostPin) this.#begin(data);
     }));
     this.unsubs.push(ch.onPeers((change) => {
       if (this.isHost) {
@@ -427,6 +511,47 @@ export class Lobby {
     this.resendTimer = null;
   }
 
+  // ---- [LOBBY_LIST] public game list (host) ----
+
+  #wantsAnnouncer() {
+    return this.isHost && !!this.state && !this.started && !this.closed && this.visibility === 'public' && supportsDirectory(this.transport);
+  }
+
+  /** Starts / stops the announcer to match the visibility (creation is async: re-checked when it resolves) */
+  #syncAnnouncer() {
+    if (!this.#wantsAnnouncer()) { this.#stopAnnouncer(); return; }
+    if (this.announcer || this.announcerPending) return;
+    this.announcerPending = true;
+    LobbyAnnouncer.create(() => this.#directoryInfo()).then((a) => {
+      this.announcerPending = false;
+      if (!a) return;
+      if (this.announcer || !this.#wantsAnnouncer()) { a.dispose(); return; }
+      this.announcer = a;
+    });
+  }
+
+  #stopAnnouncer() {
+    const a = this.announcer;
+    this.announcer = null;
+    if (a) a.close().catch(() => a.dispose());
+  }
+
+  /** What the game list shows about our game */
+  #directoryInfo() {
+    const st = this.state;
+    if (!st) return null;
+    const open = st.seats.filter((s) => s.open);
+    return {
+      code: st.code,
+      name: st.name,
+      host: this.mine.nick,
+      map: validMapChoice(st.settings?.map),
+      n: open.filter((s) => s.controller !== 'open').length,
+      max: open.length,
+      lock: this.locked,
+    };
+  }
+
   /** Client: the host's state from its presence (field `lobby`, published by a peer about itself) */
   #scanPeers(peers) {
     for (const p of peers ?? []) {
@@ -437,13 +562,58 @@ export class Lobby {
 
   #applyState(st) {
     if (this.isHost || this.started || this.closed) return;
-    if (!Array.isArray(st.seats) || typeof st.code !== 'string') return;
-    if (this.state && this.state.hostId === st.hostId && (st.v ?? 0) < (this.state.v ?? 0)) return; // older copy
+    if (!this.#validState(st)) return;
+    // [MP-SEC] the host is whoever sent the first valid state; a different claimant later (hijack attempt) is ignored
+    if (this.hostPin === null) this.hostPin = st.hostId;
+    else if (st.hostId !== this.hostPin) {
+      if (!this.hostConflict) console.warn('[lobby] another peer claims to be the host – ignored', st.hostId);
+      this.hostConflict = true;
+      return;
+    }
+    if (this.state && (st.v ?? 0) < (this.state.v ?? 0)) return; // older copy
+    // [LOBBY_LIST] the host kicked us: join() fails with lobby.error.kicked, a joined client sees state.kicked
+    if (Array.isArray(st.kicked) && st.kicked.includes(this.selfId)) {
+      if (this.kicked) return;
+      this.kicked = true;
+      if (this.stateWaiter) { this.stateWaiter(false); this.stateWaiter = null; return; }
+      this.state = { ...(this.state ?? clone(st)), kicked: true };
+      this.#notify();
+      return;
+    }
     const changed = JSON.stringify(st) !== JSON.stringify(this.state);
     this.state = clone(st);
     if (this.stateWaiter) { this.stateWaiter(true); this.stateWaiter = null; }
     if (st.started) { this.#begin(st.started); return; }
     if (changed) this.#notify();
+  }
+
+  /** [MP-SEC] Is this a plausible lobby state of OUR game (code), claimed by someone else than us? */
+  #validState(st) {
+    if (!st || typeof st !== 'object' || !Array.isArray(st.seats) || st.seats.length !== TEAMS.length) return false;
+    if (typeof st.code !== 'string' || (this.code && normalizeCode(st.code) !== this.code)) return false;
+    if (typeof st.hostId !== 'string' || !st.hostId || st.hostId.length > NET_SECURITY.maxPeerIdLength || st.hostId === this.selfId) return false;
+    if (st.v !== undefined && !Number.isFinite(st.v)) return false;
+    if (st.settings !== undefined && (typeof st.settings !== 'object' || st.settings === null || Array.isArray(st.settings))) return false;
+    if (st.name !== undefined && typeof st.name !== 'string') return false; // [LOBBY_LIST] (shown cut + escaped)
+    if (st.kicked !== undefined && (!Array.isArray(st.kicked) || st.kicked.length > LOBBY.kickedMax)) return false;
+    return st.seats.every((s) => s && typeof s === 'object');
+  }
+
+  /** [MP-SEC] Is this a plausible start payload (seat list sized for the match, bounded ids)? */
+  #validStart(p) {
+    if (!p || typeof p !== 'object' || !Array.isArray(p.seats) || !Number.isFinite(p.seed)) return false;
+    if (p.seats.length < 1 || p.seats.length > TEAMS.length) return false;
+    const humans = new Set();
+    const teams = new Set();
+    for (const s of p.seats) {
+      if (!s || typeof s !== 'object' || !Number.isInteger(s.team) || s.team < 0 || s.team >= TEAMS.length || teams.has(s.team)) return false;
+      teams.add(s.team);
+      if (s.controller === 'human') {
+        if (typeof s.playerId !== 'string' || !s.playerId || s.playerId.length > NET_SECURITY.maxPeerIdLength || humans.has(s.playerId)) return false;
+        humans.add(s.playerId);
+      }
+    }
+    return true;
   }
 
   #pushPresence() {
@@ -459,15 +629,15 @@ export class Lobby {
     const peers = new Map(this.channel.peers().map((p) => [p.id, p]));
     const seats = this.state.seats.map((s) => ({ ...s }));
     const wants = (pid, team) => peers.get(pid)?.presence?.seat === team;
-    // 1. seats whose player left or moved become free
+    // 1. seats whose player left, moved or was kicked [LOBBY_LIST] become free
     for (const s of seats) {
-      if (s.controller === 'human' && !(s.open && s.playerId && wants(s.playerId, s.team))) clearSeat(s);
+      if (s.controller === 'human' && !(s.open && s.playerId && wants(s.playerId, s.team) && !this.banned.has(s.playerId))) clearSeat(s);
     }
     // 2. new claims, first come first served (peer list order)
     const seated = new Set(seats.filter((s) => s.playerId).map((s) => s.playerId));
     for (const p of peers.values()) {
       const team = p.presence?.seat;
-      if (seated.has(p.id) || !Number.isInteger(team) || !seats[team]) continue;
+      if (seated.has(p.id) || this.banned.has(p.id) || !Number.isInteger(team) || !seats[team]) continue;
       if (seats[team].controller !== 'open' || !seats[team].open) continue; // AI and closed seats are never claimed
       seats[team].controller = 'human';
       seats[team].playerId = p.id;
@@ -498,6 +668,7 @@ export class Lobby {
       this.state.v++;
       this.#publish();
       this.#notify();
+      this.announcer?.update(); // [LOBBY_LIST] players / map changed: refresh the game list entry (rate limited)
     }
   }
 
@@ -529,9 +700,12 @@ export class Lobby {
 
   #begin(payload) {
     if (this.started || this.closed || !payload || typeof payload !== 'object') return;
-    if (!Array.isArray(payload.seats) || !Number.isFinite(payload.seed)) return;
+    if (!this.#validStart(payload)) return;
+    // [MP-SEC] a client takes the host from its pin, never from the payload (Lockstep gives the host AI / speed rights)
+    if (!this.isHost) payload = { ...payload, hostId: this.hostPin };
     this.started = true;
     this.#stopListening();
+    this.#stopAnnouncer(); // [LOBBY_LIST] the game left the list ('closed')
     const seats = clone(payload.seats);
     const me = this.selfId;
     const mySeat = seats.find((s) => s.controller === 'human' && s.playerId && s.playerId === me);

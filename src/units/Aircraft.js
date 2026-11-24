@@ -1,4 +1,4 @@
-// Steel Mans – aircraft (stats.json → vehicles entry with mobility.movementType AIR.movementType): a CombatVehicle
+// Steel Men – aircraft (stats.json → vehicles entry with mobility.movementType AIR.movementType): a CombatVehicle
 // that flies. No pathfinding (Movement.followPath goes straight for `airborne` units), flies AIR.flightHeight above
 // the terrain, collides only with other aircraft, can be hit only by weapons with "air" in targets (Combat.hitsLayer).
 // v1: no fuel, no landing – it hovers in place when idle (docs/notes/n7-air.md).
@@ -72,6 +72,9 @@ export class Aircraft extends CombatVehicle {
     ghost.position.copy(this.position);
     ghost.rotation.y = this.rotation.y;
     ghost.add(this.model); // keeps the model's local transform, leaves the unit (which World removes)
+    // A procedural model falls with the ghost: World must not dispose it with the unit, it is released when the fall ends
+    const proc = this.procModel;
+    this.procModel = null;
     world.scene.add(ghost);
     const sign = (this.eid ?? 0) & 1 ? 1 : -1;
     const heading = this.rotation.y;
@@ -91,9 +94,13 @@ export class Aircraft extends CombatVehicle {
       ghost.rotation.z = sign * k * cfg.rollDeg * DEG;
       if (ghost.position.y <= world.heightAt(ghost.position.x, ghost.position.z)) item.life = 0;
     }, () => {
+      // Also runs from Effects.dispose() (it drains every live item), so the ghost and the model are released when the match ends
       world.scene.remove(ghost);
-      ghost.remove(this.model);
-      disposeUniqueMaterials(this.model);
+      if (proc) proc.dispose();
+      else {
+        ghost.remove(this.model);
+        disposeUniqueMaterials(this.model);
+      }
       const ground = new THREE.Vector3(ghost.position.x, world.heightAt(ghost.position.x, ghost.position.z), ghost.position.z);
       fire.stop();
       world.effects.explodeUnit(this, { position: ground, fallbackSize: VEHICLE.explosionSize * cfg.explosionSize }); // [R9]

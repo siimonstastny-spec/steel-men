@@ -1,4 +1,4 @@
-// Steel Mans – procedural main building MatterConverter (roadmap 18, phase B). A drop-in alternative to
+// Steel Men – procedural main building MatterConverter (roadmap 18, phase B). A drop-in alternative to
 // models/3DStructures{race}/MatterConverter{race}_Anim.glb built in code from the style modules (ProcModules.js) and the
 // faction style (data/buildingStyles.json):
 //   • footprint inside the GLB's (ground box about ±27.3 × ±27.3, front = +Z where the gate and ramp are); pad ±26.6
@@ -17,8 +17,27 @@ import {
   spike, pipeRun, tank, chimney, plasmaCoil, laserLink, arcGeometry, ArcFlicker, Levitator, emblemDecalGeometry, emblemShape,
   pulseWave, PROC_MODULES,
 } from './ProcModules.js';
+import { PROC_TEAM_PAINT } from '../config.js';
 
 const TAU = Math.PI * 2;
+
+/**
+ * Team paint of the converter (docs/notes/proc-teampaint-a.md): the foundation ring round the hall (plinth top), a rim on the
+ * hall roof and the main armour (angular: sloped armour + parapets, round: dome ribs, faceted: floor diamond, wing roofs, stage)
+ * are team lacquer; walls and the rest stay neutral metal. The pad / plinth / hall are built as hollow shells + flat rings so
+ * that hidden caps do not count as surface (and the team share is measured on what can be seen).
+ */
+const TEAM = {
+  lod: PROC_TEAM_PAINT.lod.panel,   // coarsest LOD of the team parts (2 = far silhouette)
+  ringOverlap: 0.2,                 // flat rings reach this far under the wall that stands on them (no gap)
+  rim: 2.0,                         // width of the team rim on the hall roof (rounded / round)
+  lift: 0.06,                       // overlay slabs float this high over the surface they paint (faceted floor diamond, roofs)
+  roofSlab: 0.1,                    // thickness of the faceted roof slabs
+  roofInset: 0.5,                   // faceted: roof slab margin to the neon edge strips
+  diamond: { rIn: 10, rOut: 26.4 }, // faceted: team floor diamond round the stage (circumradii, corners on the axes; pad ±26.6)
+};
+const SHELL_SIDES_A = 12;   // BoxGeometry indices of the two X faces (6 each); order +x −x +y −y +z −z
+const SHELL_SIDES_B = 24;   // first index of the two Z faces
 
 /** Animation tuning (visual only; the style's anim block multiplies speeds) */
 export const CONVERTER_ANIM = {
@@ -226,21 +245,71 @@ function octRailing(c, R, y) {
   }
 }
 
-/** Pad, plinth ('box' / 'octagon' / 'round' / 'none') and the front ramp (+Z); round = circular pad with a neon ring */
-function foundation(c, kind) {
+/**
+ * Flat polygon ring facing up at height y (+ o.lift): apothems aIn → aOut; `sides` 4 = square, 8 = octagon, n = round (o.round: the
+ * radii are circumradii, used for cylinders). o.turn = extra rotation of the polygon (π/4 turns a square into a diamond).
+ */
+function flatRing(b, s, sides, aIn, aOut, y, o = {}) {
+  const k = o.round ? 1 : 1 / Math.cos(Math.PI / sides);
+  const start = o.round ? 0 : Math.PI / sides + (o.turn ?? 0);   // round: vertices where a plain cylinder has them (no gap at the wall)
+  const g = new THREE.RingGeometry(aIn * k, aOut * k, sides, 1, start).rotateX(-Math.PI / 2);
+  return b.add(g, s, { y: y + (o.lift ?? 0), detail: o.detail });
+}
+
+/** Prism walls without caps (hollow collar): sides 4 / 8 / n, apothem a, faces on the axes, bottom at y0 */
+function collarPrism(b, sides, a, h, s, y0) {
+  const r = a / Math.cos(Math.PI / sides);
+  return b.cylinder(r, r, h, sides, s, { y: y0 + h / 2, ry: Math.PI / sides }, true);
+}
+
+/** Box walls without top and bottom (optionally tapered: top width topW × topD), origin at the bottom centre – like PartBuilder.taperedBox */
+function shellBox(b, w, topW, h, d, s, t = {}, topD = d) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const all = Array.from(g.index.array);
+  g.setIndex(all.slice(0, SHELL_SIDES_A).concat(all.slice(SHELL_SIDES_B)));
+  g.translate(0, h / 2, 0);
+  if (topW !== w || topD !== d) {
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getY(i) <= h / 2) continue;
+      pos.setX(i, pos.getX(i) * (topW / w));
+      pos.setZ(i, pos.getZ(i) * (topD / d));
+    }
+    g.computeVertexNormals();
+  }
+  return b.add(g, s, t);
+}
+
+/**
+ * Pad, plinth ('box' / 'octagon' / 'round' / 'none') and the front ramp (+Z); round = circular pad with a neon ring.
+ * Pad and plinth are hollow shells with a flat ring on top; the plinth ring (from the wall of the hall, `innerHalf`, out to the
+ * plinth edge) is the team-painted foundation.
+ */
+function foundation(c, kind, innerHalf) {
   const L = LAYOUT;
   const { b, S, kit } = c;
+  const top = L.padH + L.plinthH;
+  const inner = innerHalf - TEAM.ringOverlap;
+  const team = { detail: TEAM.lod };
   if (kind === 'round') {
-    b.cylinder(L.padHalf, L.padHalf, L.padH, L.padSegments, S.ground, { y: L.padH / 2 });
+    b.cylinder(L.padHalf, L.padHalf, L.padH, L.padSegments, S.ground, { y: L.padH / 2 }, true);
+    flatRing(b, S.ground, L.padSegments, L.plinthHalf - TEAM.ringOverlap, L.padHalf, L.padH, { round: true });
     if (kit.style.neon >= L.padRing.neonMin) b.torus(L.padHalf - L.padRing.inset, L.padRing.tube, 4, L.padSegments, TAU, S.neon, { rx: Math.PI / 2, y: L.padH + L.padRing.lift });
+    b.cylinder(L.plinthHalf, L.plinthHalf + 0.4, L.plinthH, L.roundSegments, S.hullDark, { y: L.padH + L.plinthH / 2 }, true);
+    flatRing(b, S.teamPaint, L.roundSegments, inner, L.plinthHalf, top, { ...team, round: true });
   } else if (kind === 'octagon') {
-    octPrism(b, L.padHalf, L.padH, S.ground, 0);
-    octPrism(b, L.plinthHalf, L.plinthH, S.hullDark, L.padH);
+    collarPrism(b, OCT_FACES, L.padHalf, L.padH, S.ground, 0);
+    flatRing(b, S.ground, OCT_FACES, L.plinthHalf - TEAM.ringOverlap, L.padHalf, L.padH);
+    collarPrism(b, OCT_FACES, L.plinthHalf, L.plinthH, S.hullDark, L.padH);
+    flatRing(b, S.teamPaint, OCT_FACES, inner, L.plinthHalf, top, team);
+  } else if (kind === 'box') {
+    shellBox(b, L.padHalf * 2, L.padHalf * 2, L.padH, L.padHalf * 2, S.ground);
+    flatRing(b, S.ground, 4, L.plinthHalf - TEAM.ringOverlap, L.padHalf, L.padH);
+    shellBox(b, L.plinthHalf * 2, L.plinthHalf * 2, L.plinthH, L.plinthHalf * 2, S.hullDark, { y: L.padH });
+    flatRing(b, S.teamPaint, 4, inner, L.plinthHalf, top, team);
   } else {
     b.box(L.padHalf * 2, L.padH, L.padHalf * 2, S.ground, { base: true });
   }
-  if (kind === 'box') b.box(L.plinthHalf * 2, L.plinthH, L.plinthHalf * 2, S.hullDark, { base: true, y: L.padH });
-  if (kind === 'round') b.cylinder(L.plinthHalf, L.plinthHalf + 0.4, L.plinthH, L.roundSegments, S.hullDark, { y: L.padH + L.plinthH / 2 });
   if (kind !== 'none') b.wedge(L.rampLen, L.plinthH, L.rampW, S.lower, { y: L.padH, z: L.plinthHalf + L.rampLen / 2, ry: Math.PI / 2 });
 }
 
@@ -374,10 +443,13 @@ BODIES.rounded = (c) => {
   const D = DIM.rounded;
   const { b, S, kit, glows } = c;
   const y1 = LAYOUT.padH + LAYOUT.plinthH;
-  foundation(c, 'octagon');
+  foundation(c, 'octagon', D.hall.a);
   const y2 = y1 + D.hall.h;
   const y3 = y2 + D.tier.h;
-  octPrism(b, D.hall.a, D.hall.h, S.hull, y1);
+  // hall = hollow walls + a roof ring: neutral inside, team rim along the edge
+  collarPrism(b, OCT_FACES, D.hall.a, D.hall.h, S.hull, y1);
+  flatRing(b, S.hull, OCT_FACES, D.tier.a - TEAM.ringOverlap, D.hall.a - TEAM.rim, y2);
+  flatRing(b, S.teamPaint, OCT_FACES, D.hall.a - TEAM.rim, D.hall.a, y2, { detail: TEAM.lod });
   octPrism(b, D.tier.a, D.tier.h, S.hull, y2);
   const neonBands = kit.style.neon >= D.neonMin;
   const Wn = D.win;
@@ -420,13 +492,15 @@ BODIES.angular = (c) => {
   const D = DIM.angular;
   const { b, S, kit, glows } = c;
   const y1 = LAYOUT.padH + LAYOUT.plinthH;
-  foundation(c, 'box');
+  foundation(c, 'box', D.block.w / 2);
   const bh = D.block.w / 2;
   const y2 = y1 + D.block.h;
   const y3 = y2 + D.slope.h;
   const y4 = y3 + D.tier.h;
-  b.box(D.block.w, D.block.h, D.block.w, S.hull, { base: true, y: y1 });
-  b.taperedBox(D.slope.w, D.slope.topW, D.slope.h, D.slope.w, S.hull, { y: y2 }, D.slope.topW);
+  shellBox(b, D.block.w, D.block.w, D.block.h, D.block.w, S.hull, { y: y1 });   // hollow: its roof is hidden under the slope
+  // sloped armour in team lacquer + a neutral ring round the tier above it
+  shellBox(b, D.slope.w, D.slope.topW, D.slope.h, D.slope.w, S.teamPaint, { y: y2, detail: TEAM.lod }, D.slope.topW);
+  flatRing(b, S.hull, 4, D.tier.w / 2 - TEAM.ringOverlap, D.slope.topW / 2, y3);
   b.taperedBox(D.tier.w, D.tier.topW, D.tier.h, D.tier.w, S.hull, { y: y3 }, D.tier.topW);
   const wb = wallOf(bh, bh, y1, D.block.h);
   const w2 = wallOf(D.tier.w / 2, D.tier.w / 2, y3, D.tier.h, (D.tier.w - D.tier.topW) / 2);
@@ -446,8 +520,8 @@ BODIES.angular = (c) => {
   }
   const Pp = D.parapet;
   for (const s of [-1, 1]) {
-    b.box(Pp.t, Pp.h, Pp.len, S.hullDark, { base: true, x: s * Pp.half, y: y3 });
-    b.box(Pp.len, Pp.h, Pp.t, S.hullDark, { base: true, y: y3, z: s * Pp.half });
+    b.box(Pp.t, Pp.h, Pp.len, S.teamPaint, { base: true, x: s * Pp.half, y: y3, detail: TEAM.lod });   // team parapet
+    b.box(Pp.len, Pp.h, Pp.t, S.teamPaint, { base: true, y: y3, z: s * Pp.half, detail: TEAM.lod });
     for (const e of [-1, 1]) spike(b, kit, { x: s * Pp.half, y: y3 + Pp.h, z: e * Pp.half, h: Pp.spikeH, r: Pp.spikeR });
     for (const m of Pp.mids) {
       spike(b, kit, { x: s * Pp.half, y: y3 + Pp.h, z: m, h: Pp.spikeH * 0.7, r: Pp.spikeR });
@@ -472,18 +546,21 @@ BODIES.round = (c) => {
   const D = DIM.round;
   const { b, S, kit, glows } = c;
   const y1 = LAYOUT.padH + LAYOUT.plinthH;
-  foundation(c, 'round');
+  foundation(c, 'round', D.hall.r);
   const R = D.hall.r;
   const y2 = y1 + D.hall.h;
   const y3 = y2 + D.drum.h;
-  b.cylinder(R, R, D.hall.h, D.hallSegments, S.hull, { y: y1 + D.hall.h / 2 });
-  b.cylinder(D.drum.r, D.drum.r, D.drum.h, D.drumSegments, S.hull, { y: y2 + D.drum.h / 2 });
+  // hall = hollow wall + roof ring (neutral inside, team rim along the edge); the drum is hollow too (the dome closes it)
+  b.cylinder(R, R, D.hall.h, D.hallSegments, S.hull, { y: y1 + D.hall.h / 2 }, true);
+  flatRing(b, S.hull, D.hallSegments, D.drum.r - TEAM.ringOverlap, R - TEAM.rim, y2, { round: true });
+  flatRing(b, S.teamPaint, D.hallSegments, R - TEAM.rim, R, y2, { round: true, detail: TEAM.lod });
+  b.cylinder(D.drum.r, D.drum.r, D.drum.h, D.drumSegments, S.hull, { y: y2 + D.drum.h / 2 }, true);
   b.add(new THREE.SphereGeometry(D.drum.r, D.dome.segments, D.dome.rings, 0, TAU, 0, Math.PI / 2), S.hull, { y: y3, sy: D.dome.sy });
   const k = D.dome.sy;
   const peak = y3 + D.drum.r * k;
   const K = D.ribs;
   for (let i = 0; i < K.count; i++) {
-    b.torus(D.drum.r + K.out, K.tube, K.radial, K.tubular, Math.PI, S.hullDark, { ry: (i / K.count) * Math.PI, sy: k, y: y3 });
+    b.torus(D.drum.r + K.out, K.tube, K.radial, K.tubular, Math.PI, S.teamPaint, { ry: (i / K.count) * Math.PI, sy: k, y: y3, detail: TEAM.lod });
   }
   const N = D.neonRing;
   b.cylinder(R + N.out, R + N.out, N.h, D.hallSegments, S.neon, { y: y1 + N.y }, true);
@@ -539,14 +616,17 @@ BODIES.faceted = (c) => {
   foundation(c, 'none');
   const y0 = L.padH;
   const St = D.stage;
-  b.cylinder(St.r, St.r, St.h, St.segments, S.hullDark, { y: y0 + St.h / 2 });
+  b.cylinder(St.r, St.r, St.h, St.segments, S.teamPaint, { y: y0 + St.h / 2, detail: TEAM.lod });   // team stage
   b.torus(St.r + St.neonOut, St.neonTube, 4, St.segments * 2, TAU, S.neon, { rx: Math.PI / 2, y: y0 + St.h });
+  // team floor diamond round the stage (corners on the axes, radii are circumradii)
+  flatRing(b, S.teamPaint, 4, TEAM.diamond.rIn, TEAM.diamond.rOut, y0, { round: true, lift: TEAM.lift, detail: TEAM.lod });
 
   // east / west wings (radiators on top, diamond lens plates on the outer face)
   const Wg = D.wing;
   for (const side of [-1, 1]) {
     const cx = side * Wg.cx;
     b.taperedBox(Wg.w, Wg.topW, Wg.h, Wg.d, S.hull, { x: cx, y: y0 }, Wg.d);
+    b.box(Wg.topW - 2 * TEAM.roofInset, TEAM.roofSlab, Wg.d - 2 * TEAM.roofInset, S.teamPaint, { base: true, x: cx, y: y0 + Wg.h, detail: TEAM.lod });   // team roof slab
     const wall = wallOf(Wg.w / 2, Wg.d / 2, y0, Wg.h, (Wg.w - Wg.topW) / 2, 0, cx, 0);
     const out = FACES.find((f) => f.nx === side);
     faceBand(b, out, wall, Wg.band, Wg.d - 2, 0.5, 0.05, S.team, [{ along: 0, size: D.decal.wingSize, y: D.decal.wingY }]);
@@ -564,6 +644,7 @@ BODIES.faceted = (c) => {
   // north wing with a pylon and the scanner head (held by lasers)
   const N = D.north;
   b.taperedBox(N.w, N.topW, N.h, N.d, S.hull, { z: N.cz, y: y0 }, N.topD);
+  b.box(N.topW - 2 * TEAM.roofInset, TEAM.roofSlab, N.topD - 2 * TEAM.roofInset, S.teamPaint, { base: true, y: y0 + N.h, z: N.cz, detail: TEAM.lod });   // team roof slab
   const wn = wallOf(N.w / 2, N.d / 2, y0, N.h, (N.w - N.topW) / 2, (N.d - N.topD) / 2, 0, N.cz);
   faceDecal(c, FACES[1], wn, D.decal.northY, 0, D.decal.northSize);
   faceBand(b, FACES[1], wn, N.h - 1.2, N.w - 2, 0.5, 0.05, S.team, [{ along: 0, size: D.decal.northSize, y: D.decal.northY }]);
@@ -592,7 +673,7 @@ BODIES.faceted = (c) => {
   const G = D.gate;
   for (const side of [-1, 1]) {
     const x = side * G.x;
-    b.taperedBox(G.w, G.topW, G.h, G.w, S.hullDark, { x, y: y0, z: G.z });
+    b.taperedBox(G.w, G.topW, G.h, G.w, S.teamShade, { x, y: y0, z: G.z, detail: TEAM.lod });   // gate pylons = team shade
     b.cylinder(G.lensR, G.lensR * 0.7, G.lensH, 10, S.lens, { x, y: y0 + G.h + G.lensH / 2, z: G.z });
     beacon(b, glows.get('beaconA'), kit, [x, y0 + G.h + G.lensH, G.z]);
   }

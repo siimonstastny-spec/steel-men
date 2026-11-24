@@ -1,4 +1,4 @@
-// Steel Mans – network self-test for the lobby (diagnostics only, nothing is written anywhere):
+// Steel Men – network self-test for the lobby (diagnostics only, nothing is written anywhere):
 //   const probe = startNetProbe({ transport })    // transport: the lobby's transport or null
 //   const result = await probe.promise            // never rejects; probe.cancel() stops it and closes everything
 // result = {

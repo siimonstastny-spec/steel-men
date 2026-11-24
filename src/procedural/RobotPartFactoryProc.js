@@ -1,4 +1,4 @@
-// Steel Mans – procedural robot part factory (night plan: buildings generated in code in 4 faction styles). A drop-in
+// Steel Men – procedural robot part factory (night plan: buildings generated in code in 4 faction styles). A drop-in
 // alternative to models/3DStructures{race}/RobotPartFactory{race}_Anim.glb built from the style modules (ProcModules.js):
 //   • footprint inside the GLBs' ground box (±18 × ±12): pad ±17.6 × ±11.8, front = +Z (open work cell, hall behind it)
 //   • a production hall at the back (per style.silhouette: rounded halls · armoured block with buttresses and spikes ·
@@ -15,6 +15,7 @@ import { PartBuilder, Blinker, Spinner, TrackMover, GlowBuilder, makeRng, platea
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   spike, pipeRun, tank, chimney, plasmaCoil, laserLink, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES,
+  teamPanel, teamTrim, teamBanner, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -108,6 +109,25 @@ const DIM = {
   },
 };
 
+/**
+ * Team paint layout (docs/notes/proc-teampaint-b.md). The big coloured areas are whole surfaces painted S.teamPaint /
+ * S.teamShade (work-cell platform, one main volume per body); kit modules (panels, trim, mark, banner) add the style's look on
+ * top – their kinds come from kit.team, the shapes from the silhouette. Everything is static geometry (no draw calls).
+ */
+const TEAM = {
+  rounded: {   // upper hall tier painted; panels flank the front windows and the side emblems, mark on the roof, lip, flag
+    front: { x: 9.5, y: 2.4, w: 7, h: 1.5 }, side: { dz: 4.4, y: 3.9, w: 2.4, h: 3.4 },
+    mark: { z: -0.5, w: 16, d: 3 }, trimInset: 0.8, banner: { x: -15, z: -9.8, h: 5 },
+  },
+  angular: {}, // sloped armour crown + lower plates painted (surfaces only)
+  round: {     // two wide rings round the lying hall (neon rings stay on top of them)
+    rings: [{ x: 13.5, w: 5 }, { x: 4.5, w: 4 }], out: 0.06, banner: { x: -16, z: 3.2, h: 4 },
+  },
+  faceted: {   // diamond crown and emitter towers painted, mark on the roof, fin banner
+    mark: { x: -1.5, w: 7, d: 10 }, banner: { x: -12, z: -9.7, h: 6 },
+  },
+};
+
 const BODIES = {};   // silhouette → body function (filled below)
 
 // ---------------------------------------------------------------- common parts
@@ -123,7 +143,7 @@ function foundation(c) {
   const D = DETAIL;
   b.box(G.hx * 2, G.h, G.hz * 2, S.ground, { base: true });
   const pz = (P.z0 + P.z1) / 2;
-  b.box(P.hx * 2, P.h, P.z1 - P.z0, S.hullDark, { base: true, y: G.h, z: pz });
+  b.box(P.hx * 2, P.h, P.z1 - P.z0, S.teamShade, { base: true, y: G.h, z: pz, detail: 2 });   // the whole work-cell floor is team paint
   marking(b, kit, P.hx * 2 - 2, D.edgeMarkH, { y: G.h + P.h / 2, z: P.z1 + D.markOut });
   const top = platTop();
   const zr = P.z1 - D.railInset;
@@ -218,8 +238,16 @@ BODIES.rounded = (c) => {
   const depth = H.front - H.back;
   const roofY = y0 + D.hallH;
   styledBox(b, kit, H.hx * 2, D.hallH, depth, S.hull, { base: true, y: y0, z: zc });
-  styledBox(b, kit, D.upper.w, D.upper.h, D.upper.d, S.hull, { base: true, y: roofY, z: zc + D.upper.dz });
+  styledBox(b, kit, D.upper.w, D.upper.h, D.upper.d, S.teamPaint, { base: true, y: roofY, z: zc + D.upper.dz, detail: 2 });   // team-painted upper tier
   b.box(H.hx * 2 * B.share, B.h, B.t, S.team, { y: y0 + D.band.y, z: H.front + B.t / 2 });
+  const Tm = TEAM.rounded;
+  for (const sx of [-1, 1]) {
+    teamPanel(b, kit, Tm.front.w, Tm.front.h, { x: sx * Tm.front.x, y: y0 + Tm.front.y, z: H.front });
+    for (const e of [-1, 1]) teamPanel(b, kit, Tm.side.w, Tm.side.h, { x: sx * H.hx, y: y0 + Tm.side.y, z: zc + e * Tm.side.dz, ry: sx * Math.PI / 2 });
+  }
+  roofMark(b, kit, { x: 0, y: roofY, z: Tm.mark.z, w: Tm.mark.w, d: Tm.mark.d });
+  teamTrim(b, kit, { x: 0, y: roofY, z: zc, w: H.hx * 2 - 2 * Tm.trimInset, d: depth - 2 * Tm.trimInset });
+  teamBanner(b, kit, { x: Tm.banner.x, y: roofY, z: Tm.banner.z, h: Tm.banner.h });
   for (const sx of [-1, 1]) {
     const W = D.win;
     b.box(W.fw, W.fh, W.t, S.frame, { x: sx * W.x, y: y0 + W.y, z: H.front + W.t / 2 });
@@ -247,7 +275,7 @@ BODIES.angular = (c) => {
   const y1 = y0 + D.blockH;
   const roofY = y1 + D.slope.h;
   b.box(H.hx * 2, D.blockH, depth, S.hull, { base: true, y: y0, z: zc });
-  b.taperedBox(H.hx * 2, D.slope.topW, D.slope.h, depth, S.hull, { y: y1, z: zc }, depth - D.slope.inset);
+  b.taperedBox(H.hx * 2, D.slope.topW, D.slope.h, depth, S.teamPaint, { y: y1, z: zc, detail: 2 }, depth - D.slope.inset);   // team-painted armour crown
   const Bt = D.buttress;
   for (const x of Bt.front) {
     b.box(Bt.w, Bt.h, Bt.t, S.hullDark, { base: true, x, y: y0, z: H.front + Bt.t / 2 });
@@ -259,7 +287,7 @@ BODIES.angular = (c) => {
   }
   const Pl = D.plate;
   for (const sx of [-1, 1]) {   // plate / team bands leave the front emblem free
-    b.box(Pl.w, Pl.h, Pl.t, S.lower, { x: sx * Pl.x, y: y0 + Pl.y, z: H.front + Pl.t / 2 });
+    b.box(Pl.w, Pl.h, Pl.t, S.teamShade, { x: sx * Pl.x, y: y0 + Pl.y, z: H.front + Pl.t / 2, detail: 2 });
     b.box(Pl.w, D.team.h, Pl.t, S.team, { x: sx * Pl.x, y: y0 + D.team.y, z: H.front + Pl.t / 2 });
   }
   frontDecal(c, 0, y0 + D.decal.y, D.decal.front);
@@ -291,7 +319,12 @@ BODIES.round = (c) => {
   if (kit.style.neon >= DETAIL.neonMin) {
     for (const x of D.ring.xs) b.torus(D.r + D.ring.out, D.ring.tube, 4, 48, TAU, S.neon, { ry: Math.PI / 2, x, y: cy, z: zc });
   }
+  const Tm = TEAM.round;
   for (const x of D.band.xs) b.torus(D.r + D.ring.out, D.band.tube, 4, 48, TAU, S.team, { ry: Math.PI / 2, x, y: cy, z: zc });
+  for (const sx of [-1, 1]) {   // wide team rings (open cylinders) round the hall
+    for (const r of Tm.rings) b.cylinder(D.r + Tm.out, D.r + Tm.out, r.w, D.segments, S.teamPaint, { rz: Math.PI / 2, x: sx * r.x, y: cy, z: zc, detail: 2 }, true);
+  }
+  teamBanner(b, kit, { x: Tm.banner.x, y: platTop(), z: Tm.banner.z, h: Tm.banner.h });
   if (kit.rich) {   // neon veins along the hall
     neonStrip(b, kit, len - 2, D.ridge.w, D.ridge.w, { y: cy + D.r + 0.02, z: zc });
     for (const e of [-1, 1]) neonStrip(b, kit, len - 2, D.ridge.w, D.ridge.w, { y: cy + D.r * Math.sin(D.ridge.angle), z: zc + e * D.r * Math.cos(D.ridge.angle) });
@@ -331,7 +364,10 @@ BODIES.faceted = (c) => {
     neonStrip(b, kit, D.edgeNeon, D.edgeNeon, depth, { x: sx * D.topW / 2, y: roofY });
   }
   const Cr = D.crown;
-  b.box(Cr.w, Cr.w, depth - 1, S.hullDark, { x: Cr.x, y: roofY, z: zc, rz: Math.PI / 4 });
+  b.box(Cr.w, Cr.w, depth - 1, S.teamPaint, { x: Cr.x, y: roofY, z: zc, rz: Math.PI / 4, detail: 2 });   // team-painted diamond crown
+  const Tm = TEAM.faceted;
+  roofMark(b, kit, { x: Tm.mark.x, y: roofY, z: zc, w: Tm.mark.w, d: Tm.mark.d });
+  teamBanner(b, kit, { x: Tm.banner.x, y: roofY, z: Tm.banner.z, h: Tm.banner.h });
   const peak = roofY + (Cr.w * Math.SQRT2) / 2;
   spike(b, kit, { x: Cr.x, y: peak, z: H.front - 1, h: Cr.spike, r: 0.3 });
   laser.segment([Cr.x, peak, H.back + 0.5], [Cr.x, peak, H.front - 0.5], PROC_MODULES.laser.thickness);
@@ -339,7 +375,7 @@ BODIES.faceted = (c) => {
   const T = D.tower;
   const A = LAYOUT.arm;
   for (const sx of [-1, 1]) {   // emitter towers linked to the arm pedestals by lasers
-    b.taperedBox(T.w, T.topW, T.h, T.w, S.hullDark, { x: sx * T.x, y: platTop(), z: T.z, ry: Math.PI / 4 }, T.topW);
+    b.taperedBox(T.w, T.topW, T.h, T.w, S.teamPaint, { x: sx * T.x, y: platTop(), z: T.z, ry: Math.PI / 4, detail: 2 }, T.topW);
     const top = platTop() + T.h;
     b.cylinder(T.lensR, T.lensR * 0.7, T.lensH, 10, S.lens, { x: sx * T.x, y: top + T.lensH / 2, z: T.z });
     beacon(b, glows.get('beaconA'), kit, [sx * T.x, top + T.lensH, T.z]);

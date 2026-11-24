@@ -1,4 +1,4 @@
-// Steel Mans – draft of the player settings edited in the Settings screen. Nothing reaches the profile or the game
+// Steel Men – draft of the player settings edited in the Settings screen. Nothing reaches the profile or the game
 // (KEYBINDINGS, language, volumes, graphics…) until commit() – the Save button. discard() throws the draft away.
 import { CAMERA_RESERVED_KEYS, FORBIDDEN_KEYS, KEYBINDINGS, KEY_ACTIONS, SETTINGS_DEFAULTS } from '../config.js';
 import { getSettings, replaceSetting, updateSettings } from '../core/Profile.js';

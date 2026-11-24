@@ -1,4 +1,4 @@
-// Steel Mans – procedural anti-aircraft turret (roadmap 18, defence buildings; new building, tier 2, air targets only,
+// Steel Men – procedural anti-aircraft turret (roadmap 18, defence buildings; new building, tier 2, air targets only,
 // strong). There is no GLB for it: footprint is meant to be similar to the point defence system (plinth ±6.0, Venus disc
 // Ø 10), see docs/notes/proc-defense.md for the exact numbers and the data entry the coordinator adds.
 //   • same kit as PointDefenseProc (plinth, tower, turret head on a slew ring, barrel node with launch sockets, sensor,
@@ -69,7 +69,7 @@ function ammoBoxes(b, glows, kit, shape, head) {
   const hd = shape.head;
   const maxX = Math.max(...shape.barrels.offsets.map((o) => Math.abs(o[0])));
   for (const e of [-1, 1]) {
-    b.box(A.w, A.h, A.d, kit.S.hullDark, { x: e * hd.w * A.xShare, y: head.top - A.sink, z: hd.d * A.zShare });
+    b.box(A.w, A.h, A.d, kit.S.teamPaint, { x: e * hd.w * A.xShare, y: head.top - A.sink, z: hd.d * A.zShare });
     b.box(C.w, C.h, C.d, kit.S.frame, { x: e * (maxX + shape.barrels.r + C.w / 2), y: head.top });
   }
 }

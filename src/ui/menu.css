@@ -1,4 +1,4 @@
-/* Steel Mans – start menu. All colours are the variables below – change the look here. */
+/* Steel Men – start menu. All colours are the variables below – change the look here. */
 /* Industrial steel look: dark brushed plates, bevelled edges, one neon accent (teal). Variables live on :root so HUD/match/confirm share them. */
 :root {
   --menu-text: #d9e0e7;

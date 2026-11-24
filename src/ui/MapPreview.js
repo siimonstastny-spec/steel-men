@@ -1,4 +1,4 @@
-// Steel Mans – map preview canvas (New game menu, lobby): minimap-style picture of a map with clickable start
+// Steel Men – map preview canvas (New game menu, lobby): minimap-style picture of a map with clickable start
 // positions. A start shows the seat that picked it (team colour + seat number). Clicks call onPick(startIndex).
 import { MAPS, MAP_PLANET_I18N_PREFIX } from '../config.js';
 import { t } from '../i18n/i18n.js';

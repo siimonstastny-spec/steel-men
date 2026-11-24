@@ -1,4 +1,4 @@
-// Steel Mans – building (stats.json → structures). A finished or unfinished building is a pathfinding obstacle
+// Steel Men – building (stats.json → structures). A finished or unfinished building is a pathfinding obstacle
 // (axis-aligned box, World registers world.structures as an obstacle source). Construction is driven by builder
 // vehicles that call addBuilder() every frame they work on it; the rate comes from Construction.buildRate
 // (more builders = faster with diminishing returns, races[*].construction.continuesWithoutBuilder = goes on alone).
@@ -7,7 +7,8 @@ import * as THREE from 'three';
 import { loadModel, loadGltf } from '../core/AssetLoader.js';
 import { loadStats, getStats, unitStats, applyArmor } from '../data/Stats.js';
 import { getRenderClock } from '../core/Graphics.js';
-import { TEAMS, RINGS, STRUCTURE, VFX, PATHFINDING, SPAWN_SPOT } from '../config.js';
+import { TEAMS, RINGS, STRUCTURE, VFX, PATHFINDING, SPAWN_SPOT, GENERATOR_BLAST } from '../config.js';
+import { structureBlast } from '../game/Combat.js';
 
 // Scratch objects for sun-tracking buildings (Structure.#trackSun)
 const _sunAxis = new THREE.Vector3(0, 1, 0);
@@ -115,7 +116,7 @@ export class Structure extends THREE.Group {
     this.removed = false;
     this.speed = 0;
     this.model = null;
-    this.procModel = null;      // procedural model (src/procedural/registry.js; off with window.steelMans.procedural = false), visual only
+    this.procModel = null;      // procedural model (src/procedural/registry.js; off with window.steelMen.procedural = false), visual only
     this.mixer = null;
     this.builders = new Set();  // vehicles that built it during the last frame (HUD, rate)
     this._working = new Set();
@@ -284,6 +285,15 @@ export class Structure extends THREE.Group {
     this.setSelected(false);
     if (explode) this.world?.effects.burst(VFX.mechExplosion, this.position.clone(), { size: STRUCTURE.explosionSize });
     this.removed = true; // World removes it (and its pathfinding box)
+    // Death blast (stats.explosion, a finished power generator): origin read now, blast after GENERATOR_BLAST.delay
+    const ex = this.stats?.explosion;
+    if (explode && ex && this.complete && this.world) {
+      const origin = this.position.clone();
+      origin.y += this.aimHeight ?? 0;
+      this.procModel?.getExplosionOrigin?.(origin);
+      const world = this.world;
+      world.schedule(GENERATOR_BLAST.delay, () => structureBlast(world, this, origin, ex));
+    }
   }
 
   // ---------- production ----------

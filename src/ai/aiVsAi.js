@@ -1,17 +1,17 @@
-// Steel Mans AI – console test mode "AI vs AI" (docs/notes/ai-core.md → Test). After a single-player game started:
-//   await steelMans.ai.start({ difficulty: ['normal', 'hard'], minutes: 10 })  – AI on every team, then fast-forward
-//   await steelMans.ai.fastForward(300)   – simulates 300 s as fast as the machine can (yields to load models)
-//   steelMans.ai.report()                 – console.table of every AI (state, buildings, robots, resources…)
-//   steelMans.ai.log(1)                   – recent decisions of team 1
-//   steelMans.ai.stop()                   – AIs off
+// Steel Men AI – console test mode "AI vs AI" (docs/notes/ai-core.md → Test). After a single-player game started:
+//   await steelMen.ai.start({ difficulty: ['normal', 'hard'], minutes: 10 })  – AI on every team, then fast-forward
+//   await steelMen.ai.fastForward(300)   – simulates 300 s as fast as the machine can (yields to load models)
+//   steelMen.ai.report()                 – console.table of every AI (state, buildings, robots, resources…)
+//   steelMen.ai.log(1)                   – recent decisions of team 1
+//   steelMen.ai.stop()                   – AIs off
 // The fast-forward runs the same steps as the game loop (commands of the tick, world, match rules) and calls the AIs
 // after every tick. It stops at the end of the match.
 import { SIM, AI } from '../config.js';
 import { createAi, clearAis, updateAis, aiPlayers } from './index.js';
 
 const handle = () => {
-  const h = window.steelMans;
-  if (!h?.world || !h?.commandBus || !h?.game) throw new Error('steelMans debug handle missing – start a game first');
+  const h = window.steelMen;
+  if (!h?.world || !h?.commandBus || !h?.game) throw new Error('steelMen debug handle missing – start a game first');
   return h;
 };
 
@@ -82,11 +82,11 @@ export function aiLog(team) {
   return ai.log;
 }
 
-/** Puts the console helpers on window.steelMans.ai (call once from main.js) */
+/** Puts the console helpers on window.steelMen.ai (call once from main.js) */
 export function installAiConsole() {
   if (typeof window === 'undefined') return;
-  window.steelMans ??= {};
-  window.steelMans.ai = {
+  window.steelMen ??= {};
+  window.steelMen.ai = {
     start: startAiVsAi, fastForward: aiFastForward, report: aiReport, log: aiLog, stop: clearAis, players: aiPlayers,
   };
 }

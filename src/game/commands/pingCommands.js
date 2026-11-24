@@ -1,4 +1,4 @@
-// Steel Mans – map ping command [N7].
+// Steel Men – map ping command [N7].
 //   { type: 'ping', team, point: { x, z } }
 // A ping travels like every command (so allies get it in multiplayer) but changes NOTHING in the simulation and
 // nothing in the state hash: execute() is empty. The UI (src/ui/Pings.js) listens with commandBus.onExecuted and

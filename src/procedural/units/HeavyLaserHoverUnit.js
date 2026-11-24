@@ -1,10 +1,12 @@
-// Steel Mans – procedural heavy laser hovercraft (roadmap U4). Artillery-like long-range laser platform that needs no
+// Steel Men – procedural heavy laser hovercraft (roadmap U4). Artillery-like long-range laser platform that needs no
 // deploying: very long barrel with capacitor coils, rear power cells (glow), six hover pads. Shape table keyed by
 // style.silhouette with only `faceted` (others fall back to it).
 //   • sockets: muzzle, turret, aim, cargo, smoke
 // Model units (before VEHICLE.modelScale × stats.modelScale): ≈ 8.4 long, 4.2 wide, 2.6 high. Visual only.
-import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
+//   • team colour: hull / turret with team: true + deck mark ahead of the turret + skirt rim + team side armour and turret cheeks
+import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit, UNIT_KIT } from './UnitKit.js';
 import { hull, hover, turret, weapon, statusLamp } from './UnitModules.js';
+import { skirtRim, deckMark } from './LightLaserHoverUnit.js';
 
 /** Shape by style.silhouette (unknown → faceted); sizes in model units */
 export const HEAVY_LASER_HOVER_SHAPES = {
@@ -13,6 +15,13 @@ export const HEAVY_LASER_HOVER_SHAPES = {
     turret: { w: 2.5, d: 3.0, h: 0.95, z: -0.08 },
     gun: { length: 5.4, caliber: 0.14, pitch: [-0.05, 0.7] },
     status: [0.2, 0.8, -0.38],   // beside the dorsal fin (x share of W)
+    // deck mark ahead of the turret by style.silhouette (see LightLaserHoverUnit.js deckMark; round / faceted: module team paint only)
+    team: {
+      deckMark: {
+        rounded: { w: 0.5, d: 0.14, z: 0.28, ledge: false },
+        angular: { w: 0.6, d: 0.1, z: 0.37, ledge: true },
+      },
+    },
   },
 };
 
@@ -37,17 +46,20 @@ function buildHeavyLaserHover(kit) {
   const ub = new UnitBuilder(kit);
   ub.bone('hull', 'root', [0, L * P.gap, 0]);
   const base = hover(ub, { bone: 'hull', L: L * P.skirtL, W: W * P.skirtW, skirtH: L * P.skirtH, pads: P.pads.map(([x, z]) => [x * W, z * L]) });
-  const hl = hull(ub, { bone: 'hull', y: base, L: L * P.hullL, W, H });
+  skirtRim(ub, base, W * P.skirtW, L * P.skirtL);
+  const hullLen = L * P.hullL;
+  const hl = hull(ub, { bone: 'hull', y: base, L: hullLen, W, H, team: true });
+  deckMark(ub, s.team.deckMark[kit.style.silhouette], { base, top: hl.top, W, H, hullLen });
   const hb = ub.paint('hull');
   for (const side of [1, -1]) {
-    hb.box(W * SKIRT_WING.w, H * SKIRT_WING.h, L * SKIRT_WING.d, S.hullDark, { x: side * W * SKIRT_WING.x, y: base + H * SKIRT_WING.y, z: L * SKIRT_WING.z });
+    hb.box(W * SKIRT_WING.w, H * SKIRT_WING.h, L * SKIRT_WING.d, S.teamPaint, { x: side * W * SKIRT_WING.x, y: base + H * SKIRT_WING.y, z: L * SKIRT_WING.z, detail: UNIT_KIT.teamPaint.lod.panel });
   }
   const t = s.turret;
-  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h });
+  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
   const tb = ub.paint('turret');
   const tg = ub.glow('turret');
   for (const side of [1, -1]) {
-    tb.box(t.w * CHEEK.w, t.h * CHEEK.h, t.d * CHEEK.d, S.hullDark, { x: side * t.w * CHEEK.x, y: t.h * CHEEK.y, z: t.d * CHEEK.z });
+    tb.box(t.w * CHEEK.w, t.h * CHEEK.h, t.d * CHEEK.d, S.teamPaint, { x: side * t.w * CHEEK.x, y: t.h * CHEEK.y, z: t.d * CHEEK.z, detail: UNIT_KIT.teamPaint.lod.panel });
     const cx = side * t.w * CELL.x;
     const cy = t.h * CELL.y;
     const cz = t.d * CELL.z;

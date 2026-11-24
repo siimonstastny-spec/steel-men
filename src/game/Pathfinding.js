@@ -1,4 +1,4 @@
-// Steel Mans – grid pathfinding around static obstacles (crewless mechs now, buildings later).
+// Steel Men – grid pathfinding around static obstacles (crewless mechs now, buildings later).
 //
 // The map is covered by a grid of PATHFINDING.cellSize cells. Obstacles come from "obstacle sources"
 // (functions returning shapes), so new kinds of obstacles (buildings, rocks…) only need to register

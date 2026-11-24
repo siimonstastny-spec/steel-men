@@ -1,4 +1,4 @@
-// Steel Mans AI – data of the computer player (data/ai/*.json) and "roles": generic names (@power, @crew…) that are
+// Steel Men AI – data of the computer player (data/ai/*.json) and "roles": generic names (@power, @crew…) that are
 // resolved from stats.json for a race, so neither the code nor the data name factions or race-specific buildings.
 import { getStats, loadStats, canProduce } from '../data/Stats.js';
 import { AI, AIR } from '../config.js';

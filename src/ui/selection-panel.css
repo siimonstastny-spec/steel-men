@@ -1,4 +1,4 @@
-/* Steel Mans – HUD v2 bottom-centre selection panels (RobotPanel + CenterPanel, markup from src/ui/*Panel.js).
+/* Steel Men – HUD v2 bottom-centre selection panels (RobotPanel + CenterPanel, markup from src/ui/*Panel.js).
    Layout numbers arrive as CSS variables written inline by the panels (config.js HUD_PANELS).
    Scale: --hud-scale (unitless, set by the HUD layout), faction: --hud-frame-filter (artwork), --hud-neon, --hud-accent.
    Artwork URLs are relative to this file (src/ui/ → ../../data/image/ui/hud2/). */

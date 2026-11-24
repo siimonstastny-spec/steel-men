@@ -1,4 +1,4 @@
-// Steel Mans – identities of computer players: a call sign and an avatar index (docs/notes/n6-ainames.md).
+// Steel Men – identities of computer players: a call sign and an avatar index (docs/notes/n6-ainames.md).
 // Pure functions, no DOM. The avatar of a name is its index in AI_PLAYERS.names (Avatar.js draws it from the index).
 //
 //   hashSeed(text)                      string -> 32-bit seed (e.g. the lobby code)

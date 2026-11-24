@@ -1,4 +1,4 @@
-// Steel Mans – part stock commands [F1] (docs/notes/f1-inventory.md). Import this module once so the command registers
+// Steel Men – part stock commands [F1] (docs/notes/f1-inventory.md). Import this module once so the command registers
 // (StockWindow.js imports it). Schema:
 //   { type: 'sellPart', team, path, count }   path = stock key (an arm of either side is accepted), count 1..in stock
 // Selling returns rules.production.partSellFactor of the part's cost (ore AND energy, floored) at once. Allowed only

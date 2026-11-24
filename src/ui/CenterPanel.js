@@ -1,4 +1,4 @@
-// Steel Mans – HUD v2 centre panel (bottom centre, everything except one mech): a group (every member listed with its
+// Steel Men – HUD v2 centre panel (bottom centre, everything except one mech): a group (every member listed with its
 // HP %), or the details of a single combat vehicle / crew / economy vehicle / building / wreck.
 // Artwork center_panel_left + mid (tiled) + right; the width follows the content. Layout numbers: config.js HUD_PANELS.center,
 // styles selection-panel.css. Pure view: html(...) returns markup, onPointer(e) handles a click on a group member.

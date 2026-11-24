@@ -1,4 +1,4 @@
-// Steel Mans – ovládání myší a klávesnicí: výběr, skupiny, rozkazy – SIT
+// Steel Men – ovládání myší a klávesnicí: výběr, skupiny, rozkazy – SIT
 //   levý klik na jednotku               = výběr (Shift = přidat / odebrat)
 //   tažení levým                        = výběr obdélníkem (Shift = přidat; volba "bojové jednotky přednostně")
 //   dvojklik na vlastní jednotku        = všechny jednotky stejného typu na obrazovce (Shift = přidat) [SELSET]
@@ -57,7 +57,7 @@ const DROP_ARM_COMMANDS = { dropLeft: 'rightArm', dropRight: 'leftArm' }; // pil
 const COORD_DECIMALS = 100; // points are sent rounded to 0.01
 
 /** Plain-JSON point of a Vector3 */
-const MINIMAP_ORDER_EVENT = 'steelmans:minimapOrder'; // same name in ui/Minimap.js
+const MINIMAP_ORDER_EVENT = 'steelmen:minimapOrder'; // same name in ui/Minimap.js
 const pt = (v) => ({ x: Math.round(v.x * COORD_DECIMALS) / COORD_DECIMALS, z: Math.round(v.z * COORD_DECIMALS) / COORD_DECIMALS });
 /** Entity ids of units */
 const ids = (units) => units.map((u) => u.eid);

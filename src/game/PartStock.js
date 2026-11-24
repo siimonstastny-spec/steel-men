@@ -1,4 +1,4 @@
-// Steel Mans – robot parts as goods: the part catalog (parts.json, what models exist per slot), which parts a
+// Steel Men – robot parts as goods: the part catalog (parts.json, what models exist per slot), which parts a
 // faction may make (canProduce 'partSets'), and the per-team stock of finished parts that the part factory
 // (RobotPartFactory) fills and the assembly bay (RobotAssemblyBay) takes from. One stock lives in
 // world.economy.parts. Parts are counted by model path; an arm is universal: left and right models of one type share one stock entry.

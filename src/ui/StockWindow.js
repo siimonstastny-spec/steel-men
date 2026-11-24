@@ -1,4 +1,4 @@
-// Steel Mans – part stock window [F1] (docs/notes/f1-inventory.md): the finished robot parts of the local team
+// Steel Men – part stock window [F1] (docs/notes/f1-inventory.md): the finished robot parts of the local team
 // (world.economy.parts) by slot, with set / faction / HP / count / sale value, and selling through the commandBus
 // (command PART_SALE.commandType, src/game/commands/stockCommands.js). UI only: never mutates the simulation.
 //

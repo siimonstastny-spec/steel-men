@@ -1,8 +1,9 @@
-// Steel Mans – multiplayer transport for the static web (GitHub Pages / itch.io): WebRTC data channels between the
+// Steel Men – multiplayer transport for the static web (GitHub Pages / itch.io): WebRTC data channels between the
 // players, signalling over public Nostr relays (Trystero 0.26.0, vendor/trystero/, docs/notes/p2p-transport.md).
 // Same interface as RoomTransport (docs/MULTIPLAYER.md, "Transport"):
 //   const t = await P2PTransport.create()  // null = no WebRTC / no crypto.subtle / library failed to load
-//   t.kind 'p2p', t.selfId, await t.join(name) -> channel (rejects with a P2PError when no relay answers)
+//   t.kind 'p2p', t.selfId, await t.join(name, { password }?) -> channel (rejects with a P2PError when no relay answers)
+//   t.onPasswordError(fn) -> unsubscribe  [LOBBY_LIST]; t.joinFailureKey() after a lobby join found no host
 //   channel: selfId, send(topic, data), on(topic, fn({from, data})) -> unsubscribe, peers() -> [{id, presence, isMe}],
 //            onPeers(fn({peers, joined, left, updated})) -> unsubscribe, setPresence(obj), connected(), leave()
 // Facts the adapter relies on:
@@ -12,7 +13,8 @@
 //   - one Trystero action per topic; a message bigger than NET.maxMessageBytes is refused (same limit as the room).
 //   - relay sockets are module-wide in Trystero and stay open (reconnecting) for the life of the page; leave()
 //     closes our room, its peer connections and listeners.
-import { NET } from '../../config.js';
+import { NET, LOBBY } from '../../config.js';
+import { P2PSignalWatch } from './P2PSignalWatch.js'; // [LOBBY_LIST]
 import { t } from '../../i18n/i18n.js';
 
 const LIB_DIR = new URL('../../../vendor/trystero/', import.meta.url).href; // + NET.p2p.strategy + '.mjs'
@@ -39,7 +41,41 @@ export const P2P_ERROR = Object.freeze({
   closed: 'net.p2p.error.closed',     // the transport was disposed while joining
   hostNotFound: 'net.p2p.error.hostNotFound', // relays work, but nobody answered in this room (wrong code / host gone)
   nat: 'net.p2p.error.nat',           // a peer was found but the direct connection failed (strict NAT / firewall)
+  password: 'net.p2p.error.password', // [LOBBY_LIST] a peer's offer / answer did not decrypt: other room password
 });
+
+// [LOBBY_LIST] Trystero reports a password mismatch through onJoinError ("incorrect room password when decrypting
+// offer|answer", handshake "incorrect password for overlapping room"); the room topic does not depend on the password.
+// A side WITHOUT a password runs no Trystero check, so it only saw "handshake timed out" (QA: NAT message after 30 s).
+// Hence our own peer handshake (lockHandshake, runs after Trystero's password check on both sides): it recognises the
+// other side's password challenge / response and fails at once with HANDSHAKE_PASSWORD_ERROR. The silent case (the
+// host cannot decrypt our offer) is caught by P2PSignalWatch.
+const PASSWORD_ERROR_RE = /password/i; // QA 2: a plain handshake timeout (slow network) is NOT a password signal
+const HANDSHAKE_MARK = 'sm1';             // our handshake messages carry sm: HANDSHAKE_MARK
+const HANDSHAKE_PASSWORD_ERROR = 'the other side uses a room password';
+
+/**
+ * Peer handshake of Steel Men (Trystero onPeerHandshake; with a password it runs after Trystero's check). The
+ * initiator's hello is shaped like Trystero's password challenge: a passworded responder answers it with its
+ * password response, so a side without a password learns at once that the room has one; a passworded initiator's
+ * challenge (no mark) tells a responder without password the same. Both builds must run it (old builds: timeout).
+ */
+function lockHandshake(hasPassword) {
+  const check = (data) => {
+    if (data && typeof data === 'object' && data.sm === HANDSHAKE_MARK) return;
+    if (!hasPassword && data && typeof data === 'object' && typeof data.__trystero_pw === 'string') throw new Error(HANDSHAKE_PASSWORD_ERROR);
+    throw new Error('unexpected peer handshake');
+  };
+  return async (peerId, send, receive, isInitiator) => {
+    if (isInitiator) {
+      await send({ __trystero_pw: 'challenge', c: HANDSHAKE_MARK, sm: HANDSHAKE_MARK });
+      check((await receive())?.data);
+    } else {
+      check((await receive())?.data);
+      await send({ sm: HANDSHAKE_MARK });
+    }
+  };
+}
 
 export class P2PError extends Error {
   constructor(key, detail) {
@@ -61,11 +97,12 @@ function iceServers() {
   return list;
 }
 
-function trysteroConfig() {
+function trysteroConfig(password) {
   const cfg = NET.p2p;
   const relayConfig = { redundancy: cfg.relayRedundancy, warnOnRelayFailure: cfg.warnOnRelayFailure };
   if (cfg.relayUrls.length) relayConfig.urls = [...cfg.relayUrls];
   const config = { appId: cfg.appId, relayConfig };
+  if (password) config.password = password; // [LOBBY_LIST] encrypts the SDP + challenge handshake; no peer connects without it
   const ice = iceServers();
   if (ice.length) config.rtcConfig = { iceServers: ice }; // empty = Trystero's default public STUN list
   return config;
@@ -201,9 +238,16 @@ class P2PChannel {
     return false;
   }
 
+  /** [LOBBY_LIST] The host's lobby state arrived: no password mismatch to watch for any more (Lobby.join) */
+  stopPasswordWatch() {
+    this.signalWatch?.dispose();
+    this.signalWatch = null;
+  }
+
   leave() {
     if (this.closed) return Promise.resolve();
     this.closed = true;
+    this.stopPasswordWatch(); // [LOBBY_LIST]
     try {
       this.room.onPeerJoin = null;
       this.room.onPeerLeave = null;
@@ -314,6 +358,23 @@ export class P2PTransport {
     this.joinTimeoutMs = NET.p2p.lobbyJoinTimeoutMs; // hint for the lobby: peer discovery is slower than the room
     this.disposed = false;
     this.peerErrors = 0;                   // peers that were found but could not connect (see joinFailureKey)
+    this.passwordErrors = 0;               // [LOBBY_LIST] peers whose offer / answer used another password
+    this.passwordListeners = new Set();    // [LOBBY_LIST] onPasswordError subscribers
+  }
+
+  /** [LOBBY_LIST] fn() on every password mismatch with some peer of a room being joined; returns unsubscribe */
+  onPasswordError(fn) {
+    this.passwordListeners.add(fn);
+    return () => this.passwordListeners.delete(fn);
+  }
+
+  #joinError(e) {
+    const text = String(e?.error ?? e ?? '');
+    if (PASSWORD_ERROR_RE.test(text)) {
+      this.passwordErrors++;
+      for (const fn of [...this.passwordListeners]) { try { fn(); } catch (err) { console.error('[net] password listener failed', err); } }
+    } else this.peerErrors++;
+    console.warn('[net] p2p peer could not connect', e?.peerId ?? '', text);
   }
 
   /**
@@ -325,13 +386,20 @@ export class P2PTransport {
     let open = false;
     for (const key in sockets) if (sockets[key]?.readyState === 1) open = true;
     if (!open) return P2P_ERROR.relays;
+    if (this.passwordErrors > 0) return P2P_ERROR.password; // [LOBBY_LIST]
     return this.peerErrors > 0 ? P2P_ERROR.nat : P2P_ERROR.hostNotFound;
   }
-  /** Joins the named game room; rejects with a P2PError (err.i18nKey) when no relay answers in time */
-  join(name) {
+  /**
+   * Joins the named game room; rejects with a P2PError (err.i18nKey) when no relay answers in time.
+   * [LOBBY_LIST] opts.password ('' / missing = none, cut to LOBBY.passwordMaxLength): Trystero room password; peers
+   * with another password never connect (onPasswordError fires instead). A name already joined returns that channel.
+   * opts.watchPassword (Lobby.join): also detect a mismatch Trystero reports only to the other side (P2PSignalWatch).
+   */
+  join(name, opts = {}) {
     if (this.rooms.has(name)) return Promise.resolve(this.rooms.get(name));
     if (this.pending.has(name)) return this.pending.get(name);
-    const promise = this.#join(name).finally(() => this.pending.delete(name));
+    const password = typeof opts?.password === 'string' ? opts.password.slice(0, LOBBY.passwordMaxLength) : '';
+    const promise = this.#join(name, password, !!opts?.watchPassword).finally(() => this.pending.delete(name));
     this.pending.set(name, promise);
     return promise;
   }
@@ -340,24 +408,34 @@ export class P2PTransport {
   dispose() {
     this.disposed = true;
     this.peerErrors = 0;
+    this.passwordErrors = 0;
+    this.passwordListeners.clear();
     const all = [...this.rooms.values()].map((ch) => ch.leave());
     return Promise.all(all).then(() => {});
   }
 
-  async #join(name) {
+  async #join(name, password, watchPassword) {
     if (this.disposed) throw new P2PError(P2P_ERROR.closed);
     this.peerErrors = 0; // a stale connection error of an earlier attempt must not explain this one
+    this.passwordErrors = 0;
     let room;
     try {
-      room = this.lib.joinRoom(trysteroConfig(), name, {
+      room = this.lib.joinRoom(trysteroConfig(password), name, {
         handshakeTimeoutMs: NET.p2p.handshakeTimeoutMs,
-        onJoinError: (e) => { this.peerErrors++; console.warn('[net] p2p peer could not connect', e?.peerId ?? '', e?.error ?? e); },
+        onPeerHandshake: lockHandshake(!!password), // [LOBBY_LIST] fast password mismatch on both sides
+        onJoinError: (e) => this.#joinError(e),
       });
     } catch (e) {
       throw new P2PError(P2P_ERROR.join, e?.message ?? String(e));
     }
     // the channel registers its actions at once: a peer may connect while we still wait for the relay check
     const ch = new P2PChannel(this, name, room, this.lib);
+    if (watchPassword) { // [LOBBY_LIST] disposed by itself (SDP exchanged / timeout), ch.stopPasswordWatch() or ch.leave()
+      ch.signalWatch = new P2PSignalWatch(this.lib, name, {
+        isConnected: () => ch.closed,
+        onSuspect: (peerId) => this.#joinError({ peerId, error: 'peer never answered our offer: other room password' }),
+      });
+    }
     const ok = await waitForRelay(this.lib, NET.p2p.relayTimeoutMs, () => this.disposed || ch.closed);
     if (!ok || this.disposed || ch.closed) {
       await ch.leave();

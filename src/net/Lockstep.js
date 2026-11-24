@@ -1,4 +1,4 @@
-// Steel Mans – lockstep multiplayer (docs/MULTIPLAYER.md, "Lockstep"). Only commands travel; every client runs
+// Steel Men – lockstep multiplayer (docs/MULTIPLAYER.md, "Lockstep"). Only commands travel; every client runs
 // the same deterministic simulation.
 //
 // Turns: turn T = ticks T*NET.turnTicks + 1 … (T+1)*NET.turnTicks. A command submitted while the next tick to
@@ -54,6 +54,7 @@
 //    an observer closing its tab never stops the match. Its pause requests no longer count.
 import { NET, NET_LEAVE, NET_LEAVE_WIN, SIM, PAUSE, GAME_SPEED } from '../config.js';
 import { gameSpeed } from '../game/GameSpeed.js';
+import { NET_SECURITY, wellFormedCommand, jsonLength } from './netSecurity.js'; // [MP-SEC]
 
 const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
 /** UTF-8 byte length of a string (upper bound without TextEncoder) */
@@ -86,6 +87,10 @@ export class Lockstep {
     this.wcfg = { ...NET_LEAVE_WIN, ...(leaveWinConfig ?? {}) }; // [B6]
     this.TT = Math.max(1, this.cfg.turnTicks | 0);
     this.D = Math.max(1, this.cfg.inputDelayTurns | 0);
+    // [MP-SEC] own commands of one turn: greedy packing wastes < one command per part, so this always fits maxParts parts
+    // (headroom for control entries + part framing: one more command's worth)
+    const partRoom = this.cfg.maxMessageBytes - this.cfg.messageHeadroomBytes - this.cfg.maxCommandBytes;
+    this.maxTurnBytes = Math.max(this.cfg.maxCommandBytes, (NET_SECURITY.maxParts - 1) * partRoom);
     this.channel = channel;
     this.world = world;
     this.bus = commandBus;
@@ -464,9 +469,15 @@ export class Lockstep {
     if (byteLength(text) > this.cfg.maxCommandBytes) { console.warn(`[net] command '${cmd.type}' too big (> ${this.cfg.maxCommandBytes} B), dropped`); return; }
     // JSON round trip: this client executes exactly what the others receive (no undefined, -0, Vector3…)
     const plain = JSON.parse(text);
+    // [MP-SEC] the very check the receivers apply: a command they would reject must not run here either (desync)
+    if (!wellFormedCommand(plain, this.cfg.maxCommandBytes)) { console.warn(`[net] malformed command '${cmd.type}' dropped`, plain); return; }
     const turn = Math.max(this.turnOf(this.world.tick + 1) + this.D, this.finalizedUpTo + 1);
     if (!this.localPending.has(turn)) this.localPending.set(turn, []);
-    this.localPending.get(turn).push(plain);
+    const list = this.localPending.get(turn);
+    if (list.length >= NET_SECURITY.maxCommandsPerTurn - NET_SECURITY.controlSlots) { console.warn(`[net] too many commands in one turn, '${cmd.type}' dropped`); return; }
+    // [MP-SEC] the turn must fit into NET_SECURITY.maxParts message parts, else every receiver refuses it (stall)
+    if (jsonBytes(list) + byteLength(text) > this.maxTurnBytes) { console.warn(`[net] turn too big, '${cmd.type}' dropped`); return; }
+    list.push(plain);
   }
 
   /** Same rule on sender and receivers: own team, or the host commanding a team nobody plays (AI) */
@@ -717,11 +728,18 @@ export class Lockstep {
     this.#pruneLocal();
   }
 
-  /** Header `k` of any player: drops it decided or repeats (first value wins) */
-  #receiveDrops(k) {
-    for (const [key, K] of Object.entries(k)) {
-      const team = Number(key);
-      if (!this.teams.includes(team) || !Number.isInteger(K) || K < this.D) continue;
+  /**
+   * Header `k`: drops the coordinator decided (first value wins). [MP-SEC] Only the coordinator – as THIS client sees
+   * it – is believed, and only for a team this client sees gone from the room (or for itself: it was dropped while
+   * disconnected). Everybody still repeats `k`, but only the coordinator's copy counts.
+   */
+  #receiveDrops(fromTeam, k) {
+    const gone = new Set(this.status.left);
+    if (fromTeam !== this.#coordinatorTeam(gone)) return;
+    for (const team of this.teams) {
+      const K = k[team];
+      if (!Number.isInteger(K) || K < this.D || K > this.enqueuedUpTo + this.cfg.maxTurnsAhead + 1) continue;
+      if (team !== this.localTeam && !gone.has(team)) continue; // a player we still see in the room cannot be dropped
       const known = this.dropFrom.get(team);
       if (known === undefined) this.#applyDrop(team, K);
       else if (known !== K) console.error(`[net] conflicting drop of team ${team}: turn ${known} vs ${K}`);
@@ -778,6 +796,8 @@ export class Lockstep {
       if (!Array.isArray(e)) continue;
       const team = e[0];
       if (team === senderTeam || team === this.localTeam || !this.recv.has(team)) continue;
+      // [MP-SEC] only turns of a team THIS client sees gone: a present team sends its own turns (no forged moves)
+      if (!this.status.left.includes(team)) continue;
       this.#receiveEntry(team, this.peerOfTeam.get(team), [e[1], e[2]]);
       touched.add(team);
     }
@@ -787,9 +807,10 @@ export class Lockstep {
   // ---------- receiving ----------
 
   #onTurnMessage({ from, data }) {
-    if (this.stopped || !data || typeof data !== 'object') return;
+    if (this.stopped || !data || typeof data !== 'object' || Array.isArray(data)) return;
     const team = this.teamByPeer.get(from);
     if (team === undefined || team === this.localTeam) return; // spectator / stranger / ourselves
+    if (jsonLength(data) > NET_SECURITY.maxIncomingChars) { console.warn('[net] oversized turn message ignored'); return; } // [MP-SEC]
     const now = this.now();
     this.#markReady(team); // [W6] it only sends turns after its own barrier: it is loaded
     // their acknowledgement of our turns
@@ -807,7 +828,7 @@ export class Lockstep {
     if (Number.isFinite(data.p)) this.echo.set(team, { ts: data.p, at: now });
     // [MP-LEAVE] their view of everybody's turns (relay / drop decisions), drops, relayed turns of vanished players
     if (data.a && typeof data.a === 'object') this.peerAcks.set(team, data.a);
-    if (data.k && typeof data.k === 'object') this.#receiveDrops(data.k);
+    if (data.k && typeof data.k === 'object' && !Array.isArray(data.k)) this.#receiveDrops(team, data.k);
     if (Array.isArray(data.x)) this.#receiveRelay(team, data.x);
     // [R5] resumed pauses (before the turns: a pause they already resumed never stops us)
     if (Number.isInteger(data.r) && data.r <= this.enqueuedUpTo + this.cfg.maxTurnsAhead) this.#setResumed(data.r);
@@ -832,14 +853,14 @@ export class Lockstep {
     const parts = e[3];
     if (Number.isInteger(parts) && parts > 1) {
       const part = e[2];
-      if (!Number.isInteger(part) || part < 0 || part >= parts) return;
+      if (parts > NET_SECURITY.maxParts || !Number.isInteger(part) || part < 0 || part >= parts) return; // [MP-SEC] no huge allocations
       const partials = this.partials.get(team);
       let p = partials.get(n);
       if (!p || p.parts !== parts) { p = { parts, got: new Array(parts).fill(null) }; partials.set(n, p); }
       p.got[part] = cmds;
       if (p.got.some((x) => x === null)) return;
       partials.delete(n);
-      store.set(n, p.got.flat());
+      store.set(n, p.got.flat().slice(0, NET_SECURITY.maxCommandsPerTurn));
       return;
     }
     store.set(n, cmds);
@@ -850,8 +871,12 @@ export class Lockstep {
     if (!Array.isArray(list)) return null;
     const out = [];
     for (const c of list) {
-      if (!c || typeof c !== 'object' || typeof c.type !== 'string' || typeof c.team !== 'number') continue;
+      if (out.length >= NET_SECURITY.maxCommandsPerTurn) break; // [MP-SEC]
+      if (!wellFormedCommand(c, this.cfg.maxCommandBytes)) continue; // [MP-SEC] shape, size, finite bounded numbers
       if (c.type === this.lcfg.commandType) continue; // [MP-LEAVE] only the lockstep itself injects it
+      // [MP-SEC] control entries (pause / speed) are lockstep-only; everything else must be a command the bus knows
+      const control = c.type === PAUSE.commandType || c.type === GAME_SPEED.commandType;
+      if (!control && this.bus.isKnown && !this.bus.isKnown(c.type)) continue;
       if (!this.#mayCommand(from, team, c.team)) { console.warn('[net] remote command for a foreign team ignored', c); continue; }
       out.push({ ...c, origin: from });
     }
@@ -920,7 +945,7 @@ export class Lockstep {
       return;
     }
     this.status.desync = { tick: this.lastTick(p.n), turn: p.n, hashes: Object.fromEntries(m) };
-    console.error(`[net] DESYNC at tick ${this.lastTick(p.n)} (turn ${p.n})`, this.status.desync.hashes, '– steelMans.net.desyncReport()');
+    console.error(`[net] DESYNC at tick ${this.lastTick(p.n)} (turn ${p.n})`, this.status.desync.hashes, '– steelMen.net.desyncReport()');
     for (const fn of [...this.desyncListeners]) { try { fn(this.status.desync); } catch (err) { console.error(err); } }
   }
 

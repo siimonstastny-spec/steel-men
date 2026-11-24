@@ -1,4 +1,4 @@
-// Steel Mans – build commands. Placing a building is a command; the simulation validates it again, pays,
+// Steel Men – build commands. Placing a building is a command; the simulation validates it again, pays,
 // creates the structure and sends the builders. Walls and turrets (placeWall, placeTurret) are registered by
 // src/game/Walls.js with the helpers exported here.
 //
@@ -281,7 +281,8 @@ registerCommand('deleteStructure', {
 // The simulation state is world.autoAssist[team]; a team that never sent the command has it off (AI teams unless
 // they send it themselves). Vehicle.update reads it.
 registerCommand('setAutoAssist', {
-  validate: (world, cmd) => typeof cmd.on === 'boolean',
+  validate: (world, cmd) => typeof cmd.on === 'boolean' && Number.isInteger(cmd.team)
+    && cmd.team >= 0 && cmd.team < (world.economy?.races?.length ?? 0),
   execute(world, cmd) {
     world.autoAssist ??= {};
     world.autoAssist[cmd.team] = cmd.on;

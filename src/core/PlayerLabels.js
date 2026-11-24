@@ -1,4 +1,4 @@
-// Steel Mans – display identities of the players of the running match (docs/notes/n6-ainames.md).
+// Steel Men – display identities of the players of the running match (docs/notes/n6-ainames.md).
 // main.js fills the table once per match; the HUD, the match screens and the stats read it. A computer player has a
 // call sign and an avatar index; the local human and remote humans have no avatar and use their nickname elsewhere,
 // so for them `playerLabel` returns '' and the caller falls back to its own text.

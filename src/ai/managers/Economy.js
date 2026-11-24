@@ -1,4 +1,4 @@
-// Steel Mans AI – economy: DrillTrucks on deposits, how many trucks / builders / power plants / supply buildings
+// Steel Men AI – economy: DrillTrucks on deposits, how many trucks / builders / power plants / supply buildings
 // the team wants. It writes wishes to the blackboard (bb.minVehicles, bb.wantStructures); Production and
 // Construction carry them out. Harvest orders are given here.
 import { AI } from '../../config.js';

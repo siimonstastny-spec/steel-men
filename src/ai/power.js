@@ -1,4 +1,4 @@
-// Steel Mans AI – energy plan (D3, docs/notes/d3-ai-economy.md).
+// Steel Men AI – energy plan (D3, docs/notes/d3-ai-economy.md).
 // Planned power of the team: energy income of the power plants it owns (finished, under construction and placements
 // waiting for their result) + the HQ, against what every owned consumer (stats.energyUse: production buildings while
 // they work, towers always) would draw. Construction asks it before a consumer is placed (a power plant goes first

@@ -1,4 +1,4 @@
-// Steel Mans – [B1] ore multiplier option (New game / lobby combobox, settings key `oreMultiplier`).
+// Steel Men – [B1] ore multiplier option (New game / lobby combobox, settings key `oreMultiplier`).
 // Value: one of ORE_MULTIPLIER.options (a number that scales the deposits' starting amount, or 'infinite').
 //
 //   validOreMultiplier(v)      v if listed, else ORE_MULTIPLIER.default

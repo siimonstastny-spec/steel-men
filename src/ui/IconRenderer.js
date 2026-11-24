@@ -1,4 +1,4 @@
-// Steel Mans – UI icons rendered at runtime (docs/notes/icon-renderer.md). Every building with a procedural model is drawn
+// Steel Men – UI icons rendered at runtime (docs/notes/icon-renderer.md). Every building with a procedural model is drawn
 // once from a fixed 3/4 view (team colour, race style) into a small canvas. Visual only – never touches the simulation.
 //   const c = getBuildingIcon('vehicleFactory', 'X', '#3a5ccc');   // canvas, or null while it is still being rendered
 //   const off = onIconReady(() => rebuildUi());                      // fired when a requested icon is done; off() unsubscribes

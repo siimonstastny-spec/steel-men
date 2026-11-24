@@ -1,4 +1,4 @@
-// Steel Mans – utržená ruka ležící na zemi (vrak), kterou lze sebrat – SIT
+// Steel Men – utržená ruka ležící na zemi (vrak), kterou lze sebrat – SIT
 // Při pádu hraje animaci Amputated*ArmSkeleton (ruka se zaškube a lehne si).
 import * as THREE from 'three';
 import { bindPart, retargetClip } from '../anim/AnimLibrary.js';

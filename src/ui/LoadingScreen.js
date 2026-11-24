@@ -1,4 +1,4 @@
-// Steel Mans – loading screen shown from the Start press until the match is ready (docs/notes/w6-loading.md).
+// Steel Men – loading screen shown from the Start press until the match is ready (docs/notes/w6-loading.md).
 // Text only for now; the background picture is set by LOADING.backgroundImage (CSS variable --loading-bg).
 //   const loading = new LoadingScreen();
 //   loading.show();                       // sync: overlay is in the DOM; `loading.painted` = Promise after the first paint

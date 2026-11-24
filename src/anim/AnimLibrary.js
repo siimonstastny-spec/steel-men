@@ -1,4 +1,4 @@
-// Steel Mans – knihovna animací kostry robota a jejich přenos na díly – SIT
+// Steel Men – knihovna animací kostry robota a jejich přenos na díly – SIT
 // Animace jsou v animbase/RobotSkeleton.glb (node animace bez skinningu).
 // Uzly kostry se mapují na uzly dílů podle pozice ve stromu (nejbližší sourozenec).
 import * as THREE from 'three';

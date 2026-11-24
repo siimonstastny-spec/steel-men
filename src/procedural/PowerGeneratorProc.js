@@ -1,4 +1,4 @@
-// Steel Mans – procedural power generator (tier 3 power source), model and animation only. Built in code from the style
+// Steel Men – procedural power generator (tier 3 power source), model and animation only. Built in code from the style
 // modules (ProcModules.js) and the faction style (data/buildingStyles.json):
 //   • footprint: pad ±12 × ±12 around the model origin, front = +Z (control house with the door); tall central reactor
 //   • the reactor is chosen by style.silhouette (code knows shapes, the data picks one; unknown → rounded) and glows in
@@ -12,14 +12,41 @@
 // Destruction: the owner reads getExplosionOrigin(out) and GENERATOR_EXPLOSION (the blast itself is not part of the model).
 // No allocations in update().
 import * as THREE from 'three';
+import { PROC_TEAM_PAINT } from '../config.js';
 import { PartBuilder, Blinker, surface, steppedEase } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   spike, pipeRun, tank, chimney, plasmaCoil, arcGeometry, ArcFlicker, Levitator, emblemDecalGeometry, emblemShape, pulseWave,
-  PROC_MODULES,
+  PROC_MODULES, teamTrim, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
+
+/**
+ * Team paint (S.teamPaint / S.teamShade = vertices of the static geometry with team = 1: no extra draw call, batching and
+ * setTeamColor work as before). The main structural unit of every style is painted, the rest stays neutral metal.
+ * detail = coarsest LOD the painted parts still appear in (2 = the far silhouette, the colour must read from the RTS camera).
+ */
+const TEAM = {
+  detail: PROC_TEAM_PAINT.lod.panel,
+  ring: { w: 3.2, gap: 0.9, lift: 0.03, seg: 40 },    // flat team ring on a round plinth top: width, gap to the plinth rim (neon line), lift
+  frame: { w: 1.6, inset: 1.2, h: 0.06 },             // flat team frame on the armoured plinth top (inset from the corner spikes)
+  houseRoof: { wShare: 0.5, dShare: 0.6 },            // roof mark of the control house (shares of its roof)
+};
+
+/** Flat ring (annulus) lying on a surface at height y, facing up */
+function flatRing(b, s, rIn, rOut, y, segments) {
+  return b.add(new THREE.RingGeometry(rIn, rOut, segments).rotateX(-Math.PI / 2), s, { y, detail: TEAM.detail });
+}
+
+/** Flat rectangular frame (four slabs) of half size `half`, width w, lying on y */
+function flatFrame(b, s, half, w, y, h) {
+  for (const e of [-1, 1]) {
+    b.box(half * 2, h, w, s, { y: y + h / 2, z: e * (half - w / 2), detail: TEAM.detail });
+    b.box(w, h, half * 2 - 2 * w, s, { x: e * (half - w / 2), y: y + h / 2, detail: TEAM.detail });
+  }
+  return b;
+}
 
 /** Animation tuning (visual only; the style's anim block multiplies speeds) */
 export const GENERATOR_ANIM = {
@@ -148,6 +175,8 @@ function foundation(c, F) {
   if (F.kind === 'round') {
     b.cylinder(F.r, F.r + 0.4, L.plinthH, L.plinthSegments, S.hullDark, { y: y + L.plinthH / 2 });
     if (kit.style.neon >= L.neonMin) b.torus(F.r - 0.4, L.neonTube, 4, L.plinthSegments * 2, TAU, S.neon, { rx: Math.PI / 2, y: y + L.plinthH + 0.02 });
+    const rOut = F.r - TEAM.ring.gap;
+    flatRing(b, S.teamShade, rOut - TEAM.ring.w, rOut, y + L.plinthH + TEAM.ring.lift, TEAM.ring.seg);   // big team ring on the plinth top
     return y + L.plinthH;
   }
   if (F.kind === 'armored') {
@@ -157,12 +186,16 @@ function foundation(c, F) {
     b.box(w, h, w, S.hullDark, { base: true, y });
     for (const e of [-1, 1]) b.box(w * A.bandShare, A.bandH, A.bandT, S.lower, { y: y + A.bandY, z: e * (F.half + A.bandT / 2) });
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) spike(b, kit, { x: sx * F.half, y: y + h, z: sz * F.half, h: A.spikeH, r: A.spikeR });
+    flatFrame(b, S.teamShade, F.half - TEAM.frame.inset, TEAM.frame.w, y + h, TEAM.frame.h);   // team frame on the plinth top
+    teamTrim(b, kit, { y: y + h, w, d: w });                                                   // low lip on the plinth rim
     return y + h;
   }
   const St = DETAIL.stage;
   const h = L.plinthH - St.lessH;
   b.cylinder(F.r, F.r + St.grow, h, F.segments, S.hullDark, { y: y + h / 2 });
   if (kit.style.neon >= L.neonMin) b.torus(F.r + St.grow, L.neonTube, 4, F.segments * 2, TAU, S.neon, { rx: Math.PI / 2, y: y + h });
+  const rOut = F.r * Math.cos(Math.PI / F.segments) - TEAM.ring.gap;   // inside the octagon
+  flatRing(b, S.teamShade, rOut - TEAM.ring.w, rOut, y + h + TEAM.ring.lift, TEAM.ring.seg);
   return y + h;
 }
 
@@ -178,7 +211,7 @@ function house(c, H, baseY) {
   const top = baseY + H.h;
   if (H.kind === 'dome') {
     b.cylinder(H.r, H.r, H.h, G.domeSegments, S.hull, { y: baseY + H.h / 2, z: H.z });
-    b.add(new THREE.SphereGeometry(H.r, G.domeSegments, G.domeRings, 0, TAU, 0, Math.PI / 2), S.hull, { y: top, z: H.z, sy: G.domeFlat });
+    b.add(new THREE.SphereGeometry(H.r, G.domeSegments, G.domeRings, 0, TAU, 0, Math.PI / 2), S.teamPaint, { y: top, z: H.z, sy: G.domeFlat, detail: TEAM.detail });   // the dome is team paint
     b.cylinder(H.r + G.out, H.r + G.out, G.winH, G.domeSegments, S.window, { y: baseY + H.h * G.winY, z: H.z }, true);
     if (neon) b.cylinder(H.r + G.out * 1.5, H.r + G.out * 1.5, G.neonH, G.domeSegments, S.neon, { y: baseY + H.h * G.neonY, z: H.z }, true);
     const rr = H.r - G.out;
@@ -200,7 +233,10 @@ function house(c, H, baseY) {
   b.box(G.doorW + G.frameW * 2, G.frameW, G.doorT * 1.5, S.frame, { y: baseY + G.doorH + G.frameW / 2, x: doorX, z: doorZ });
   marking(b, kit, G.doorW + G.frameW * 2, G.markH, { y: baseY + G.doorH + G.frameW + G.markH / 2, x: doorX, z: front + G.markOut });
   if (neon) neonStrip(b, kit, H.w * G.neonW, G.neonH, G.neonT, { y: top - G.neonDrop, z: front + G.neonOut });
-  b.box(H.w * G.bandW, G.bandH, G.bandT, S.team, { y: top - G.bandDrop, z: front + G.bandOut });
+  b.box(H.w * G.bandW, G.bandH, G.bandT, S.teamPaint, { y: top - G.bandDrop, z: front + G.bandOut, detail: TEAM.detail });
+  const roofW = H.topW ?? H.w;   // team lip + mark on the roof (seen from the RTS camera)
+  teamTrim(b, kit, { y: top, z: H.z, w: roofW, d: H.d });
+  roofMark(b, kit, { y: top, z: H.z, w: roofW * TEAM.houseRoof.wShare, d: H.d * TEAM.houseRoof.dShare });
   const bx = (H.topW ?? H.w) / 2 - G.beaconInset;
   for (const s of [-1, 1]) beacon(b, beaconA, kit, [s * bx, top, front - G.beaconInset]);
   c.decals.push({ position: [H.w * G.decalX, baseY + G.decalY, front], normal: [0, 0, 1], size: G.decalSize });
@@ -245,7 +281,7 @@ BODIES.rounded = (c) => {
     const a = (i / V.legs) * TAU + V.legPhase;
     b.box(V.legW, cy - edge - y0, V.legW, S.frame, { base: true, x: Math.cos(a) * V.R, y: y0, z: Math.sin(a) * V.R });
   }
-  for (const s of [-1, 1]) b.torus(V.R, V.shell, V.segTube, V.segRing, TAU, S.hull, { rx: Math.PI / 2, y: cy + s * V.gap });
+  for (const s of [-1, 1]) b.torus(V.R, V.shell, V.segTube, V.segRing, TAU, s > 0 ? S.teamPaint : S.teamShade, { rx: Math.PI / 2, y: cy + s * V.gap, detail: TEAM.detail });   // both shells are team paint
   b.torus(V.R, V.plasma, V.segPlasma, V.segRing, TAU, c.R, { rx: Math.PI / 2, y: cy });
   for (let i = 0; i < V.clamps; i++) {
     const a = (i / V.clamps) * TAU;
@@ -286,8 +322,8 @@ BODIES.angular = (c) => {
   const K = D.vessel;
   const top = y0 + K.h;
   const capY = top + K.capH;
-  b.cylinder(K.r, K.r, K.h, K.sides, S.hull, { y: y0 + K.h / 2 });
-  b.cylinder(K.capTop, K.r, K.capH, K.sides, S.hull, { y: top + K.capH / 2 });
+  b.cylinder(K.r, K.r, K.h, K.sides, S.teamPaint, { y: y0 + K.h / 2, detail: TEAM.detail });             // the whole containment is team paint
+  b.cylinder(K.capTop, K.r, K.capH, K.sides, S.teamShade, { y: top + K.capH / 2, detail: TEAM.detail });
   const ap = K.r * Math.cos(Math.PI / K.sides);
   for (let k = 0; k < K.sides; k++) {
     const v = (k / K.sides) * TAU;                 // vertex angle (x = sin, z = cos, like CylinderGeometry)
@@ -297,7 +333,6 @@ BODIES.angular = (c) => {
     b.box(K.buttW, K.buttH, K.buttD, S.hullDark, { base: true, x: Math.sin(v) * (K.r + K.buttOut), y: y0, z: Math.cos(v) * (K.r + K.buttOut), ry: v });
     b.box(K.slitW, K.slitH, K.slitT, c.R, { x: sf * (ap + K.slitOut), y: y0 + K.slitY, z: cf * (ap + K.slitOut), ry: f });
     glows.get('reactor').box(K.haloW, K.haloH, K.haloD, { x: sf * (ap + K.haloOut), y: y0 + K.slitY, z: cf * (ap + K.haloOut), ry: f });
-    b.box(K.bandW, K.bandH, K.bandT, S.team, { x: sf * (ap + K.bandT / 2), y: y0 + K.bandY, z: cf * (ap + K.bandT / 2), ry: f });
     b.box(K.lowerW, K.lowerH, K.lowerT, S.lower, { x: sf * (ap + K.lowerT / 2), y: y0 + K.lowerY, z: cf * (ap + K.lowerT / 2), ry: f });
     spike(b, kit, { x: Math.sin(v) * K.capTop, y: capY, z: Math.cos(v) * K.capTop, h: K.spikeH, r: K.spikeR });
   }
@@ -339,7 +374,7 @@ BODIES.round = (c) => {
   const P = D.pedestal;
   const O = D.orb;
   const cy = y0 + P.h + O.gap + O.r;
-  b.cylinder(P.rTop, P.rBottom, P.h, P.segments, S.hullDark, { y: y0 + P.h / 2 });
+  b.cylinder(P.rTop, P.rBottom, P.h, P.segments, S.teamPaint, { y: y0 + P.h / 2, detail: TEAM.detail });   // team pedestal under the plasma sphere
   b.cylinder(O.stemR, O.stemR, O.gap + 0.4, 10, c.R, { y: y0 + P.h + O.gap / 2 });
   b.sphere(O.r, O.wSeg, O.hSeg, c.R, { y: cy });
   glows.get('reactor').sphere(O.r * O.halo, 16, 10, { y: cy });
@@ -359,9 +394,9 @@ BODIES.round = (c) => {
 
   const gb = new PartBuilder();   // gyroscope: three orthogonal rings around the sphere
   const G = D.gyro;
-  gb.torus(G.r, G.tube, 6, 28, TAU, S.trim, { rx: Math.PI / 2 });
-  gb.torus(G.r, G.tube, 6, 28, TAU, S.trim, {});
-  gb.torus(G.r, G.tube, 6, 28, TAU, S.trim, { ry: Math.PI / 2 });
+  gb.torus(G.r, G.tube, 6, 28, TAU, S.teamPaint, { rx: Math.PI / 2 });   // the spinning gyroscope rings are team paint
+  gb.torus(G.r, G.tube, 6, 28, TAU, S.teamShade, {});
+  gb.torus(G.r, G.tube, 6, 28, TAU, S.teamPaint, { ry: Math.PI / 2 });
   c.core = { geometry: gb.build(), at: [0, cy, 0], mode: 'turn', speed: GENERATOR_ANIM.gyroSpeed };
   c.explosionAt = [0, cy, 0];
   emblemStand(c, D.emblem, y0);
@@ -378,7 +413,7 @@ BODIES.faceted = (c) => {
   const K = D.crystal;
   const cy = y0 + K.y;
   const Pd = D.pedestal;
-  b.taperedBox(Pd.w, Pd.topW, Pd.h, Pd.w, S.hullDark, { y: y0, ry: Math.PI / 4 });
+  b.taperedBox(Pd.w, Pd.topW, Pd.h, Pd.w, S.teamShade, { y: y0, ry: Math.PI / 4, detail: TEAM.detail });
   photon.box(Pd.shaftW, Pd.shaftH, Pd.shaftW, { y: y0 + Pd.h + Pd.shaftH / 2 });
   photon.sphere(K.halo, 14, 10, { y: cy });
 
@@ -388,7 +423,7 @@ BODIES.faceted = (c) => {
     const a = (i / P.count) * TAU + P.phase;
     const x = Math.cos(a) * P.r;
     const z = Math.sin(a) * P.r;
-    b.taperedBox(P.w, P.topW, P.h, P.w, S.hullDark, { x, y: y0, z, ry: Math.PI / 4 - a });
+    b.taperedBox(P.w, P.topW, P.h, P.w, S.teamPaint, { x, y: y0, z, ry: Math.PI / 4 - a, detail: TEAM.detail });   // the six laser pylons are team paint
     const lens = [Math.cos(a) * P.lensR, y0 + P.h + P.lensLift, Math.sin(a) * P.lensR];
     const g = new THREE.OctahedronGeometry(P.lensSize, 0);
     g.scale(1, P.lensStretch, 1);
@@ -411,7 +446,7 @@ BODIES.faceted = (c) => {
   const g = new THREE.OctahedronGeometry(K.size, 0);
   g.scale(1, K.stretch, 1);
   cb.add(g, c.R);
-  for (const s of [-1, 1]) cb.box(K.discR * 2, K.discH, K.discR * 2, S.trim, { y: s * K.discDy, ry: Math.PI / 4 });
+  for (const s of [-1, 1]) cb.box(K.discR * 2, K.discH, K.discR * 2, S.teamPaint, { y: s * K.discDy, ry: Math.PI / 4 });
   cb.cylinder(K.lensR, K.lensR, K.lensR * 2, 8, S.lens, { x: K.discR + K.lensR, rz: Math.PI / 2 });
   c.core = { geometry: cb.build(), at: [0, cy, 0], mode: 'float' };
   c.explosionAt = [0, cy, 0];

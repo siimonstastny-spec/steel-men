@@ -1,4 +1,4 @@
-// Steel Mans – herní svět: roboti, posádky, vraky, výška terénu, časovače a efekty boje – SIT
+// Steel Men – herní svět: roboti, posádky, vraky, výška terénu, časovače a efekty boje – SIT
 import * as THREE from 'three';
 import { ArmWreck } from '../units/ArmWreck.js';
 import { SalvageWreck } from '../units/SalvageWreck.js';

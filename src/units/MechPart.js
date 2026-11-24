@@ -1,4 +1,4 @@
-// Steel Mans – jedna část robota s vlastním HP – SIT
+// Steel Men – jedna část robota s vlastním HP – SIT
 import * as THREE from 'three';
 import { applyArmor } from '../data/Stats.js';
 import { MUZZLE, HIGHLIGHT } from '../config.js';

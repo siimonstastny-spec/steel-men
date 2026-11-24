@@ -1,4 +1,4 @@
-// Steel Mans – smooth fade of the terrain into the void colour along the map border (visual only, no simulation state).
+// Steel Men – smooth fade of the terrain into the void colour along the map border (visual only, no simulation state).
 // Per-pixel: the terrain material's fragment shader mixes the final colour towards MAP_EDGE_FADE.color by the distance
 // of the world position from the map border (smoothstep), so there are no vertex-interpolation steps. Vertex colours,
 // heights, fog of war (FogOfWar.patchMaterial) and other objects are untouched.

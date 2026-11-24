@@ -1,4 +1,4 @@
-// Steel Mans – command executors for every order the player gives to units (see docs/notes/phase0-CMD.md).
+// Steel Men – command executors for every order the player gives to units (see docs/notes/phase0-CMD.md).
 // CommandInput (and later the AI / network) only submits plain-JSON commands; everything below runs inside the
 // simulation tick, so every client builds identical order queues.
 //   { type, team, units: [eid...], queued, ...payload }   points are { x, z }, targets are eids

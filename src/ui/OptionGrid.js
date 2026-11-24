@@ -1,4 +1,4 @@
-// Steel Mans – universal grid of buttons. The same component serves the option grid on the left (buildings,
+// Steel Men – universal grid of buttons. The same component serves the option grid on the left (buildings,
 // production inside a building, robot parts) and the command grid in the bottom left (RTS orders).
 //   grid.show({ title, back, tabs, items, summary, action })
 //     items:   [{ icon, label, tip, hotkey, disabled, on, pending, onClick, onContext } | null (empty slot)]

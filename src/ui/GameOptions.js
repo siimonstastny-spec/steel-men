@@ -1,4 +1,4 @@
-// Steel Mans – [B1] shared game-setting comboboxes of the New game and multiplayer lobby screens (modern RTS style:
+// Steel Men – [B1] shared game-setting comboboxes of the New game and multiplayer lobby screens (modern RTS style:
 // one labelled select per option). The screens own the state; this module only draws the controls and decodes changes.
 //
 //   optionsHtml(values, { disabled })         rows "label + select" (pre-build, start set, energy cap, population cap,

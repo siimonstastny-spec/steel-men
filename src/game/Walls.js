@@ -1,4 +1,4 @@
-// Steel Mans – walls: posts joined by wall segments, turrets on posts (stats.json structures, WALL in config.js).
+// Steel Men – walls: posts joined by wall segments, turrets on posts (stats.json structures, WALL in config.js).
 //
 //   • A post is a structure with `placement: 'wall'`; its `wallSegment` names the segment structure and
 //     `turretSocket` the model node a turret stands on. A segment is a normal structure (HP, armour, cost) whose

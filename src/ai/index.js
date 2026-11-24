@@ -1,4 +1,4 @@
-// Steel Mans AI – entry point for main.js: the list of computer players of the running match.
+// Steel Men AI – entry point for main.js: the list of computer players of the running match.
 //   createAi({ world, commandBus, team, race, difficulty, unlocks, allies }) – adds one AI team (AiPlayer)
 //   updateAis(simTimeSeconds)  – after each simulation tick (host / single player only)
 //   clearAis()                  – new match / back to the menu

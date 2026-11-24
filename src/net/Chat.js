@@ -6,15 +6,15 @@
 // Security: sender and team come from the transport (`from` -> roster), never from the message content.
 // Text is sanitised here (type, length, control chars); the UI must still escape it (esc()) when building HTML.
 import { CHAT } from '../config.js';
+import { CONTROL_RE } from './textClean.js'; // control, bidi and zero-width characters (shared, ASCII-escaped)
 
-const CTRL_RE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g; // control + bidi / zero-width chars
 
 export function cleanChatText(s) {
-  return String(s ?? '').replace(CTRL_RE, ' ').replace(/\s+/g, ' ').trim().slice(0, CHAT.maxLength);
+  return String(s ?? '').replace(CONTROL_RE, ' ').replace(/\s+/g, ' ').trim().slice(0, CHAT.maxLength);
 }
 
 function cleanName(n) {
-  return String(n ?? '').replace(CTRL_RE, ' ').replace(/\s+/g, ' ').trim().slice(0, CHAT.maxNameLength);
+  return String(n ?? '').replace(CONTROL_RE, ' ').replace(/\s+/g, ' ').trim().slice(0, CHAT.maxNameLength);
 }
 
 export class Chat {

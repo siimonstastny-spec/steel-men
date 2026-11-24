@@ -1,4 +1,4 @@
-// Steel Mans – scéna, kamera, světla, terén – SIT
+// Steel Men – scéna, kamera, světla, terén – SIT
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MAP, R2, MAP_EDGE_FADE } from '../config.js';

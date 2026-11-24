@@ -1,4 +1,4 @@
-// Steel Mans – graphics quality (full / medium / reduced). Reduced = lower render resolution (pixel ratio downscale)
+// Steel Men – graphics quality (full / medium / reduced). Reduced = lower render resolution (pixel ratio downscale)
 // and cheaper, smaller shadows. Presets are in config.js (GRAPHICS).
 // Also the building quality level (procedural buildings, BUILDING_LOD): the setting `buildingDetail` high / medium /
 // low / auto → effective level; `auto` follows the measured frame time. Visual only, the simulation never reads it.

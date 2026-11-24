@@ -1,4 +1,4 @@
-// Steel Mans – unit collisions, path following and "give up when blocked" for move orders
+// Steel Men – unit collisions, path following and "give up when blocked" for move orders
 import * as THREE from 'three';
 import { MOVEMENT, PATHFINDING, VEHICLE, MAPS, JUMP_JET } from '../config.js';
 import { clampToArea, confineUnits } from './PreBuild.js';

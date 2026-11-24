@@ -1,4 +1,4 @@
-// Steel Mans – procedural wall turrets (roadmap 18, walls): mobileWallGunTurret and mobileWallLaserTurret. Drop-in
+// Steel Men – procedural wall turrets (roadmap 18, walls): mobileWallGunTurret and mobileWallLaserTurret. Drop-in
 // alternatives to models/3DStructures{race}/MobileWall{Gun,Laser}Turret{race}_Anim.glb, built on the defence kit of
 // PointDefenseProc.js (DefenseProcModel, turretHead, barrelCluster) – same pattern as the point defence:
 //   • the model origin is the turret pivot on the wall post (DefenseStructure puts a turning model there): static pedestal
@@ -14,11 +14,24 @@
 // by the simulation; update() allocates nothing.
 import * as THREE from 'three';
 import { PartBuilder } from './ProcKit.js';
-import { createSharedCache, GlowSet, emblemDecalGeometry, pulseWave } from './ProcModules.js';
+import { createSharedCache, GlowSet, emblemDecalGeometry, pulseWave, teamPanel } from './ProcModules.js';
 import {
   DefenseProcModel, DEFENSE_DETAIL, DEFENSE_ANIM, turretHead, barrelCluster, nextDefenseInstance,
 } from './PointDefenseProc.js';
-import { TAU, HALF_PI, QUARTER_PI, WALL_LAYOUT } from './MobileWallProc.js';
+import { TAU, HALF_PI, QUARTER_PI, WALL_LAYOUT, WALL_TEAM } from './MobileWallProc.js';
+
+/**
+ * Team paint of the turret (S.teamPaint / S.teamShade, see WALL_TEAM): the whole pedestal and the slew ring, a cap on the head
+ * (flat slab on a box head, painted upper part of a wedge, painted crown of a dome) and a panel on the rear face of a box head.
+ * The emblem plates on the sides and the front (barrels) stay neutral.
+ */
+const TURRET_TEAM = {
+  cap: { inset: 0.86, t: 0.14 },                          // box head: top slab (share of the roof size, thickness)
+  ringOver: 0.05,                                         // slew ring paint sits this much outside the ring
+  wedge: { from: 0.4, over: 0.08 },                       // wedge head: painted from this share of the height up, offset off the faces
+  dome: { arc: Math.PI / 3, over: 1.015, seg: 24, rows: 6 },   // dome head: painted crown (polar angle, radius factor, segments)
+  panel: { w: 0.7, h: 0.5 },                              // box head: rear panel (shares of the head width / height)
+};
 
 /** Socket node names = stats.json launchSockets of the two turrets (the GLB node names, one per muzzle) */
 export const GUN_SOCKETS = ['socket_Launch_1', 'socket_2e603755'];
@@ -94,9 +107,32 @@ const MUZZLE = { gun: 10.2, laser: 10.6 };
 function pedestal(b, kit, P) {
   const S = kit.S;
   const apothem = P.r * Math.cos(Math.PI / P.seg);
-  b.cylinder(P.r * P.topShare, P.r, P.h, P.seg, S.hullDark, { y: P.h / 2, ry: P.seg === 4 ? QUARTER_PI : 0 });
-  b.torus(apothem * PEDESTAL.ringShare, PEDESTAL.tube, 4, PEDESTAL.segments, TAU, S.team, { rx: HALF_PI, y: P.h * PEDESTAL.yShare });
+  const detail = WALL_TEAM.detail;
+  b.cylinder(P.r * P.topShare, P.r, P.h, P.seg, S.teamPaint, { y: P.h / 2, ry: P.seg === 4 ? QUARTER_PI : 0, detail });   // painted pedestal
+  b.torus(apothem * PEDESTAL.ringShare, PEDESTAL.tube, 4, PEDESTAL.segments, TAU, S.teamShade, { rx: HALF_PI, y: P.h * PEDESTAL.yShare, detail });
   if (kit.rich) b.torus(apothem * P.topShare * PEDESTAL.neonShare, PEDESTAL.neonTube, 3, PEDESTAL.segments, TAU, S.neon, { rx: HALF_PI, y: P.h * PEDESTAL.neonYShare });
+}
+
+/** Team paint on the turning head (written after turretHead; `head` = its return value) */
+function teamHead(b, kit, hd, head) {
+  const S = kit.S;
+  const D = DEFENSE_DETAIL;
+  const K = TURRET_TEAM;
+  const detail = WALL_TEAM.detail;
+  b.cylinder(hd.ring + K.ringOver, hd.ring * D.ringFlare + K.ringOver, D.ringH, D.seg.ring, S.teamShade, { y: D.ringH / 2, detail });
+  if (hd.kind === 'dome') {
+    const drum = hd.r * hd.flat;
+    b.add(new THREE.SphereGeometry(hd.r * K.dome.over, K.dome.seg, K.dome.rows, 0, TAU, 0, K.dome.arc), S.teamPaint, { y: head.y0 + drum, sy: hd.flat, detail });
+  } else if (hd.kind === 'wedge') {
+    const f0 = K.wedge.from;
+    const o = 2 * K.wedge.over;
+    const w0 = hd.w + (hd.topW - hd.w) * f0 + o;
+    const d0 = hd.d + (hd.topD - hd.d) * f0 + o;
+    b.taperedBox(w0, hd.topW + o, hd.h * (1 - f0), d0, S.teamPaint, { y: head.y0 + hd.h * f0, detail }, hd.topD + o);
+  } else {
+    b.box(hd.w * K.cap.inset, K.cap.t, hd.d * K.cap.inset, S.teamPaint, { y: head.top + K.cap.t / 2, detail });
+    teamPanel(b, kit, hd.w * K.panel.w, hd.h * K.panel.h, { y: head.y0 + hd.h / 2, z: -hd.d / 2, ry: Math.PI });
+  }
 }
 
 /**
@@ -167,6 +203,7 @@ function buildShared(kit, def) {
   const tb = new PartBuilder();
   const hd = shape.head;
   const head = turretHead(tb, kit, hd);
+  teamHead(tb, kit, hd, head);
   const bz = hd.d / 2;
   const bs = shape.barrels;
   const offsets = bs.offsets ?? [[0, 0]];

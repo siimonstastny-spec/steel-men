@@ -1,4 +1,4 @@
-// Steel Mans – seeded pseudo-random generator for the simulation (mulberry32: 32-bit state, fast, good enough
+// Steel Men – seeded pseudo-random generator for the simulation (mulberry32: 32-bit state, fast, good enough
 // for games). Every random decision that changes the simulation (hit rolls, scatter, drops…) must use the
 // world's generator `world.rng`, never Math.random – two clients with the same seed and the same commands then
 // roll the same numbers in the same order (lockstep multiplayer, replays). Purely visual randomness (explosion

@@ -1,4 +1,4 @@
-// Steel Mans – [W3] frame with ALL queues of the local player, above the player statistics (bottom right).
+// Steel Men – [W3] frame with ALL queues of the local player, above the player statistics (bottom right).
 // Groups: the builders' constructions (current + Shift-queued buildings, read only: click = camera) and the production queue
 // of every producing building (icons of the items; the head item is highlighted with its progress, an item waiting for energy
 // is marked). Visible only when something is queued. A pure view over world.production (ProductionQueue.js) and the builders'

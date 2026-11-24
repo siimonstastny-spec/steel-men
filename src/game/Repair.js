@@ -1,4 +1,4 @@
-// Steel Mans – repairs beyond the crew's own field repair (ModularMech.startRepair):
+// Steel Men – repairs beyond the crew's own field repair (ModularMech.startRepair):
 //   ([N5] a new order interrupts a running repair: repairInterruptible + unitCommands.give)
 //
 //   • Service in an own assembly bay (structure that produces 'mech'). A mech ordered into the bay (order

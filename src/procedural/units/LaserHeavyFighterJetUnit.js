@@ -1,17 +1,20 @@
-// Steel Mans – procedural laser heavy fighter jet (roadmap U4). Bigger and stronger than the light laser jet: broad
+// Steel Men – procedural laser heavy fighter jet (roadmap U4). Bigger and stronger than the light laser jet: broad
 // fuselage, long swept wings with emitter pods on pylons, three beam-style nozzles, twin nose lasers. Shape table keyed
 // by style.silhouette with only `faceted` (others fall back to it).
 //   • sockets: muzzle, muzzle_2 (twin laser, fire('muzzle_2')), exhaust_1..3, aim, smoke
 //   • flight: owner calls setMotion(speed, yawRate) and setThrottle(0..1)
 // Model units (before VEHICLE.modelScale × stats.modelScale): ≈ 8.0 long, 7.8 span, 2.7 high incl. fins. Visual only.
-import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
-import { fuselage, wings, tailFins, exhaust, weapon, statusLamp } from './UnitModules.js';
+//   • team colour: dorsal spine, team tail fins and team wing emitter pods (teamSpine / teamFins from LightLaserJetUnit.js)
+import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit, UNIT_KIT } from './UnitKit.js';
+import { fuselage, wings, exhaust, weapon, statusLamp } from './UnitModules.js';
+import { teamFins, teamSpine } from './LightLaserJetUnit.js';
 
 /** Shape by style.silhouette (unknown → faceted); sizes in model units */
 export const LASER_HEAVY_FIGHTER_SHAPES = {
   faceted: {
     L: 8.0, W: 1.6, H: 1.1, span: 7.8, rc: 3.0, tc: 0.7, sweep: -0.8, fins: 2, engines: 3,
     engine: { r: 0.26, length: 1.8, spacing: 0.55 },   // spacing = share of W
+    spine: { w: 0.75, h: 0.6, z: -0.2, d: 0.3, lift: 0.02 },   // team spine: shares of W / H / L (behind the canopy, under the status lamp)
   },
 };
 
@@ -36,14 +39,15 @@ function buildLaserHeavyFighter(kit) {
   ub.meta.hull = { bone: 'hull', bank: true, bobAmp: JET.bobAmp, bobFreq: JET.bobFreq };
   fuselage(ub, { bone: 'hull', L: s.L, W: s.W, H: s.H });
   wings(ub, { bone: 'hull', y: s.H * JET.wingY, z: s.L * JET.wingZ, span: s.span, rc: s.rc, tc: s.tc, sweep: s.sweep });
-  tailFins(ub, { bone: 'hull', y: s.H * JET.finY, z: s.L * JET.finZ, h: JET.finH, chord: JET.finChord, count: s.fins, tilt: JET.finTilt });
+  teamFins(ub, { bone: 'hull', y: s.H * JET.finY, z: s.L * JET.finZ, h: JET.finH, chord: JET.finChord, count: s.fins, tilt: JET.finTilt });
+  teamSpine(ub, { W: s.W, H: s.H, L: s.L, spine: s.spine });
   const hb = ub.paint('hull');
   const hg = ub.glow('hull');
   for (const side of [1, -1]) {
     const px = side * s.span * POD.x;
     const py = s.H * JET.wingY + POD.y;
     const pz = s.L * JET.wingZ + POD.z;
-    hb.box(POD.w, POD.h, POD.d, S.hullDark, { x: px, y: py, z: pz });
+    hb.box(POD.w, POD.h, POD.d, S.teamPaint, { x: px, y: py, z: pz, detail: UNIT_KIT.teamPaint.lod.panel });
     hg.point([px, py, pz + POD.d / 2 + POD.glowOut], POD.glowR, ub.style.weaponGlow, {});
   }
   for (let i = 0; i < s.engines; i++) {

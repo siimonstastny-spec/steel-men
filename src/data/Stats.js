@@ -1,4 +1,4 @@
-// Steel Mans – game stats: loading data/stats.json, resolving stats per model, composing mechs
+// Steel Men – game stats: loading data/stats.json, resolving stats per model, composing mechs
 import { setFromPath, ACCURACY } from '../config.js';
 
 const STATS_URL = './data/stats.json';

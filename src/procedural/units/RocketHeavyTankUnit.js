@@ -1,10 +1,10 @@
-// Steel Mans – procedural heavy tank (roadmap U2): massive tracked hull, big turret, heavy cannon (muzzle, barrel pitch,
+// Steel Men – procedural heavy tank (roadmap U2): massive tracked hull, big turret, heavy cannon (muzzle, barrel pitch,
 // recoil) and a weak rotary AA machine gun on the turret roof (second weapon: socket muzzle_2, bone barrel_2).
 //   • dimensions per style.silhouette (ROCKET_HEAVY_TANK_SHAPES, unknown → first entry); looks adapt through the modules
 //   • sockets: muzzle (cannon), muzzle_2 (AA gun), turret, aim, cargo, smoke
 // Model units (before VEHICLE.modelScale × stats.modelScale): ≈ 8.0 long, 4.9 wide, 3.3 high. Visual only.
-import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
-import { hull, tracks, turret, weapon, statusLamp } from './UnitModules.js';
+import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit, UNIT_KIT } from './UnitKit.js';
+import { hull, tracks, turret, weapon, statusLamp, roofMark, UNIT_MODULES } from './UnitModules.js';
 
 /** Shapes by style.silhouette (sizes in model units; shares of L / W where noted) */
 export const ROCKET_HEAVY_TANK_SHAPES = {
@@ -18,6 +18,13 @@ export const ROCKET_HEAVY_TANK_SHAPES = {
   },
 };
 
+// team mark in front of the turret (roofMark; round / faceted hulls have no flat deck: module caps / strakes are their team paint).
+// z, d = shares of the hull length, w = share of W; ledge = angular hull: on the flat lower-hull ledge ahead of the deck (else on the deck top)
+// cover = darker team deck cover under / around the turret (shares of W, hull length, hull length); the deck mark stands on it
+const DECK_MARK = {
+  rounded: { z: 0.24, d: 0.15, w: 0.6, ledge: false, cover: { w: 0.7, d: 0.7, z: -0.05 } },
+  angular: { z: 0.37, d: 0.12, w: 0.7, ledge: true, cover: { w: 0.64, d: 0.58, z: -0.06 } },
+};
 const WEAPON_MOUNT = 0.85;   // trunnion z = turret front × this
 const SOCKET_AIM = 0.5;      // aim socket at hull top + turret height × this
 const SMOKE_Z = 0.45;        // smoke socket z share of the hull length (behind the centre)
@@ -29,12 +36,21 @@ function buildHeavyTank(kit) {
   const { L, W, H } = s;
   const ub = new UnitBuilder(kit);
   const th = L * s.trackH;
-  tracks(ub, { L, gauge: W * s.gauge, tw: W * s.trackW, th });
+  // team colour: module team layouts (skirts / plates / caps, roof marks, emblems on plates) + a deck mark
+  tracks(ub, { L, gauge: W * s.gauge, tw: W * s.trackW, th, team: true });
   ub.bone('hull', 'root', [0, th * s.hullLift, 0]);
   ub.meta.hull = { bone: 'hull', bank: false };
-  const hl = hull(ub, { bone: 'hull', y: 0, L: L * s.hullL, W, H });
+  const hullLen = L * s.hullL;
+  const hl = hull(ub, { bone: 'hull', y: 0, L: hullLen, W, H, team: true });
+  const dm = DECK_MARK[kit.style.silhouette];
+  const coverH = dm ? UNIT_KIT.teamPaint.roofMark.h : 0;
+  if (dm) {
+    const c = dm.cover;
+    ub.paint('hull').box(W * c.w, coverH, hullLen * c.d, kit.S.teamShade, { y: hl.top + coverH / 2, z: hullLen * c.z, detail: UNIT_KIT.teamPaint.lod.roofMark });
+    roofMark(ub, 'hull', { y: dm.ledge ? H * UNIT_MODULES.hull.angular.lowerShare : hl.top + coverH, z: hullLen * dm.z, w: W * dm.w, d: hullLen * dm.d });
+  }
   const t = s.turret;
-  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h });
+  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
   weapon(ub, 'cannon', {
     parent: 'turret', position: [0, tr.mid, tr.front * WEAPON_MOUNT], length: s.gun.length, caliber: s.gun.caliber, pitch: s.gun.pitch,
   });

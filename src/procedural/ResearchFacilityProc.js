@@ -1,4 +1,4 @@
-// Steel Mans – procedural research facility (roadmap 18, phase B). Drop-in alternative to
+// Steel Men – procedural research facility (roadmap 18, phase B). Drop-in alternative to
 // models/3DStructures{race}/ResearchFacility{race}_Anim.glb, built from the style modules (ProcModules.js) and the
 // faction style (data/buildingStyles.json). A lab block (entrance on +Z) joined to a data-core tower behind it:
 //   • lab block per style.silhouette (RESEARCH_SHAPES): flat deck / armoured / vault / ridge, windows (blinking while
@@ -16,6 +16,31 @@ import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   pipeRun, plasmaCoil, laserLink, spike, arcGeometry, ArcFlicker, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES,
 } from './ProcModules.js';
+import { PROC_TEAM_PAINT } from '../config.js';
+
+/**
+ * Team paint of the research facility (docs/notes/proc-teampaint-a.md): the main structure is team lacquer, the rest stays
+ * neutral metal – pilasters / ribs / buttresses / fins, the roof deck (vault: a centre stripe of share `vaultTeam`), the plinth
+ * collar, the core tower base and cap, the connector. `lod` = coarsest LOD they appear in (2 = far silhouette).
+ */
+const TEAM = {
+  lod: PROC_TEAM_PAINT.lod.panel,
+  vaultTeam: 0.6,                       // share of the vault arc (centre stripe) in team paint
+};
+
+/**
+ * Box without its top and bottom faces (a hollow collar, origin like PartBuilder.box). The caps of a plinth are hidden under the
+ * building; leaving them out keeps the surface (and the measured team share) honest. BoxGeometry order: +x −x +y −y +z −z.
+ */
+const COLLAR_SIDES_A = 12;   // indices of the two X faces (6 each)
+const COLLAR_SIDES_B = 24;   // first index of the two Z faces
+function collarBox(b, w, h, d, s, t = {}) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const all = Array.from(g.index.array);
+  g.setIndex(all.slice(0, COLLAR_SIDES_A).concat(all.slice(COLLAR_SIDES_B)));
+  if (t.base) g.translate(0, h / 2, 0);
+  return b.add(g, s, t);
+}
 
 const TAU = Math.PI * 2;
 
@@ -47,7 +72,7 @@ const LAYOUT = {
   doorHalfW: 1.5, doorH: 3.0, jambX: 1.85, jambW: 0.5, jambD: 0.5, headerH: 0.6,
   pilasterZ: [-0.7, 2.5, 5.7, 8.3],
   emblemBay: 2,                         // bay with the side emblem (no window there)
-  emblemFront: 1.2, emblemSide: 2.0,
+  emblemFront: 1.2, emblemSide: 1.4,    // side: keeps ≥ 0.15 free of the team-painted pilasters either side (bay 2.6 wide, buttress 0.9 wide)
   frontWinX: 4.4, frontWinY: 2.4,
   sideWinBelow: 2.4,                    // side window centre below the wall top
   apronOut: 0.6, apronH: 0.5,   // apron centre in front of the door; the marking ends inside the floor (padHalf)
@@ -146,7 +171,8 @@ function buildStatic(kit, shape) {
   const zf = L.hallZ1;
   const tilt = Math.atan2(hb - ht, H);
   const wallXAt = (y) => hb - (hb - ht) * (y / H);
-  const onWall = (side, y, z, w, h, d, s, out = 0) => b.box(d, h, w, s, { x: side * (wallXAt(y) + d / 2 + out), y, z, rz: side * tilt });
+  const onWall = (side, y, z, w, h, d, s, out = 0, detail) => b.box(d, h, w, s, { x: side * (wallXAt(y) + d / 2 + out), y, z, rz: side * tilt, detail });
+  const skel = S.teamPaint;               // structural skeleton / roof deck / tower base: team lacquer
   const roofY = H + L.roofSlab;
   const vault = shape.roof === 'vault';
   const topY = vault ? H : roofY;                 // surface for corner beacons
@@ -161,7 +187,7 @@ function buildStatic(kit, shape) {
   marking(b, kit, L.doorHalfW * 2 + L.jambW * 2, L.apronH, { rx: -Math.PI / 2, y: L.padH + 0.01, z: zf + L.apronOut });
 
   // hall body
-  b.box(hb * 2 + D.plinth.over, D.plinth.h, hallD, S.hullDark, { base: true, z: hallCz });
+  collarBox(b, hb * 2 + D.plinth.over, D.plinth.h, hallD, skel, { base: true, z: hallCz, detail: TEAM.lod });   // team plinth
   if (hb !== ht) b.taperedBox(hb * 2, ht * 2, H, hallD, S.hull, { z: hallCz });
   else styledBox(b, kit, hb * 2, H, hallD, S.hull, { base: true, z: hallCz }, shape.hallEdge);
 
@@ -171,24 +197,24 @@ function buildStatic(kit, shape) {
       switch (shape.pilaster) {
         case 'column': {
           const c = D.column;
-          b.box(c.w, H + c.extraH, c.d, S.frame, { base: true, x: side * (hb + c.out), z });
+          b.box(c.w, H + c.extraH, c.d, skel, { base: true, x: side * (hb + c.out), z, detail: TEAM.lod });
           break;
         }
         case 'rib': {
           const r = D.rib;
-          b.cylinder(r.rTop, r.rBottom, H, r.segments, S.hullDark, { x: side * (hb + r.out), y: H / 2, z });
+          b.cylinder(r.rTop, r.rBottom, H, r.segments, skel, { x: side * (hb + r.out), y: H / 2, z, detail: TEAM.lod });
           break;
         }
         case 'fin': {
           const f = D.fin;
-          b.box(f.w, H * f.hShare, f.t, S.frame, { base: true, x: side * (hb + f.out), z });
+          b.box(f.w, H * f.hShare, f.t, skel, { base: true, x: side * (hb + f.out), z, detail: TEAM.lod });
           neonStrip(b, kit, f.neonW, H * f.neonShare, f.neonD, { base: true, x: side * (hb + f.neonOut), y: H * f.neonY, z });
           break;
         }
         default: {
           const t = D.buttress;
           const bh = H * t.hShare;
-          onWall(side, bh / 2, z, t.w, bh, t.d, S.hullDark);
+          onWall(side, bh / 2, z, t.w, bh, t.d, skel, 0, TEAM.lod);
           b.box(t.footW, t.footH, t.footD, S.frame, { base: true, x: side * (hb + t.footOut), z });
         }
       }
@@ -256,11 +282,11 @@ function buildStatic(kit, shape) {
   // roof
   if (shape.roof === 'deck') {
     const R = D.flatRoof;
-    b.box(hb * 2 + R.slabOver, L.roofSlab, hallD + R.slabOver, S.frame, { base: true, y: H, z: hallCz });
+    b.box(hb * 2 + R.slabOver, L.roofSlab, hallD + R.slabOver, skel, { base: true, y: H, z: hallCz, detail: TEAM.lod });
     neonStrip(b, kit, hb * 2, R.neonH, R.neonT, { y: roofY + R.neonH / 2, z: zf + R.slabOver / 2 });
   } else if (shape.roof === 'armored') {
     const A = D.armored;
-    b.box(ht * 2 + A.slabOver, L.roofSlab, hallD + A.slabOver, S.frame, { base: true, y: H, z: hallCz });
+    b.box(ht * 2 + A.slabOver, L.roofSlab, hallD + A.slabOver, skel, { base: true, y: H, z: hallCz, detail: TEAM.lod });
     for (const side of [-1, 1]) {
       b.box(A.parapetT, A.parapetH, hallD + A.slabOver, S.hullDark, { base: true, x: side * (ht + A.parapetOut), y: roofY, z: hallCz });
       b.box(ht * 2 + A.slabOver, A.parapetH, A.parapetT, S.hullDark, { base: true, y: roofY, z: hallCz + side * (hallD / 2 + A.parapetOut) });
@@ -271,12 +297,18 @@ function buildStatic(kit, shape) {
   } else if (vault) {
     const V = D.vault;
     const k = shape.vaultRise / hb;
-    b.cylinder(hb, hb, hallD, V.segments, S.hull, { rx: Math.PI / 2, sz: k, y: H, z: hallCz }, false, Math.PI / 2, Math.PI);
-    for (const z of L.pilasterZ) b.torus(hb + V.ribOut, V.ribT, 4, 16, Math.PI, S.hullDark, { sy: k, y: H, z });
+    // three arcs: neutral flanks and a team-lacquer centre stripe (share TEAM.vaultTeam of the arc)
+    const flank = (1 - TEAM.vaultTeam) / 2;
+    const arcs = [[0, flank, S.hull], [flank, TEAM.vaultTeam, S.teamPaint], [flank + TEAM.vaultTeam, flank, S.hull]];
+    for (const [from, share, s] of arcs) {
+      b.cylinder(hb, hb, hallD, Math.max(2, Math.round(V.segments * share)), s, { rx: Math.PI / 2, sz: k, y: H, z: hallCz, detail: s === S.hull ? undefined : TEAM.lod },
+        false, Math.PI / 2 + Math.PI * from, Math.PI * share);
+    }
+    for (const z of L.pilasterZ) b.torus(hb + V.ribOut, V.ribT, 4, 16, Math.PI, skel, { sy: k, y: H, z, detail: TEAM.lod });
     neonStrip(b, kit, V.neonW, V.neonH, hallD - V.neonInset, { y: H + shape.vaultRise, z: hallCz });
   } else {
     const R = D.ridge;
-    b.box(hb * 2 + R.slabOver, L.roofSlab, hallD + R.slabOver, S.frame, { base: true, y: H, z: hallCz });
+    b.box(hb * 2 + R.slabOver, L.roofSlab, hallD + R.slabOver, skel, { base: true, y: H, z: hallCz, detail: TEAM.lod });
     const ridgeLen = hallD - R.inset;
     const g = new THREE.BoxGeometry(1, 1, ridgeLen);
     g.rotateZ(Math.PI / 4);
@@ -298,9 +330,9 @@ function buildStatic(kit, shape) {
     for (const y of C.laserY) laserLink(b, glows.get('laser'), kit, [-C.laserX, y, C.z - C.d / 2], [-C.laserX, y, C.z + C.d / 2]);
     for (const y of C.laserY) laserLink(b, glows.get('laser'), kit, [C.laserX, y, C.z - C.d / 2], [C.laserX, y, C.z + C.d / 2]);
   } else if (shape.core === 'orb') {
-    b.cylinder(C.tubeR, C.tubeR, C.d + 1, 14, S.hull, { rx: Math.PI / 2, y: C.tubeR + L.padH, z: C.z });
+    b.cylinder(C.tubeR, C.tubeR, C.d + 1, 14, skel, { rx: Math.PI / 2, y: C.tubeR + L.padH, z: C.z, detail: TEAM.lod });
   } else {
-    styledBox(b, kit, C.w, C.h, C.d + 1, S.hullDark, { base: true, y: L.padH, z: C.z }, 0.5);
+    styledBox(b, kit, C.w, C.h, C.d + 1, skel, { base: true, y: L.padH, z: C.z, detail: TEAM.lod }, 0.5);
   }
 
   // core tower
@@ -309,7 +341,7 @@ function buildStatic(kit, shape) {
   const pulse = glows.get('pulse');
   if (shape.core === 'cageRound') {
     const baseR = CB.r * CB.baseFlare;
-    b.cylinder(CB.r, baseR, CB.baseH, 20, S.hull, { y: CB.baseH / 2, z: tz });
+    b.cylinder(CB.r, baseR, CB.baseH, 20, skel, { y: CB.baseH / 2, z: tz, detail: TEAM.lod });
     b.cylinder(CB.r + 0.03, CB.r + 0.03, CB.neonH, 20, S.neon, { y: CB.baseH - CB.neonBelow, z: tz }, true);
     const pr = CB.r * CB.pillarShare;
     const top = CB.baseH + CB.cageH;
@@ -320,12 +352,12 @@ function buildStatic(kit, shape) {
     for (let k = 1; k <= CB.rings; k++) b.torus(pr, CB.ringTube, 4, 24, TAU, S.neon, { rx: Math.PI / 2, y: CB.baseH + (CB.cageH * k) / (CB.rings + 1), z: tz });
     b.cylinder(CB.coreR, CB.coreR, CB.cageH, 12, S.plasma, { y: CB.baseH + CB.cageH / 2, z: tz });
     pulse.cylinder(CB.haloR, CB.haloR, CB.cageH, 12, { y: CB.baseH + CB.cageH / 2, z: tz });
-    b.cylinder(CB.r * CB.capShare, CB.r * CB.capShare, CB.capH, 20, S.frame, { y: top + CB.capH / 2, z: tz });
+    b.cylinder(CB.r * CB.capShare, CB.r * CB.capShare, CB.capH, 20, skel, { y: top + CB.capH / 2, z: tz, detail: TEAM.lod });
     b.cylinder(CB.mastR, CB.mastR, CB.mastH, 8, S.frame, { y: top + CB.capH + CB.mastH / 2, z: tz });
     for (const e of [-1, 1]) beacon(b, glows.get('beaconA'), kit, [e * CB.r * CB.beaconShare, top + CB.capH, tz]);
     if (st.industrial) head = { kind: 'radar', x: 0, y: top + CB.capH + CB.mastH + CB.radarLift, z: tz };
   } else if (shape.core === 'cageSquare') {
-    b.taperedBox(CB.r * 2, CB.topR * 2, CB.baseH, CB.r * 2, S.hull, { z: tz }, CB.topR * 2);
+    b.taperedBox(CB.r * 2, CB.topR * 2, CB.baseH, CB.r * 2, skel, { z: tz, detail: TEAM.lod }, CB.topR * 2);
     const top = CB.baseH + CB.cageH;
     const pc = CB.topR - CB.pillarW / 2;
     for (const sx of [-1, 1]) {
@@ -340,7 +372,7 @@ function buildStatic(kit, shape) {
     }
     b.box(CB.coreW, CB.cageH, CB.coreW, S.plasma, { base: true, y: CB.baseH, z: tz });
     pulse.box(CB.haloW, CB.cageH, CB.haloW, { y: CB.baseH + CB.cageH / 2, z: tz });
-    b.box(CB.capW, CB.capH, CB.capW, S.frame, { base: true, y: top, z: tz });
+    b.box(CB.capW, CB.capH, CB.capW, skel, { base: true, y: top, z: tz, detail: TEAM.lod });
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) spike(b, kit, { x: sx * (CB.capW / 2 - CB.spikeR), y: top + CB.capH, z: tz + sz * (CB.capW / 2 - CB.spikeR), h: CB.spikeH, r: CB.spikeR });
     }
@@ -349,7 +381,7 @@ function buildStatic(kit, shape) {
     beacon(b, glows.get('beaconA'), kit, [-(CB.capW / 2 - CB.spikeR * 3), top + CB.capH, tz]);
     if (st.industrial) head = { kind: 'radar', x: 0, y: top + CB.capH + CB.mastH + CB.radarLift, z: tz };
   } else if (shape.core === 'orb') {
-    b.cylinder(CB.pedTop, CB.pedBottom, CB.pedH, 20, S.hull, { y: CB.pedH / 2, z: tz });
+    b.cylinder(CB.pedTop, CB.pedBottom, CB.pedH, 20, skel, { y: CB.pedH / 2, z: tz, detail: TEAM.lod });
     b.torus(CB.neonR, CB.neonT, 4, 24, TAU, S.neon, { rx: Math.PI / 2, y: CB.pedH * 0.5, z: tz });
     const cy = CB.pedH + CB.orbR * (1 - CB.orbLift);
     b.sphere(CB.orbR, 20, 12, S.plasma, { y: cy, z: tz });
@@ -360,7 +392,7 @@ function buildStatic(kit, shape) {
     head = { kind: 'rings', y: cy, z: tz };
   } else {
     const colTop = L.padH + CB.colH;
-    styledBox(b, kit, CB.colW, CB.colH, CB.colW, S.hullDark, { base: true, y: L.padH, z: tz, ry: Math.PI / 4 });
+    styledBox(b, kit, CB.colW, CB.colH, CB.colW, skel, { base: true, y: L.padH, z: tz, ry: Math.PI / 4, detail: TEAM.lod });
     b.box(CB.neonW, CB.neonH, CB.neonW, S.neon, { y: colTop - CB.neonBelow, z: tz, ry: Math.PI / 4 });
     for (let k = 0; k < CB.lasers; k++) {
       const a = (k * TAU) / CB.lasers;

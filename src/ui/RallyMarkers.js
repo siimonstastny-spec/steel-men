@@ -1,4 +1,4 @@
-// Steel Mans – rally point of the selected own building: a line from the building through the chain of rally
+// Steel Men – rally point of the selected own building: a line from the building through the chain of rally
 // points, a ring at each point and a pole on the last one. Only the owner sees it, and only while the building is
 // selected. Visual only (reads structure.rally, never touches the simulation). Sizes / colours: RALLY.marker (config.js).
 // Wiring (main.js): const rallyMarkers = new RallyMarkers({ world, input }); call rallyMarkers.update() every frame.

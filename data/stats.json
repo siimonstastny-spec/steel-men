@@ -23,17 +23,21 @@
       "startSetOrder": ["builderDrill", "withHq", "withRobotProduction", "withVehicleFactory"],
       "defaultStartSet": "withHq",
       "startSets": {
-        "builderDrill": { "structures": [], "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0 },
-        "withHq": { "structures": ["matterConverter"], "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0 },
+        "builderDrill": { "structures": [], "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0,
+                          "startResources": { "ore": 1850, "energy": 400 } },
+        "withHq": { "structures": ["matterConverter"], "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0,
+                    "startResources": { "ore": 1250, "energy": 300 } },
         "withRobotProduction": {
           "structures": ["matterConverter", "robotPartFactory", "robotAssemblyBay"],
-          "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0
+          "vehicles": ["hoverTruck", "drillTruck"], "mech": null, "crew": 0,
+          "startResources": { "ore": 900, "energy": 180 }
         },
         "withVehicleFactory": {
           "structures": ["matterConverter", "robotPartFactory", "robotAssemblyBay", "vehicleFactory"],
           "vehicles": ["hoverTruck", "drillTruck"],
           "mech": { "legs": "Basic", "torso": "Basic", "leftArm": "Basic", "rightArm": "$startArm" },
-          "crew": 1
+          "crew": 1,
+          "startResources": { "ore": 530, "energy": 110 }
         }
       },
       "populationMax": 100
@@ -160,7 +164,7 @@
         "partSets": ["DrunkMissile", "PowerGun", "Sonar", "PowerShield", "ForceField", "SelfRepair",
                      "KatanaSword", "BladeArm", "PowerFist", "HomingMissile", "LongMissile", "EnergyBlaster"],
         "research": ["guidanceChips", "shieldCapacitors", "missileArtillery"],
-        "vehicles": ["missileCar", "nemesis"],
+        "vehicles": ["missileCar", "nemesis", "gunTank", "advancedFighterJet"],
         "structures": ["cryoFarm"]
       },
       "construction": { "continuesWithoutBuilder": false },
@@ -177,7 +181,7 @@
         "partSets": ["Armor", "HighStrength", "HTHupgrade", "Steady", "Howitzer", "Tracer",
                      "Axe", "HammerHand", "MultiClaw", "RotaryBlade", "CarpetBomb"],
         "research": ["hardenedSteel", "heavyShells", "siegeArtillery"],
-        "vehicles": ["gunTank", "mobileArtillery", "nemesis"],
+        "vehicles": ["gunTank", "mobileArtillery", "nemesis", "rocketHeavyTank", "heavyMissileVehicle", "heavyFighterJet", "heavyBomber"],
         "structures": ["cryoFarm"]
       },
       "construction": { "continuesWithoutBuilder": true },
@@ -191,10 +195,10 @@
       "uiColor": { "primary": "#8a4fd0", "accent": "#5fd39a", "neon": "#b84dff", "frameFilter": "hue-rotate(65deg) saturate(1.5)", "panelTop": "rgba(38, 84, 56, 0.93)", "panelBottom": "rgba(20, 52, 34, 0.93)" },
       "modifiers": { "hp": 0.92, "moveSpeed": 1.1, "acceleration": 1.1 },
       "exclusive": {
-        "partSets": ["HighSpeed", "JumpJet", "Laser", "PowerPulse", "BlastPulse", "Camo", "EMP", "JetPack",
-                     "LaserSword", "ElectroGrip", "PlasmaCannon", "ProtoBlast", "SniperLaser", "EnergyShield"],
+        "partSets": ["HighSpeed", "JumpJet", "PowerPulse", "BlastPulse", "Camo", "EMP", "JetPack",
+                     "ElectroGrip", "PlasmaCannon", "ProtoBlast", "EnergyShield"],
         "research": ["phaseFocusing", "tacticalSystems", "plasmaWeapons", "pulseTechnology"],
-        "vehicles": ["hoverBomber", "missileCar", "alienTank"],
+        "vehicles": ["hoverBomber", "missileCar", "alienTank", "lightPlasmaTank", "electricTank", "stealthTank", "stealthJet"],
         "structures": ["crewTrainingFacility"]
       },
       "construction": { "continuesWithoutBuilder": false },
@@ -208,7 +212,12 @@
       "uiColor": { "primary": "#e8a21a", "accent": "#ffd75e", "neon": "#ffb62e", "frameFilter": "hue-rotate(185deg) saturate(1.5)", "panelTop": "rgba(92, 62, 14, 0.93)", "panelBottom": "rgba(58, 38, 8, 0.93)" },
       "modifiers": { "hp": 1.01, "armor": 1.025, "moveSpeed": 1.025, "acceleration": 1.05 },
       "modelRace": "X",
-      "exclusive": { "structures": ["cryoFarm"] },
+      "exclusive": {
+        "partSets": ["Laser", "SniperLaser", "LaserSword", "PlasmaCannon", "ProtoBlast"],
+        "research": ["plasmaWeapons"],
+        "vehicles": ["lightLaserHover", "mediumLaserHover", "heavyLaserHover", "targetingVehicle", "lightLaserJet", "laserHeavyFighterJet"],
+        "structures": ["crewQuarters"]
+      },
       "construction": { "continuesWithoutBuilder": false },
       "startArm": "GattlingGun",
       "population": { "fullFromStart": false }
@@ -324,7 +333,7 @@
     "Laser": {
       "legs": { "cost": { "ore": 110, "energy": 60 }, "buildTime": 10, "hp": 150, "armor": { "physical": 15, "energy": 20 }, "mass": 55, "loadCapacity": 90,
                 "mobility": { "speedModifier": 0.94, "turnSpeed": 230, "acceleration": 28, "deceleration": 42 },
-                "weapons": [{ "id": "legLaser", "stopsToFire": true, "damage": { "physical": 0, "energy": 18 }, "range": 55, "attackTime": 1.0, "cooldown": 1.5, "accuracy": 0.95,
+                "weapons": [{ "id": "legLaser", "stopsToFire": true, "damage": { "physical": 0, "energy": 18 }, "range": 55, "attackTime": 1.0, "cooldown": 1.5, "accuracy": 0.95, "projectileColor": "#ffb62e",
                               "pierce": { "count": 2, "damageFactor": 0.6, "length": 50 } }] }
     },
     "PowerGun": {
@@ -492,7 +501,7 @@
     "SniperLaser": {
       "arm": { "cost": { "ore": 120, "energy": 80 }, "buildTime": 12, "hp": 65, "armor": { "physical": 5, "energy": 20 }, "mass": 18,
                "requires": ["researchFacility"], "requiresResearch": ["plasmaWeapons"],
-               "weapons": [{ "id": "sniperLaser", "stopsToFire": true, "damage": { "physical": 0, "energy": 55 }, "range": 160, "attackTime": 2.0, "hitAt": 0.7, "cooldown": 4, "accuracy": 0.95, "accuracyLongFactor": 0.95 }] }
+               "weapons": [{ "id": "sniperLaser", "stopsToFire": true, "damage": { "physical": 0, "energy": 55 }, "range": 160, "attackTime": 2.0, "hitAt": 0.7, "cooldown": 4, "accuracy": 0.95, "accuracyLongFactor": 0.95, "projectileColor": "#ffb62e" }] }
     }
   },
 
@@ -502,7 +511,7 @@
     "model": "vehicles/RobotCrew{race}_Anim.glb", "races": ["X", "Y"],
     "animationSource": "vehicles/RobotCrewX_Anim.glb",
     "clips": { "idle": "RobotCrewX_Anim_anim01", "run": "RobotCrewRun_Anim" },
-    "producedAt": ["cryoFarm", "crewTrainingFacility"],
+    "producedAt": ["cryoFarm", "crewTrainingFacility", "crewQuarters"],
     "squadSize": 5,
     "modelScale": 0.5,
     "formationSpacing": 2.5,
@@ -517,7 +526,7 @@
 
   "vehicles": {
     "gunTank": {
-      "model": "3DVehicles/GunTank{race}_Anim.glb", "modelScale": 0.8,
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "modelScale": 0.8, "procModel": "mediumTank",
       "producedAt": "vehicleFactory", "supply": 3,
       "cost": { "ore": 150, "energy": 20 }, "buildTime": 15,
       "hp": 320, "mass": 250, "armor": { "physical": 40, "energy": 15 }, "sightRange": 90,
@@ -528,18 +537,18 @@
                     "projectileSpeed": 90, "splashRadius": 3, "accuracy": 0.9 }]
     },
     "missileCar": {
-      "model": "3DVehicles/MissileCar{race}_Anim.glb", "modelScale": 0.75,
+      "model": "3DVehicles/MissileCar{race}_Anim.glb", "modelScale": 0.75, "procModel": "lightMissileHover",
       "producedAt": "vehicleFactory", "supply": 2,
       "cost": { "ore": 160, "energy": 40 }, "buildTime": 16,
       "hp": 220, "mass": 180, "armor": { "physical": 15, "energy": 10 }, "sightRange": 100,
-      "mobility": { "movementType": "ground", "moveSpeed": 22, "turnSpeed": 150, "acceleration": 26, "deceleration": 36 },
+      "mobility": { "movementType": "hover", "moveSpeed": 22, "turnSpeed": 150, "acceleration": 26, "deceleration": 36 },
       "turret": { "socket": "socket_c6e5475c", "launchSocket": "socket_Launch_1", "turnSpeed": 120,
                   "models": { "X": "3DVehicles/07ffdb79.glb", "Y": "3DVehicles/cca308dc.glb", "Z": "3DVehicles/4a377a72.glb" } },
-      "weapons": [{ "id": "carMissiles", "mount": "turret", "fireArc": 30, "damage": { "physical": 25, "energy": 0 }, "burst": 2, "range": 110, "minRange": 20, "attackTime": 1.5, "cooldown": 4,
+      "weapons": [{ "id": "carMissiles", "mount": "turret", "launchSockets": ["launch_1", "launch_2", "launch_3", "launch_4", "launch_5", "launch_6", "launch_7", "launch_8"], "fireArc": 30, "damage": { "physical": 25, "energy": 0 }, "burst": 2, "range": 110, "minRange": 20, "attackTime": 1.5, "cooldown": 4,
                     "projectileSpeed": 99, "projectileShape": "missile", "splashRadius": 4, "homing": true, "targets": ["ground", "air"] }]
     },
     "mobileArtillery": {
-      "model": "3DVehicles/MobileArtillery{race}_Anim.glb", "modelScale": 0.85,
+      "model": "3DVehicles/MobileArtillery{race}_Anim.glb", "modelScale": 0.85, "procModel": "mobileArtillery", "deploys": true,
       "producedAt": "vehicleFactory", "supply": 3, "requires": ["researchFacility"],
       "cost": { "ore": 220, "energy": 50 }, "buildTime": 22,
       "hp": 240, "mass": 220, "armor": { "physical": 20, "energy": 10 }, "sightRange": 80,
@@ -550,7 +559,7 @@
                     "attackTime": 2.5, "hitAt": 0.3, "cooldown": 9, "projectileSpeed": 40, "splashRadius": 20, "accuracy": 0.75 }]
     },
     "hoverJet": {
-      "model": "3DVehicles/HoverJet{race}_Anim.glb", "modelScale": 0.75,
+      "model": "3DVehicles/HoverJet{race}_Anim.glb", "modelScale": 0.75, "procModel": "fighterJet",
       "producedAt": "aircraftHangar", "supply": 2,
       "cost": { "ore": 180, "energy": 80 }, "buildTime": 18,
       "hp": 220, "armor": { "physical": 15, "energy": 20 }, "sightRange": 120,
@@ -559,12 +568,13 @@
                     "accuracy": 0.85, "targets": ["ground", "air"] }]
     },
     "hoverBomber": {
-      "model": "3DVehicles/HoverBomber{race}_Anim.glb", "modelScale": 0.85,
+      "model": "3DVehicles/HoverBomber{race}_Anim.glb", "modelScale": 0.85, "procModel": "stealthBomber",
       "producedAt": "aircraftHangar", "supply": 3, "requires": ["researchFacility"],
       "cost": { "ore": 260, "energy": 100 }, "buildTime": 25,
       "hp": 320, "mass": 160, "armor": { "physical": 20, "energy": 20 }, "sightRange": 100,
       "mobility": { "movementType": "air", "moveSpeed": 30, "turnSpeed": 100, "acceleration": 20, "deceleration": 20 },
-      "weapons": [{ "id": "bombs", "class": "artillery", "damage": { "physical": 70, "energy": 0 }, "range": 10, "attackTime": 2.0, "cooldown": 10, "projectileSpeed": 30,
+      "abilities": [{ "type": "cloak", "whileMoving": true }],
+      "weapons": [{ "id": "bombs", "launchSockets": ["bomb_1", "bomb_2", "bomb_3", "bomb_4"], "class": "artillery", "damage": { "physical": 70, "energy": 0 }, "range": 10, "attackTime": 2.0, "cooldown": 10, "projectileSpeed": 30,
                     "splashRadius": 15, "accuracy": 0.8 }]
     },
     "hoverTruck": {
@@ -586,14 +596,194 @@
       "abilities": [{ "type": "harvest", "resource": "ore", "ratePerSecond": 3, "range": 8 }]
     },
     "nemesis": {
-      "model": "3DVehicles/Nemesis{race}_Anim.glb", "races": ["X", "Y"], "modelScale": 1.1,
+      "model": "3DVehicles/Nemesis{race}_Anim.glb", "races": ["X", "Y"], "modelScale": 1.1, "procModel": "heavyTank", "procScale": 0.9,
       "producedAt": "vehicleFactory", "supply": 6, "requires": ["researchFacility"],
       "cost": { "ore": 450, "energy": 200 }, "buildTime": 45,
       "hp": 800, "mass": 600, "armor": { "physical": 60, "energy": 45 }, "sightRange": 110,
       "mobility": { "movementType": "ground", "moveSpeed": 10, "turnSpeed": 60, "acceleration": 8, "deceleration": 16 },
       "weapons": [
-        { "id": "nemesisCannon", "fireArc": 30, "damage": { "physical": 60, "energy": 20 }, "range": 120, "attackTime": 2.0, "cooldown": 4, "projectileSpeed": 80, "splashRadius": 8, "accuracy": 0.9 },
-        { "id": "nemesisLaser", "fireArc": 90, "damage": { "physical": 0, "energy": 6 }, "burst": 3, "range": 70, "attackTime": 1.0, "cooldown": 1, "accuracy": 0.9, "targets": ["ground", "air"] }
+        { "id": "nemesisCannon", "mount": "turret", "fireArc": 30, "damage": { "physical": 60, "energy": 20 }, "range": 120, "attackTime": 2.0, "cooldown": 4, "projectileSpeed": 80, "splashRadius": 8, "accuracy": 0.9 },
+        { "id": "nemesisLaser", "mount": "turret", "launchSocket": "muzzle_2", "fireArc": 90, "damage": { "physical": 0, "energy": 6 }, "burst": 3, "range": 70, "attackTime": 1.0, "cooldown": 1, "accuracy": 0.9, "targets": ["ground", "air"] }
+      ]
+    },
+    "lightTank": {
+      "note": "Procedural unit (docs/notes/proc-units-wire.md). `model` is only the fallback while procedural models are off. Balance is a first estimate.",
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "procModel": "lightTank", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 2,
+      "cost": { "ore": 110, "energy": 10 }, "buildTime": 11,
+      "hp": 240, "mass": 160, "armor": { "physical": 25, "energy": 10 }, "sightRange": 90,
+      "mobility": { "movementType": "ground", "moveSpeed": 20, "turnSpeed": 140, "acceleration": 24, "deceleration": 34 },
+      "weapons": [{ "id": "lightCannon", "mount": "turret", "fireArc": 20, "damage": { "physical": 22, "energy": 0 }, "range": 65, "attackTime": 1.0, "cooldown": 1.4,
+                    "projectileSpeed": 95, "splashRadius": 2, "accuracy": 0.9 }]
+    },
+    "rocketHeavyTank": {
+      "note": "Procedural unit (proc-units-wire.md): cannon (muzzle) + roof AA gun (muzzle_2). Balance is a first estimate.",
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "procModel": "rocketHeavyTank", "modelScale": 0.85,
+      "producedAt": "vehicleFactory", "supply": 5, "requires": ["researchFacility"],
+      "cost": { "ore": 380, "energy": 140 }, "buildTime": 38,
+      "hp": 640, "mass": 520, "armor": { "physical": 55, "energy": 20 }, "sightRange": 100,
+      "mobility": { "movementType": "ground", "moveSpeed": 11, "turnSpeed": 70, "acceleration": 10, "deceleration": 20 },
+      "weapons": [
+        { "id": "heavyCannon", "mount": "turret", "fireArc": 20, "damage": { "physical": 70, "energy": 0 }, "range": 95, "attackTime": 1.8, "cooldown": 3,
+          "projectileSpeed": 85, "splashRadius": 6, "accuracy": 0.9 },
+        { "id": "roofGun", "mount": "turret", "launchSocket": "muzzle_2", "fireArc": 120, "damage": { "physical": 8, "energy": 0 }, "burst": 3, "range": 70, "attackTime": 0.8, "cooldown": 0.8,
+          "projectileSpeed": 150, "projectileShape": "shell", "accuracy": 0.8, "targets": ["ground", "air"] }
+      ]
+    },
+    "heavyMissileVehicle": {
+      "note": "Procedural unit (proc-units-wire.md): one big rocket on a raised cradle. Balance is a first estimate.",
+      "model": "3DVehicles/MissileCar{race}_Anim.glb", "procModel": "heavyMissileVehicle", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 5, "requires": ["researchFacility"],
+      "cost": { "ore": 340, "energy": 120 }, "buildTime": 34,
+      "hp": 380, "mass": 400, "armor": { "physical": 30, "energy": 15 }, "sightRange": 110,
+      "mobility": { "movementType": "ground", "moveSpeed": 14, "turnSpeed": 80, "acceleration": 12, "deceleration": 24 },
+      "weapons": [{ "id": "heavyRocket", "mount": "turret", "launchSocket": "launch_1", "fireArc": 20, "damage": { "physical": 120, "energy": 0 }, "range": 190, "minRange": 40,
+                    "attackTime": 2.0, "hitAt": 0.4, "cooldown": 8, "projectileSpeed": 70, "projectileShape": "missile", "splashRadius": 12, "accuracy": 0.85 }]
+    },
+    "advancedFighterJet": {
+      "note": "Procedural unit (proc-units-wire.md): nose gun (muzzle) + wing missiles. Balance is a first estimate.",
+      "model": "3DVehicles/HoverJet{race}_Anim.glb", "procModel": "advancedFighterJet", "modelScale": 0.85,
+      "producedAt": "aircraftHangar", "supply": 3, "requires": ["researchFacility"],
+      "cost": { "ore": 280, "energy": 120 }, "buildTime": 26,
+      "hp": 300, "armor": { "physical": 20, "energy": 25 }, "sightRange": 130,
+      "mobility": { "movementType": "air", "moveSpeed": 44, "turnSpeed": 150, "acceleration": 32, "deceleration": 32 },
+      "weapons": [
+        { "id": "jetBlaster", "damage": { "physical": 0, "energy": 20 }, "burst": 2, "range": 65, "attackTime": 1.0, "cooldown": 1.4, "projectileSpeed": 150,
+          "accuracy": 0.85, "targets": ["ground", "air"] },
+        { "id": "jetMissiles", "launchSockets": ["launch_2_1", "launch_2_2", "launch_2_3", "launch_2_4"], "damage": { "physical": 30, "energy": 0 }, "burst": 4, "range": 95, "minRange": 15,
+          "attackTime": 1.2, "cooldown": 6, "projectileSpeed": 110, "projectileShape": "missile", "splashRadius": 4, "accuracy": 0.85, "homing": true, "targets": ["ground", "air"] }
+      ]
+    },
+    "heavyFighterJet": {
+      "note": "Procedural unit (proc-units-wire.md): rotary cannon (muzzle_2) + missile block. Balance is a first estimate.",
+      "model": "3DVehicles/HoverJet{race}_Anim.glb", "procModel": "heavyFighterJet", "modelScale": 0.85,
+      "producedAt": "aircraftHangar", "supply": 4, "requires": ["researchFacility"],
+      "cost": { "ore": 340, "energy": 160 }, "buildTime": 30,
+      "hp": 420, "armor": { "physical": 30, "energy": 20 }, "sightRange": 120,
+      "mobility": { "movementType": "air", "moveSpeed": 36, "turnSpeed": 120, "acceleration": 26, "deceleration": 26 },
+      "weapons": [
+        { "id": "jetCannon", "launchSocket": "muzzle_2", "damage": { "physical": 9, "energy": 0 }, "burst": 4, "range": 60, "attackTime": 1.0, "cooldown": 1.2, "projectileSpeed": 160,
+          "projectileShape": "shell", "accuracy": 0.8, "targets": ["ground", "air"] },
+        { "id": "jetMissiles", "launchSockets": ["launch_1", "launch_2", "launch_3", "launch_4"], "damage": { "physical": 35, "energy": 0 }, "burst": 4, "range": 100, "minRange": 15,
+          "attackTime": 1.2, "cooldown": 6, "projectileSpeed": 110, "projectileShape": "missile", "splashRadius": 5, "accuracy": 0.85, "homing": true, "targets": ["ground", "air"] }
+      ]
+    },
+    "heavyBomber": {
+      "note": "Procedural unit (proc-units-wire.md): six bomb sockets, tail / dorsal guns are visual only for now. Balance is a first estimate.",
+      "model": "3DVehicles/HoverBomber{race}_Anim.glb", "procModel": "heavyBomber", "modelScale": 0.6,
+      "producedAt": "aircraftHangar", "supply": 4, "requires": ["researchFacility"],
+      "cost": { "ore": 380, "energy": 150 }, "buildTime": 32,
+      "hp": 520, "mass": 220, "armor": { "physical": 30, "energy": 20 }, "sightRange": 100,
+      "mobility": { "movementType": "air", "moveSpeed": 26, "turnSpeed": 80, "acceleration": 16, "deceleration": 16 },
+      "weapons": [{ "id": "bombs", "launchSockets": ["bomb_1", "bomb_2", "bomb_3", "bomb_4", "bomb_5", "bomb_6"], "class": "artillery", "damage": { "physical": 85, "energy": 0 }, "range": 10,
+                    "attackTime": 2.0, "cooldown": 10, "projectileSpeed": 30, "splashRadius": 18, "accuracy": 0.8 }]
+    },
+    "lightPlasmaTank": {
+      "note": "Procedural unit (proc-units-wire.md): plasma gun, can elevate against air. Balance is a first estimate.",
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "procModel": "lightPlasmaTank", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 2,
+      "cost": { "ore": 130, "energy": 50 }, "buildTime": 13,
+      "hp": 200, "mass": 150, "armor": { "physical": 10, "energy": 25 }, "sightRange": 95,
+      "mobility": { "movementType": "hover", "moveSpeed": 24, "turnSpeed": 160, "acceleration": 28, "deceleration": 36 },
+      "weapons": [{ "id": "plasmaGun", "mount": "turret", "fireArc": 25, "damage": { "physical": 0, "energy": 26 }, "range": 70, "attackTime": 1.0, "cooldown": 1.6,
+                    "projectileSpeed": 80, "splashRadius": 2, "accuracy": 0.9, "targets": ["ground", "air"] }]
+    },
+    "electricTank": {
+      "note": "Procedural unit (proc-units-wire.md): lightning gun between two tesla pylons. Balance is a first estimate.",
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "procModel": "electricTank", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 3, "requires": ["researchFacility"],
+      "cost": { "ore": 200, "energy": 100 }, "buildTime": 20,
+      "hp": 260, "mass": 190, "armor": { "physical": 15, "energy": 35 }, "sightRange": 90,
+      "mobility": { "movementType": "hover", "moveSpeed": 21, "turnSpeed": 140, "acceleration": 24, "deceleration": 32 },
+      "weapons": [{ "id": "lightningGun", "mount": "turret", "fireArc": 25, "damage": { "physical": 0, "energy": 16 }, "burst": 2, "range": 55, "attackTime": 1.0, "cooldown": 1.5,
+                    "projectileSpeed": 0, "projectileColor": "#9fd0ff", "accuracy": 0.95 }]
+    },
+    "stealthTank": {
+      "note": "Procedural unit (proc-units-wire.md): cloaks while standing still and not firing (visual shimmer only, no detection logic yet). Balance is a first estimate.",
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "procModel": "stealthTank", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 3, "requires": ["researchFacility"],
+      "cost": { "ore": 210, "energy": 110 }, "buildTime": 22,
+      "hp": 220, "mass": 170, "armor": { "physical": 10, "energy": 30 }, "sightRange": 100,
+      "mobility": { "movementType": "hover", "moveSpeed": 22, "turnSpeed": 150, "acceleration": 26, "deceleration": 34 },
+      "abilities": [{ "type": "cloak", "whileMoving": false }],
+      "weapons": [{ "id": "plasmaGun", "mount": "turret", "fireArc": 25, "damage": { "physical": 0, "energy": 32 }, "range": 75, "attackTime": 1.0, "cooldown": 2.0,
+                    "projectileSpeed": 80, "splashRadius": 2, "accuracy": 0.92 }]
+    },
+    "stealthJet": {
+      "note": "Procedural unit (proc-units-wire.md): cloaked also while flying (visual shimmer only). Balance is a first estimate.",
+      "model": "3DVehicles/HoverJet{race}_Anim.glb", "procModel": "stealthJet", "modelScale": 0.8,
+      "producedAt": "aircraftHangar", "supply": 3, "requires": ["researchFacility"],
+      "cost": { "ore": 240, "energy": 130 }, "buildTime": 24,
+      "hp": 200, "armor": { "physical": 10, "energy": 25 }, "sightRange": 130,
+      "mobility": { "movementType": "air", "moveSpeed": 46, "turnSpeed": 160, "acceleration": 34, "deceleration": 34 },
+      "abilities": [{ "type": "cloak", "whileMoving": true }],
+      "weapons": [{ "id": "jetPlasma", "damage": { "physical": 0, "energy": 22 }, "burst": 2, "range": 65, "attackTime": 1.0, "cooldown": 1.5, "projectileSpeed": 140,
+                    "accuracy": 0.85, "targets": ["ground", "air"] }]
+    },
+    "lightLaserHover": {
+      "note": "Procedural unit (proc-units-wire.md): one laser. Balance is a first estimate.",
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "procModel": "lightLaserHover", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 2,
+      "cost": { "ore": 130, "energy": 50 }, "buildTime": 13,
+      "hp": 210, "mass": 150, "armor": { "physical": 12, "energy": 25 }, "sightRange": 95,
+      "mobility": { "movementType": "hover", "moveSpeed": 23, "turnSpeed": 150, "acceleration": 27, "deceleration": 35 },
+      "weapons": [{ "id": "lightLaser", "mount": "turret", "fireArc": 25, "damage": { "physical": 0, "energy": 18 }, "range": 70, "attackTime": 0.8, "cooldown": 1.4,
+                    "projectileSpeed": 0, "projectileColor": "#ffd040", "accuracy": 0.95 }]
+    },
+    "mediumLaserHover": {
+      "note": "Procedural unit (proc-units-wire.md): main laser (muzzle) + roof AA laser (muzzle_2). Balance is a first estimate.",
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "procModel": "mediumLaserHover", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 3,
+      "cost": { "ore": 200, "energy": 80 }, "buildTime": 20,
+      "hp": 340, "mass": 230, "armor": { "physical": 22, "energy": 32 }, "sightRange": 100,
+      "mobility": { "movementType": "hover", "moveSpeed": 19, "turnSpeed": 120, "acceleration": 22, "deceleration": 30 },
+      "weapons": [
+        { "id": "mediumLaser", "mount": "turret", "fireArc": 25, "damage": { "physical": 0, "energy": 30 }, "range": 85, "attackTime": 1.0, "cooldown": 1.8,
+          "projectileSpeed": 0, "projectileColor": "#ffd040", "accuracy": 0.95 },
+        { "id": "roofLaser", "mount": "turret", "launchSocket": "muzzle_2", "fireArc": 120, "damage": { "physical": 0, "energy": 7 }, "burst": 3, "range": 65, "attackTime": 0.8, "cooldown": 0.9,
+          "projectileSpeed": 0, "projectileColor": "#ffd040", "accuracy": 0.9, "targets": ["ground", "air"] }
+      ]
+    },
+    "heavyLaserHover": {
+      "note": "Procedural unit (proc-units-wire.md): very long laser, long range, no anchoring. Balance is a first estimate.",
+      "model": "3DVehicles/GunTank{race}_Anim.glb", "procModel": "heavyLaserHover", "modelScale": 0.8,
+      "producedAt": "vehicleFactory", "supply": 5, "requires": ["researchFacility"],
+      "cost": { "ore": 360, "energy": 160 }, "buildTime": 34,
+      "hp": 520, "mass": 360, "armor": { "physical": 35, "energy": 40 }, "sightRange": 110,
+      "mobility": { "movementType": "hover", "moveSpeed": 14, "turnSpeed": 90, "acceleration": 14, "deceleration": 26 },
+      "weapons": [{ "id": "heavyLaser", "mount": "turret", "fireArc": 20, "damage": { "physical": 0, "energy": 75 }, "range": 160, "minRange": 25, "attackTime": 1.6, "cooldown": 4,
+                    "projectileSpeed": 0, "projectileColor": "#ffd040", "accuracy": 0.95 }]
+    },
+    "targetingVehicle": {
+      "note": "Procedural unit (proc-units-wire.md): support vehicle with a tall dish, no weapons; sight / target designation is data only for now. Balance is a first estimate.",
+      "model": "3DVehicles/HoverTruck{race}_Anim.glb", "procModel": "targetingVehicle", "modelScale": 0.7,
+      "producedAt": "vehicleFactory", "supply": 2, "requires": ["researchFacility"],
+      "cost": { "ore": 180, "energy": 90 }, "buildTime": 18,
+      "hp": 220, "mass": 150, "armor": { "physical": 12, "energy": 20 }, "sightRange": 200,
+      "mobility": { "movementType": "hover", "moveSpeed": 22, "turnSpeed": 140, "acceleration": 24, "deceleration": 32 }
+    },
+    "lightLaserJet": {
+      "note": "Procedural unit (proc-units-wire.md): nose laser, two beam exhausts. Balance is a first estimate.",
+      "model": "3DVehicles/HoverJet{race}_Anim.glb", "procModel": "lightLaserJet", "modelScale": 0.8,
+      "producedAt": "aircraftHangar", "supply": 2,
+      "cost": { "ore": 190, "energy": 90 }, "buildTime": 19,
+      "hp": 220, "armor": { "physical": 15, "energy": 25 }, "sightRange": 120,
+      "mobility": { "movementType": "air", "moveSpeed": 42, "turnSpeed": 150, "acceleration": 30, "deceleration": 30 },
+      "weapons": [{ "id": "jetLaser", "damage": { "physical": 0, "energy": 14 }, "burst": 2, "range": 65, "attackTime": 1.0, "cooldown": 1.4, "projectileSpeed": 0,
+                    "projectileColor": "#ffd040", "accuracy": 0.9, "targets": ["ground", "air"] }]
+    },
+    "laserHeavyFighterJet": {
+      "note": "Procedural unit (proc-units-wire.md): two nose lasers (muzzle, muzzle_2). Balance is a first estimate.",
+      "model": "3DVehicles/HoverJet{race}_Anim.glb", "procModel": "laserHeavyFighterJet", "modelScale": 0.85,
+      "producedAt": "aircraftHangar", "supply": 4, "requires": ["researchFacility"],
+      "cost": { "ore": 330, "energy": 170 }, "buildTime": 30,
+      "hp": 400, "armor": { "physical": 25, "energy": 35 }, "sightRange": 125,
+      "mobility": { "movementType": "air", "moveSpeed": 38, "turnSpeed": 130, "acceleration": 28, "deceleration": 28 },
+      "weapons": [
+        { "id": "jetLaser", "damage": { "physical": 0, "energy": 20 }, "burst": 2, "range": 75, "attackTime": 1.0, "cooldown": 1.6, "projectileSpeed": 0,
+          "projectileColor": "#ffd040", "accuracy": 0.9, "targets": ["ground", "air"] },
+        { "id": "jetLaserTwin", "launchSocket": "muzzle_2", "damage": { "physical": 0, "energy": 20 }, "burst": 2, "range": 75, "attackTime": 1.0, "cooldown": 1.6, "projectileSpeed": 0,
+          "projectileColor": "#ffd040", "accuracy": 0.9, "targets": ["ground", "air"] }
       ]
     },
     "alienTank": {
@@ -640,6 +830,14 @@
       "conversion": { "input": { "energy": 4 }, "output": { "ore": 2 }, "interval": 1 }
     },
     "cryoFarm": {
+      "model": "3DStructures{race}/CryoFarm{race}_Anim.glb",
+      "cost": { "ore": 150, "energy": 30 }, "buildTime": 25,
+      "hp": 700, "armor": { "physical": 25, "energy": 25 }, "sightRange": 50,
+      "supplyProvided": 10,
+      "produces": ["crew"], "energyUse": 4.5
+    },
+    "crewQuarters": {
+      "note": "Crew building of the race with stand-in models (exclusive via races[*].exclusive.structures). Same numbers as cryoFarm; model = placeholder (cryoFarm GLB of its modelRace) until a procedural one is registered under this id.",
       "model": "3DStructures{race}/CryoFarm{race}_Anim.glb",
       "cost": { "ore": 150, "energy": 30 }, "buildTime": 25,
       "hp": 700, "armor": { "physical": 25, "energy": 25 }, "sightRange": 50,
@@ -700,12 +898,49 @@
       "weapons": [{ "id": "pdsFlak", "damage": { "physical": 10, "energy": 0 }, "burst": 3, "range": 85, "attackTime": 1.0, "cooldown": 1, "projectileSpeed": 150,
                     "projectileShape": "shell", "accuracy": 0.85, "fireArc": 360, "targets": ["ground", "air", "projectile"] }]
     },
+    "aaTurret": {
+      "note": "Anti-air only, strong. Model is a procedural one (registry); the PDS GLB is only the footprint / fallback.",
+      "model": "3DStructures{race}/PointDefenseSystem{race}_Anim.glb",
+      "cost": { "ore": 260, "energy": 160 }, "buildTime": 35,
+      "hp": 1000, "armor": { "physical": 40, "energy": 35 }, "sightRange": 130,
+      "requiresTier": 2,
+      "launchSockets": ["socket_launch_1", "socket_launch_2", "socket_launch_3", "socket_launch_4"], "energyUse": 3,
+      "weapons": [{ "id": "aaFlak", "damage": { "physical": 22, "energy": 0 }, "burst": 4, "range": 130, "attackTime": 1.0, "cooldown": 1, "projectileSpeed": 190,
+                    "projectileShape": "shell", "accuracy": 0.9, "fireArc": 360, "targets": ["air"] }]
+    },
+    "reconTower": {
+      "note": "Common building. Detection reveals cloaked enemies within radius (data only for now, see docs/notes/new-buildings-data.md).",
+      "model": "3DStructures{race}/SolarPanel{race}_Anim.glb",
+      "cost": { "ore": 120, "energy": 60 }, "buildTime": 20,
+      "hp": 500, "armor": { "physical": 20, "energy": 20 }, "sightRange": 170,
+      "abilities": [{ "type": "detection", "radius": 150 }], "energyUse": 1.5
+    },
+    "powerGenerator": {
+      "note": "Strong energy source. Destroyed (when finished) = huge explosion hurting nearby buildings and units, see `explosion` (Combat.structureBlast). Model is procedural; the Outpost GLB is only the footprint / fallback.",
+      "model": "3DStructures{race}/Outpost{race}_Anim.glb",
+      "cost": { "ore": 700, "energy": 400 }, "buildTime": 80,
+      "hp": 4500, "armor": { "physical": 80, "energy": 70 }, "sightRange": 90,
+      "requires": ["researchFacility"], "requiresTier": 3, "maxPerTeam": 3,
+      "income": { "energy": 12 }, "storage": { "energy": 400 },
+      "explosion": { "radius": 60, "damageOwnBuildings": 1800, "damageOtherBuildings": 1200, "damageUnits": 600,
+                     "damageType": "energy", "falloff": 0.5, "chainsToGenerators": true }
+    },
+    "oreDeepExtractor": {
+      "note": "Built on an ore deposit; mines it endlessly but slower than a drill truck (needs game code, see docs/notes/new-buildings-data.md). Model is procedural; the PDS GLB is only the footprint / fallback.",
+      "model": "3DStructures{race}/PointDefenseSystem{race}_Anim.glb",
+      "cost": { "ore": 450, "energy": 250 }, "buildTime": 60,
+      "hp": 1500, "armor": { "physical": 50, "energy": 40 }, "sightRange": 70,
+      "requires": ["researchFacility"], "requiresTier": 3, "energyUse": 4,
+      "mountOnDeposit": true,
+      "deepExtraction": { "ratePerSecond": 1.5, "infinite": true, "maxPerDeposit": 1 }
+    },
     "railGun": {
       "model": "3DStructures{race}/RailGun{race}_Anim.glb", "buildable": false,
       "cost": { "ore": 350, "energy": 250 }, "buildTime": 50,
       "hp": 1100, "armor": { "physical": 50, "energy": 40 }, "sightRange": 120,
+      "launchSockets": ["socket_launch_1"],
       "requires": ["researchFacility"], "energyUse": 3,
-      "weapons": [{ "id": "railGun", "damage": { "physical": 120, "energy": 0 }, "range": 180, "attackTime": 1.0, "hitAt": 0.2, "cooldown": 6, "accuracy": 0.95, "accuracyLongFactor": 0.95 }]
+      "weapons": [{ "id": "railGun","damage": { "physical": 120, "energy": 0 }, "range": 180, "attackTime": 1.0, "hitAt": 0.2, "cooldown": 6, "accuracy": 0.95, "accuracyLongFactor": 0.95 }]
     },
     "mobileWall": {
       "model": "3DStructures{race}/MobileWall{race}_Anim.glb", "modelScale": 1.5,

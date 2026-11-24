@@ -1,4 +1,4 @@
-// Steel Mans – economy: resource accounts per team (stats.json → resources, e.g. ore / energy), the energy
+// Steel Men – economy: resource accounts per team (stats.json → resources, e.g. ore / energy), the energy
 // storage cap chosen in the new-game menu, income of finished buildings, population (cap and use) and the
 // ore deposits of the map. One instance lives in world.economy (created by main.js when a game starts).
 //
@@ -31,6 +31,7 @@ import { PartStock } from './PartStock.js';
 import { ECONOMY, ECONOMY_POWER } from '../config.js';
 import { ORE_MULTIPLIER, isInfiniteOre, validOreMultiplier } from './OreMultiplier.js';
 import { validStartMultiplier, isInfiniteStart } from './StartMultiplier.js';
+import { startSetData } from './StartSets.js';
 
 const NO_FLOW = Object.freeze({ income: 0, drain: 0 }); // energyFlow of an unknown team
 const DEFERRED = new Set(ECONOMY.deferredResources ?? []);
@@ -65,7 +66,7 @@ export class Economy {
    */
   constructor(world, {
     races, energyCap = ECONOMY.defaultEnergyCap, populationCap = ECONOMY.defaultPopulationCap,
-    oreMultiplier, infiniteDeposits = false, startMultiplier = 1,
+    oreMultiplier, infiniteDeposits = false, startMultiplier = 1, startSet = null,
   }) {
     this.world = world;
     this.races = [...races];
@@ -81,10 +82,14 @@ export class Economy {
     this.infiniteResources = isInfiniteStart(this.startMultiplier);
     this.resources = getStats().resources ?? ['ore', 'energy'];
     const rules = getStats().rules.economy ?? {};
-    const start = rules.startResources ?? {};
+    // [start sets] a set may carry its own starting resources ({ ore, energy }); otherwise the global rules apply
+    const setStart = startSet ? startSetData(startSet, getStats())?.startResources : null;
+    const start = setStart ? { ...(rules.startResources ?? {}), ore: setStart.ore ?? rules.startResources?.ore ?? 0 } : (rules.startResources ?? {});
     const factor = this.infiniteResources ? 1 : this.startMultiplier;
-    const startEnergy = this.infiniteResources ? this.energyCap
-      : (rules.startEnergyShare ?? 0) * this.#shareCap(this.energyCap) * factor;
+    let startEnergy;
+    if (this.infiniteResources) startEnergy = this.energyCap;
+    else if (setStart) startEnergy = (setStart.energy ?? 0) * factor; // add() clips it to the cap
+    else startEnergy = (rules.startEnergyShare ?? 0) * this.#shareCap(this.energyCap) * factor;
     // [W5b] infinite resources: fixed accounts hold ECONOMY.infiniteAmount from the start (add() never changes them)
     this.accounts = this.races.map(() => Object.fromEntries(this.resources
       .map((r) => [r, this.#isFixed(r) ? ECONOMY.infiniteAmount : 0])));

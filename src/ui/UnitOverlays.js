@@ -1,4 +1,4 @@
-// Steel Mans – bars above units: health (shown when selected, recently damaged, or always via
+// Steel Men – bars above units: health (shown when selected, recently damaged, or always via
 // world.settings.ui.alwaysShowHealthBars), boarding progress of a mech and production progress at the
 // spawn point of the item being produced. Plain DOM elements projected from 3D every frame.
 import * as THREE from 'three';

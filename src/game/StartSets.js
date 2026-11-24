@@ -1,4 +1,4 @@
-// Steel Mans – start sets (ROADMAP 16 / N15a): which buildings, vehicles, mech and crew a team starts with.
+// Steel Men – start sets (ROADMAP 16 / N15a): which buildings, vehicles, mech and crew a team starts with.
 // Pure functions over stats.json (rules.economy.startSets / startSetOrder / defaultStartSet, races.<race>.startArm)
 // and START_LAYOUT (config.js). No world access and no randomness: the same set + race give the same plan, in a fixed
 // creation order (structures, vehicles, mech, crews), so entity ids match on every client of a lockstep match.

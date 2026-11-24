@@ -1,4 +1,4 @@
-// Steel Mans – game map loaded from data/maps/<name>.json: size, start positions, super node, obstacles.
+// Steel Men – game map loaded from data/maps/<name>.json: size, start positions, super node, obstacles.
 //
 // File format (see data/maps/basic.json, described in data/README.md):
 //   size             – width = depth of the square map (units), centred on 0,0

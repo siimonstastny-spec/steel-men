@@ -1,4 +1,4 @@
-// Steel Mans – registers every procedural unit (side-effect imports only: each file calls registerProcUnit).
+// Steel Men – registers every procedural unit (side-effect imports only: each file calls registerProcUnit).
 // No `export *` on purpose: unit files export their own shape tables and must not collide.
 // Import this once (main.js / UnitPreview.js) instead of the single unit files.
 import './LightTankUnit.js';

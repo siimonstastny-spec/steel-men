@@ -1,4 +1,4 @@
-// Steel Mans – vehicle (stats.json → vehicles): moves along world.nav paths, collides with other units, has HP,
+// Steel Men – vehicle (stats.json → vehicles): moves along world.nav paths, collides with other units, has HP,
 // can be selected and ordered (CommandInput). Abilities from the data decide what else it does:
 //   { type: 'harvest', resource, ratePerSecond, range } – mines an ore deposit directly into the team account
 //   { type: 'construct' }                                – builds structures (Construction.js / Structure.js)
@@ -13,6 +13,7 @@ import { applyTeamColor } from '../core/TeamColor.js';
 import { canRepairTarget, vehicleRepairStep } from '../game/Repair.js';
 import { issueOrder, advanceQueue, clearQueue } from './OrderQueue.js';
 import { continuesAlone } from '../game/Construction.js';
+import { createVehicleProc, socketHeight, ProcDriver, PROC_VEHICLE } from './ProcVehicle.js';
 
 const DEG = Math.PI / 180;
 
@@ -54,6 +55,8 @@ export class Vehicle extends THREE.Group {
     this.removed = false;
     this.world = null;
     this.model = null;
+    this.procModel = null; // procedural unit model (stats.procModel) – then it is also `model`; World disposes it on removal
+    this.procDriver = null;
     this.selectionRing = null;
     this.teamRing = null;
     this.activity = null; // 'harvesting' | 'building' | 'waiting' – what the vehicle does at its target (HUD)
@@ -65,28 +68,49 @@ export class Vehicle extends THREE.Group {
     await loadStats();
     this.stats = unitStats('vehicles', this.unitId, this.race, this.team);
     this.maxHp = this.hp = this.stats.hp;
-    const model = await loadModel(this.stats.model);
+    // Procedural model (stats.procModel) instead of the GLB when the models are on; otherwise the GLB is the fallback
+    const proc = await createVehicleProc(this.stats, this.race, TEAMS[this.team].color);
+    const model = proc ?? await loadModel(this.stats.model);
     // VEHICLE.modelScale for all vehicles × the vehicle's own stats.modelScale (data, default 1)
-    model.scale.setScalar(VEHICLE.modelScale * (this.stats.modelScale ?? 1));
-    // Centre the footprint on the origin so the collision circle sits on the model
-    model.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(model);
-    const centre = box.getCenter(new THREE.Vector3());
-    model.position.set(-centre.x, -box.min.y, -centre.z);
-    model.traverse((o) => {
-      if (!o.isMesh) return;
-      o.castShadow = true;
-      o.receiveShadow = true;
-    });
+    // (procScale: own scale of the procedural model when it differs from the GLB's modelScale)
+    const scale = VEHICLE.modelScale * ((proc ? this.stats.procScale : null) ?? this.stats.modelScale ?? 1);
+    model.scale.setScalar(scale);
+    let sizeXZ;
+    let height;
+    if (proc) {
+      // Built around the footprint centre on the ground (+Z forward); the model casts shadows by itself
+      const d = proc.dims;
+      sizeXZ = Math.max(d.length, d.width) * scale;
+      height = (d.minY + d.height) * scale;
+    } else {
+      // Centre the footprint on the origin so the collision circle sits on the model
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      const centre = box.getCenter(new THREE.Vector3());
+      model.position.set(-centre.x, -box.min.y, -centre.z);
+      model.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = true;
+        o.receiveShadow = true;
+      });
+      const size = box.getSize(new THREE.Vector3());
+      sizeXZ = Math.max(size.x, size.z);
+      height = size.y;
+    }
     model.userData.unit = this;
     this.model = model;
+    this.procModel = proc;
     this.add(model);
-    const size = box.getSize(new THREE.Vector3());
-    this.radius = Math.max(size.x, size.z) * VEHICLE.radiusFactor;
-    this.bodyHeight = size.y;
-    this.aimHeight = size.y * VEHICLE.aimHeightFactor;
+    this.radius = sizeXZ * VEHICLE.radiusFactor;
+    this.bodyHeight = height;
+    this.aimHeight = height * VEHICLE.aimHeightFactor;
+    if (proc) {
+      const aimY = socketHeight(this, proc, PROC_VEHICLE.aimSocket);
+      if (aimY != null && aimY > 0) this.aimHeight = aimY;
+    }
     this.#createRings();
     this.refreshTeamColor();
+    if (proc) this.procDriver = new ProcDriver(this);
     return this;
   }
 
@@ -123,7 +147,8 @@ export class Vehicle extends THREE.Group {
 
   refreshTeamColor() {
     const color = TEAMS[this.team].color;
-    if (this.model) applyTeamColor(this.model, color);
+    if (this.procModel) this.procModel.setTeamColor(color); // (applyTeamColor would clone the emblem materials)
+    else if (this.model) applyTeamColor(this.model, color);
     this.teamRing?.material.color.set(color);
   }
 
@@ -317,6 +342,12 @@ export class Vehicle extends THREE.Group {
   }
 
   update(dt) {
+    this.stepOrders(dt);
+    this.tickProc(dt);
+  }
+
+  /** Orders / movement of one simulation step (CombatVehicle reuses it for the base orders without the model tick) */
+  stepOrders(dt) {
     if (this.dead) return;
     this.activity = null;
     if (this.status?.disabled || this.status?.knockedBack) { this.speed = 0; return; }
@@ -325,6 +356,9 @@ export class Vehicle extends THREE.Group {
     const moving = this.#act(dt);
     if (!moving) this.speed = 0;
   }
+
+  /** Visual state of a procedural model (motion, lamp, cloak, anchoring); no-op for GLB vehicles */
+  tickProc(dt) { if (!this.dead) this.procDriver?.update(dt); }
 
   // ---------- auto assist ([R6], reminder 19) ----------
 

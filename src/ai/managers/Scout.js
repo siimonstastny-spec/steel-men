@@ -1,4 +1,4 @@
-// Steel Mans AI – simple scouting: while no enemy building is known, one fast army unit visits the start positions
+// Steel Men AI – simple scouting: while no enemy building is known, one fast army unit visits the start positions
 // that are not explored yet (nearest first). It is released (back to the army) once an enemy building is known,
 // it dies, or there is nothing left to look at. Off on difficulties with scout.enabled = false (the attack wave
 // then explores by itself).

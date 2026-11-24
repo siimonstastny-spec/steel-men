@@ -1,4 +1,4 @@
-// Steel Mans – order queue on the ground: for every selected own unit with queued orders (OrderQueue.js) a line
+// Steel Men – order queue on the ground: for every selected own unit with queued orders (OrderQueue.js) a line
 // runs from the unit through the targets of its current and queued orders, with a ring at each target.
 // A patrol is drawn as a closed loop in its own colour. Colours / sizes: ORDER_QUEUE.marker (config.js).
 import * as THREE from 'three';

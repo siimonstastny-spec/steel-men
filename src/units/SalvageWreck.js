@@ -1,4 +1,4 @@
-// Steel Mans – legs or torso thrown off a destroyed mech (rules.salvageDrop in stats.json).
+// Steel Men – legs or torso thrown off a destroyed mech (rules.salvageDrop in stats.json).
 // A salvageable wreck stays on the ground as loot: mechs cannot mount it in the field. A future builder
 // unit will carry it to the base (the mech assembly building) where it can be researched – see
 // rules.salvageResearch and World.takeSalvage. A non-salvageable piece is just charred debris (e.g. a

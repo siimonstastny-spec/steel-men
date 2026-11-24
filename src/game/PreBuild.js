@@ -1,4 +1,4 @@
-// Steel Mans – [N8] optional pre-build phase (docs/notes/n8-flee-prebuild.md).
+// Steel Men – [N8] optional pre-build phase (docs/notes/n8-flee-prebuild.md).
 // For the first N minutes of a match every team is held in a square around its start (world.teamStarts[team]):
 // units cannot leave it, nobody can attack, buildings can only be placed inside the own square. Afterwards the
 // limits are gone. The phase is pure simulation state: it depends only on world.tick and world.prebuild, which

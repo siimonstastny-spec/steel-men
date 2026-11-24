@@ -1,4 +1,4 @@
-// Steel Mans – minimap in the bottom-right corner (#minimap, created here).
+// Steel Men – minimap in the bottom-right corner (#minimap, created here).
 // Shows the terrain, obstacles, super node, start positions, own units and enemies the player can see
 // (fog of war) in team colours, and the camera view. Click / drag = move the camera there.
 // An own unit that lost HP blinks for MINIMAP.damageFlashTime (damage warning).
@@ -14,7 +14,7 @@ import { terrainHeight } from '../core/SceneSetup.js';
 import { getStats } from '../data/Stats.js';
 import { drawMinimapMarks, submitPing, isPingClick } from './Pings.js'; // [N7]
 
-const MINIMAP_ORDER_EVENT = 'steelmans:minimapOrder'; // same name in input/CommandInput.js
+const MINIMAP_ORDER_EVENT = 'steelmen:minimapOrder'; // same name in input/CommandInput.js
 const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]]; // screen corners (NDC) for the camera view outline
 const TAU = Math.PI * 2;
 const KIND_STRUCTURE = 0, KIND_VEHICLE = 1, KIND_MECH = 2, KIND_CREW = 3, KIND_AIR = 4; // [N7] aircraft = triangle

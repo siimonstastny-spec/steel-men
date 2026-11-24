@@ -1,4 +1,4 @@
-// Steel Mans – multiplayer transport inside a claude.ai artifact: the `room` capability (runtime contract 0.2.96,
+// Steel Men – multiplayer transport inside a claude.ai artifact: the `room` capability (runtime contract 0.2.96,
 // room.d.ts). A thin adapter maps the room onto the transport interface of docs/MULTIPLAYER.md:
 //   room.join(name) -> NamedRoom { emit, on, presence, peers, onPeers, connected, leave }
 //   message { peer, isMe, sameTab, kind, data }  ->  { from: peer, data }
@@ -175,8 +175,9 @@ export class RoomTransport {
 
   static create() { return RoomTransport.probe(); }
 
-  /** Joins the named game room (opens it when empty); resolves the channel. Rejects with a RoomError. */
-  async join(name) {
+  /** Joins the named game room (opens it when empty); resolves the channel. Rejects with a RoomError.
+   *  [LOBBY_LIST] `_opts.password` is accepted and ignored: the platform room has no password (organisation members only) */
+  async join(name, _opts) { // eslint-disable-line no-unused-vars
     if (this.rooms.has(name)) return this.rooms.get(name);
     let named;
     try {

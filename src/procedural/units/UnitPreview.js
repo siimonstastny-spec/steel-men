@@ -1,10 +1,10 @@
-// Steel Mans – console preview of procedural units (roadmap U0): one model per style side by side (+X), optionally the
+// Steel Men – console preview of procedural units (roadmap U0): one model per style side by side (+X), optionally the
 // current GLB vehicle behind each (−Z), all animated by a requestAnimationFrame loop of their own (UI side, never the
 // simulation – performance.now is fine here). The demo drives the tracks / wheels / hover in place, sweeps the turret,
 // fires, cycles the status marker and (optional) deploy and cloak.
 //   const { spawnUnitPreview } = await import('./src/procedural/units/UnitPreview.js');
-//   const p = await spawnUnitPreview(steelMans.scene, { x: 0, y: 0, z: 0 });                     // light tank, all styles
-//   const j = await spawnUnitPreview(steelMans.scene, { x: 0, y: 0, z: 20 }, { id: 'previewJet' });
+//   const p = await spawnUnitPreview(steelMen.scene, { x: 0, y: 0, z: 0 });                     // light tank, all styles
+//   const j = await spawnUnitPreview(steelMen.scene, { x: 0, y: 0, z: 20 }, { id: 'previewJet' });
 //   p.cloak = true; p.deploy = true; p.demo = false; p.models[0].fire(); p.stats(); p.dispose();
 // Also defines a small aircraft test model ('previewJet') that exercises the aircraft modules (fuselage, wings, fins,
 // 1–4 engines, nose weapon); it is only for checking the kit, not a game unit.

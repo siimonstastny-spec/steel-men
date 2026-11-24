@@ -1,4 +1,4 @@
-// Steel Mans – [N2] crews waiting inside an assembly bay (structure that produces 'mech'), docs/notes/n2-baycrew.md.
+// Steel Men – [N2] crews waiting inside an assembly bay (structure that produces 'mech'), docs/notes/n2-baycrew.md.
 //
 //   • A crew ordered into an own finished bay (order 'joinBay': right click on the bay, or a move whose point lies
 //     in its footprint – unitCommands.js) walks up to it and goes in once its edge is BAY_CREW.entryRange from the

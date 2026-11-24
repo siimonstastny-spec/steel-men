@@ -1,4 +1,4 @@
-// Steel Mans – colour similarity of team colours (CIE Lab distance, threshold COLOR_SIMILARITY.minDeltaE)
+// Steel Men – colour similarity of team colours (CIE Lab distance, threshold COLOR_SIMILARITY.minDeltaE)
 import { COLOR_SIMILARITY } from '../config.js';
 
 const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);

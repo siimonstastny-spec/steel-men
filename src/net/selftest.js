@@ -1,4 +1,4 @@
-// Steel Mans – lockstep self-test without a browser page, server or real network. Two Lockstep instances talk over
+// Steel Men – lockstep self-test without a browser page, server or real network. Two Lockstep instances talk over
 // a fake channel with deterministic loss, latency and reordering and a manual clock; fake world + fake CommandBus.
 // Checks: both clients execute the same commands at the same ticks in the same order, no command is lost
 // (resends repair dropped messages), big turns are split under the size limit, a corrupted hash is detected.

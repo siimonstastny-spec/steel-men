@@ -1,4 +1,4 @@
-// Steel Mans – procedural model kit. Shared low-level helpers for buildings generated in code:
+// Steel Men – procedural model kit. Shared low-level helpers for buildings generated in code:
 //   • one "paint" shader for every static and animated part: vertex colour + per-vertex surface attribute
 //     aSurface = (teamMask, metalness, roughness, emissive) → a whole building is a few draw calls
 //   • panel textures from canvas, one per surface type (clean / worn / smooth / circuit – PROC_KIT.textures), used
@@ -328,7 +328,7 @@ export function acquireInstancedPaintMaterial(texture = PROC_KIT.defaultTexture)
     material.userData.uHighlight = highlightUniform;
     material.userData.procedural = true;
     material.onBeforeCompile = paintOnBeforeCompile;
-    material.customProgramCacheKey = () => 'steelMansProcPaintInstanced';
+    material.customProgramCacheKey = () => 'steelMenProcPaintInstanced';
     entry = { material, users: 0, type };
     instancedCache.set(type, entry);
   }
@@ -368,7 +368,7 @@ export function acquirePaintMaterial(color, texture = PROC_KIT.defaultTexture) {
     material.userData.uDetail = { value: o.detail };
     material.userData.procedural = true;
     material.onBeforeCompile = paintOnBeforeCompile;
-    material.customProgramCacheKey = () => 'steelMansProcPaint';
+    material.customProgramCacheKey = () => 'steelMenProcPaint';
     entry = { material, users: 0, type };
     paintCache.set(key, entry);
   }

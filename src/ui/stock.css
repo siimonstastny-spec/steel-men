@@ -1,4 +1,4 @@
-/* Steel Mans – part stock window (src/ui/StockWindow.js, docs/notes/f1-inventory.md) */
+/* Steel Men – part stock window (src/ui/StockWindow.js, docs/notes/f1-inventory.md) */
 #stock-window {
   position: fixed; inset: 0; z-index: 20;
   display: flex; align-items: center; justify-content: center;

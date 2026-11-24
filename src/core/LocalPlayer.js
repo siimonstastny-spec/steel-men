@@ -1,4 +1,4 @@
-// Steel Mans – who sits at this computer. Replaces the hard-coded PLAYER_TEAM for everything that is about
+// Steel Men – who sits at this computer. Replaces the hard-coded PLAYER_TEAM for everything that is about
 // "the local player" (UI, fog rendering, team rings, selection). The simulation itself must NEVER read this:
 // every client in a multiplayer game (and the AI) runs the same simulation, only the viewpoint differs.
 //   localTeam()          – team index of the local player (0 in single player)

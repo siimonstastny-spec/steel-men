@@ -1,4 +1,4 @@
-// Steel Mans – local multiplayer transport: two (or more) tabs of one browser talk over a BroadcastChannel.
+// Steel Men – local multiplayer transport: two (or more) tabs of one browser talk over a BroadcastChannel.
 // Same interface as RoomTransport (docs/MULTIPLAYER.md, "Transport"), so lobby and lockstep can be tested on
 // localhost without an artifact. Topic messages can be dropped / delayed / reordered on purpose
 // (NET.debugDropRate, debugLatencyMs, debugJitterMs; URL ?netDrop=0.2&netLatency=150&netJitter=50 overrides),
@@ -176,8 +176,9 @@ export class BroadcastTransport {
     this.rooms = new Map();
   }
 
-  /** Joins the named game room; joining a name already joined returns the same channel */
-  async join(name) {
+  /** Joins the named game room; joining a name already joined returns the same channel. [LOBBY_LIST] `_opts.password` is
+   *  accepted and ignored (local two-tab testing only; passwords are enforced by P2P) */
+  async join(name, _opts) { // eslint-disable-line no-unused-vars
     if (this.rooms.has(name)) return this.rooms.get(name);
     const ch = new BroadcastChannelRoom(this, name);
     this.rooms.set(name, ch);

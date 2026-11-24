@@ -1,11 +1,13 @@
-// Steel Mans – procedural medium laser combat hovercraft (roadmap U4). Wider, armoured hover with a main laser in the
+// Steel Men – procedural medium laser combat hovercraft (roadmap U4). Wider, armoured hover with a main laser in the
 // turret plus a small roof point-defence laser (own barrel bone, rests pitched up, for air). Hover pads glow under the
 // skirt. Shape table keyed by style.silhouette with only `faceted` (others fall back to it).
 //   • sockets: muzzle (main laser), muzzle_2 (roof laser, fire('muzzle_2')), turret, aim, cargo, smoke
 //   • the roof laser bone `barrel_2` is not driven by setBarrelPitch (that moves the main laser)
 // Model units (before VEHICLE.modelScale × stats.modelScale): ≈ 6.8 long, 3.4 wide, 2.5 high. Visual only.
-import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
+//   • team colour: hull / turret with team: true + deck mark ahead of the turret + skirt rim + team armour pods
+import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit, UNIT_KIT } from './UnitKit.js';
 import { hull, hover, turret, weapon, statusLamp } from './UnitModules.js';
+import { skirtRim, deckMark } from './LightLaserHoverUnit.js';
 
 /** Shape by style.silhouette (unknown → faceted); sizes in model units */
 export const MEDIUM_LASER_HOVER_SHAPES = {
@@ -15,6 +17,13 @@ export const MEDIUM_LASER_HOVER_SHAPES = {
     gun: { length: 3.4, caliber: 0.1, pitch: [-0.1, 0.45] },
     aa: { length: 1.2, caliber: 0.045, x: 0.28, z: -0.2 },   // shares of turret w / d (centre offsets)
     status: [0.2, 0.8, -0.34],   // beside the dorsal fin (x share of W)
+    // deck mark ahead of the turret by style.silhouette (see LightLaserHoverUnit.js deckMark; round / faceted: module team paint only)
+    team: {
+      deckMark: {
+        rounded: { w: 0.5, d: 0.15, z: 0.25, ledge: false },
+        angular: { w: 0.6, d: 0.1, z: 0.37, ledge: true },
+      },
+    },
   },
 };
 
@@ -42,18 +51,21 @@ function buildMediumLaserHover(kit) {
   const ub = new UnitBuilder(kit);
   ub.bone('hull', 'root', [0, L * P.gap, 0]);
   const base = hover(ub, { bone: 'hull', L: L * P.skirtL, W: W * P.skirtW, skirtH: L * P.skirtH, pads: P.pads.map(([x, z]) => [x * W, z * L]) });
-  const hl = hull(ub, { bone: 'hull', y: base, L: L * P.hullL, W, H });
+  skirtRim(ub, base, W * P.skirtW, L * P.skirtL);
+  const hullLen = L * P.hullL;
+  const hl = hull(ub, { bone: 'hull', y: base, L: hullLen, W, H, team: true });
+  deckMark(ub, s.team.deckMark[kit.style.silhouette], { base, top: hl.top, W, H, hullLen });
   const hb = ub.paint('hull');
   const hg = ub.glow('hull');
   for (const side of [1, -1]) {
     const px = side * W * SPONSON.x;
     const py = base + H * SPONSON.y;
-    hb.box(W * SPONSON.w, H * SPONSON.h, L * SPONSON.d, S.hullDark, { x: px, y: py, z: L * SPONSON.z });
+    hb.box(W * SPONSON.w, H * SPONSON.h, L * SPONSON.d, S.teamPaint, { x: px, y: py, z: L * SPONSON.z, detail: UNIT_KIT.teamPaint.lod.panel });
     hb.cylinder(SIDE_LASER.r, SIDE_LASER.r, SIDE_LASER.len, SIDE_LASER.seg, S.frame, { rx: Math.PI / 2, x: side * W * SIDE_LASER.x, y: base + H * SIDE_LASER.y, z: L * (SPONSON.z + SPONSON.d / 2) + SIDE_LASER.len / 2, detail: 0 });
     hg.point([px, py, L * (SPONSON.z + SPONSON.d / 2) + SIDE_LASER.len], SPONSON.glowR, ub.style.weaponGlow, {});
   }
   const t = s.turret;
-  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h });
+  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
   weapon(ub, 'laser', {
     parent: 'turret', position: [0, tr.mid, tr.front * WEAPON_MOUNT], length: s.gun.length, caliber: s.gun.caliber, pitch: s.gun.pitch,
   });

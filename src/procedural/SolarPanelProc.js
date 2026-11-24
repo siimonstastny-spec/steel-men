@@ -1,4 +1,4 @@
-// Steel Mans – procedural solar panel (roadmap 18, phase B). A drop-in alternative to
+// Steel Men – procedural solar panel (roadmap 18, phase B). A drop-in alternative to
 // models/3DStructures{race}/SolarPanel{race}_Anim.glb built in code from the style modules (ProcModules.js):
 //   • same layout as the GLB (mast at the origin, panel pivot at y = 11.5, rest-pose panel inside ±6.74 × −7.0…6.89)
 //   • light: one merged static mesh per style (plinth, mast, inverter with a vent unit, beacons) + emblem decals
@@ -11,11 +11,11 @@
 // Visual only: update() takes the frame delta and ignores `active` (a solar panel never "produces" in the sense of
 // Structure.update – sun tracking and the glow run all the time). No allocations in update().
 import * as THREE from 'three';
-import { STRUCTURE } from '../config.js';
+import { STRUCTURE, PROC_TEAM_PAINT } from '../config.js';
 import { PartBuilder, Spinner, Blinker, withSurface } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
-  spike, emblemDecalGeometry, Levitator, pulseWave, PROC_MODULES,
+  spike, emblemDecalGeometry, Levitator, pulseWave, PROC_MODULES, teamStripe, teamPanel, teamTrim, teamBanner, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -51,6 +51,14 @@ const DETAIL = {
   neonBand: { h: 0.08, t: 0.05, yShare: 0.8 },
   mastRing: { tube: 0.05, ys: [0.35, 0.7], over: 0.04 },
   corner: { spikeH: 0.6, spikeR: 0.15, ribW: 0.5 },
+  // team paint layout: inset = stripe ends kept off the plinth corners, panel on the inverter side (shares of its size),
+  // ring (round plinth) = share of the tier radius / height, mark = ground mark on the pad (centre x z, size w d)
+  // mastLod = coarsest LOD of the big painted mast / pad ring (2 = visible even in the far silhouette); padRing = inner pad border
+  // (width comes from the shape, thickness here); lipT = thickness of the teamTrim lip the ring sits next to
+  team: {
+    inset: 0.5, stripeH: 0.34, ringShare: 0.95, ringY: 0.55, panelW: 0.5, panelH: 0.38, panelY: 0.5, cornerInset: 0.7, bannerH: 3.2,
+    mark: { x: -4.1, z: 0.6, w: 2.5, d: 3.2 }, mastLod: PROC_TEAM_PAINT.lod.panel, padRingH: 0.06, lipT: 0.14,
+  },
   inverter: { markLen: 0.8, markH: 0.4, markY: 0.9, markOut: 0.02, lowerH: 0.5, lowerT: 0.05, lowerY: 0.6 },
   laser: { nub: 0.2, fromInset: 0.2, hubDrop: 1.0 },
   cell: { base: '#101c40', tint: 0.12, metal: 0.6, rough: 0.18, h: 0.06 },     // tint = share of the style's neon colour
@@ -63,21 +71,29 @@ const DETAIL = {
 /** Building shapes by style.silhouette (code knows shapes, the style data picks one; unknown → rounded) */
 export const SOLAR_SHAPES = {
   rounded: { // clean cabinet, slim round mast, framed cell grid with team-coloured corners
+    stripeY: 1.09,   // height of the team stripes above the pad (inside the flat part of the wall)
+    mastTeam: 0.45,  // share of the mast height (from the bottom) painted in the team colour – the GLB's team-coloured leg
     plinth: { kind: 'box', w: 4.4, h: 1.6, d: 4.4, edge: 1 }, mast: { seg: 16, rTop: 0.5, rBottom: 0.7 }, joint: 'sphere',
     inverter: { kind: 'box', w: 2.2, h: 2.0, d: 2.4, edge: 1 }, ventR: 0.85, beaconAt: [1.7, 1.7],
     panel: { kind: 'grid', half: 5.9, thick: 0.4, frame: 0.4, cols: 3, rows: 3, back: 'hull', corners: 'cap' },
   },
   angular: { // low armoured plinth with ribs, square pillar, heavy frame with spikes
+    stripeY: 0.2,    // on the armoured skirt, below its rusty strip
+    mastTeam: 1.0,
     plinth: { kind: 'armored', w: 5.0, h: 1.9, d: 5.0, baseH: 0.8, topW: 3.8 }, mast: { seg: 4, rTop: 0.65, rBottom: 0.95 }, joint: 'box',
     inverter: { kind: 'plated', w: 2.4, h: 2.4, d: 2.6, edge: 0 }, ventR: 0.9, beaconAt: [2.1, 2.1],
     panel: { kind: 'grid', half: 6.1, thick: 0.7, frame: 0.65, cols: 2, rows: 3, back: 'hullDark', corners: 'spike', ribs: 3 },
   },
   round: { // stacked discs, smooth mast with neon rings, petal panel with plasma tips, plasma pod
+    mastTeam: 0.55,
     plinth: { kind: 'disc', w: 4.8, h: 1.5, d: 4.8 }, mast: { seg: 24, rTop: 0.6, rBottom: 1.0 }, joint: 'sphere',
     inverter: { kind: 'pod', w: 2.4, h: 2.0, d: 2.4 }, ventR: 0.9, beaconAt: [1.3, 1.4],
     panel: { kind: 'petals', radius: 6.3, petals: 6, thick: 0.3, dome: 1.4 },
   },
   faceted: { // slim chamfered pylon, thin mast, rhombic lamellae linked by lasers, glowing radiator
+    stripeY: 1.36,
+    mastTeam: 1.0,
+    padRing: 0.5,   // width of a team-painted border on the pad (the slim pylon leaves most of the area to the pad)
     plinth: { kind: 'faceted', w: 3.4, h: 2.0, d: 3.4, edge: 1 }, mast: { seg: 4, rTop: 0.3, rBottom: 0.45 }, joint: 'box',
     inverter: { kind: 'box', w: 1.9, h: 2.6, d: 1.9, edge: 1 }, ventR: 0.7, beaconAt: [1.4, 1.4],
     panel: { kind: 'lamellae', count: 5, pitch: 2.35, halfLen: 6.4, halfWid: 1.15, thick: 0.14 },
@@ -150,10 +166,45 @@ function buildStatic(kit, shape) {
     emblems.push({ position: [0, L.padH + pl.h * 0.5, e * (frontZ + L.emblemPlateOut)], normal: [0, 0, e], size: L.emblemSize });
   }
 
+  // team paint (kit.team, ProcModules team paint writers): stripes on the plinth walls (they keep clear of the emblem plates),
+  // a panel on the inverter, a lip round the pad, a banner on the rear corner and a mark on the ground (styles pick the looks)
+  const T = D.team;
+  const skirt = pl.kind === 'armored' ? 0.6 : 0;   // the armoured skirt is wider than the body
+  if (pl.kind === 'disc') {   // round plinth: a ring lip on the lower tier instead of flat stripes
+    teamTrim(b, kit, { r: (pl.w / 2) * T.ringShare, y: L.padH + pl.h * T.ringY });
+  } else {
+    const y = L.padH + shape.stripeY;
+    const plateHalf = L.emblemPlate / 2;
+    for (const e of [1, -1]) {
+      teamStripe(b, kit, pl.w + skirt - 2 * T.inset, T.stripeH, { y, z: e * frontZ, ry: e > 0 ? 0 : Math.PI }, { avoid: [[-plateHalf, plateHalf]] });
+      teamStripe(b, kit, pl.d + skirt - 2 * T.inset, T.stripeH, { y, x: e * (pl.w + skirt) / 2, ry: (e * Math.PI) / 2 });
+    }
+  }
+  if (shape.inverter.kind !== 'pod') {
+    const iv0 = shape.inverter;
+    teamPanel(b, kit, iv0.d * T.panelW, iv0.h * T.panelH, { x: L.inverterX + iv0.w / 2, y: L.padH + iv0.h * T.panelY, z: L.inverterZ, ry: Math.PI / 2 });
+  }
+  teamTrim(b, kit, { y: L.padH, w: L.padHalfX * 2, d: L.padHalfZ * 2 });
+  if (shape.padRing) {   // painted border inside the lip: four low slabs (long sides first, short sides between them)
+    const rw = shape.padRing;
+    const edge = T.lipT + rw / 2;
+    for (const e of [-1, 1]) {
+      b.box(L.padHalfX * 2 - 2 * T.lipT, T.padRingH, rw, S.teamPaint, { detail: T.mastLod, y: L.padH + T.padRingH / 2, z: e * (L.padHalfZ - edge) });
+      b.box(rw, T.padRingH, L.padHalfZ * 2 - 2 * (T.lipT + rw), S.teamPaint, { detail: T.mastLod, x: e * (L.padHalfX - edge), y: L.padH + T.padRingH / 2 });
+    }
+  }
+  teamBanner(b, kit, { x: -(L.padHalfX - T.cornerInset), y: L.padH, z: -(L.padHalfZ - T.cornerInset), h: T.bannerH });
+  roofMark(b, kit, { x: T.mark.x, y: L.padH, z: T.mark.z, w: T.mark.w, d: T.mark.d });
+
   // mast with a joint under the pivot; neon rings for the neon-rich styles
   const mh = L.mastTop - py;
   const m = shape.mast;
-  b.cylinder(m.rTop, m.rBottom, mh, m.seg, S.frame, { y: py + mh / 2, ry: m.seg === 4 ? Math.PI / 4 : 0 });
+  // the lower part of the mast (shape.mastTeam of its height) is team lacquer, the rest neutral frame metal
+  const mastRy = m.seg === 4 ? Math.PI / 4 : 0;
+  const lowH = mh * shape.mastTeam;
+  const rMid = m.rBottom + (m.rTop - m.rBottom) * shape.mastTeam;
+  b.cylinder(rMid, m.rBottom, lowH, m.seg, S.teamPaint, { detail: T.mastLod, y: py + lowH / 2, ry: mastRy });
+  if (shape.mastTeam < 1) b.cylinder(m.rTop, rMid, mh - lowH, m.seg, S.frame, { y: py + lowH + (mh - lowH) / 2, ry: mastRy });
   if (kit.rich) {
     for (const k of D.mastRing.ys) {
       const rr = m.rBottom + (m.rTop - m.rBottom) * k + D.mastRing.over;

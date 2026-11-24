@@ -1,4 +1,4 @@
-// Steel Mans – procedural advanced research facility (a data relay). A drop-in alternative to
+// Steel Men – procedural advanced research facility (a data relay). A drop-in alternative to
 // models/3DStructures{race}/DataRelay{race}_Anim.glb built in code from the style modules (ProcModules.js) and the
 // faction style (data/buildingStyles.json). Unlike the research facility (a lab hall + a core tower) this is ONE slim relay
 // tower on a small plinth with a signal head, so the two are easy to tell apart at a glance:
@@ -16,6 +16,7 @@ import { PartBuilder, Blinker } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
   spike, chimney, laserLink, arcGeometry, ArcFlicker, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES,
+  teamTrim, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -55,6 +56,20 @@ const DETAIL = {
   dish: { stemH: 0.35, tilt: 0.4, depth: 0.35, rod: 0.03 },
   crystal: { stretch: 2.0, halo: 1.3 },
   pylon: { rTop: 0.2, rBottom: 0.35, lensR: 0.26 },
+};
+
+/**
+ * Team paint (large surfaces, visible from the RTS camera down to LOD2; docs/notes/proc-teampaint-c.md): the main structural unit
+ * (shaft / tower / lowest pod / stage + pylons) is team paint, the emblem plates stay neutral; plus a lip and a mark by silhouette.
+ */
+const TEAM = {
+  detail: 2,                 // coarsest LOD the team surfaces still appear in
+  lipH: 0.5, lipInset: 0.25, // rounded: lip round the top of the bunker (h × style.teamPaint.trim), inset from the edge
+  ringH: 0.5, ringOut: 0.05, // round: ring round the disc
+  podIndex: 0,               // round: the pod that carries the team colour (the lowest)
+  marks: {                   // roofMark footprints { z, w, d } by body
+    rounded: { z: -2.65, w: 4.6, d: 1.3 }, round: { z: -3.1, w: 1.6, d: 1.6 }, faceted: { z: -2.4, w: 3.0, d: 1.4 },
+  },
 };
 
 /** Dimensions of every body by style.silhouette (unknown → rounded); all inside the pad */
@@ -163,13 +178,14 @@ BODIES.rounded = (c) => {
   const y1 = L.padH + Bs.h;
   const front = Bs.d / 2;
   door(c, front, L.padH, D.door.w, D.door.h);
-  b.box(Bs.w * 0.96, DETAIL.band.h, DETAIL.band.t, S.team, { y: L.padH + D.band.y, z: front + DETAIL.band.t / 2 });
+  teamTrim(b, kit, { y: y1, w: Bs.w - 2 * TEAM.lipInset, d: Bs.d - 2 * TEAM.lipInset, h: TEAM.lipH });
+  roofMark(b, kit, { y: y1, z: TEAM.marks.rounded.z, w: TEAM.marks.rounded.w, d: TEAM.marks.rounded.d });
   for (const s of [-1, 1]) b.box(D.window.t, D.window.h, D.window.len, S.window, { x: s * (Bs.w / 2 + D.window.t / 2), y: L.padH + D.window.y, z: 0 });
   for (const [x, z] of D.vents) c.vents.push(ventUnit(b, glows, kit, { x, y: y1, z, r: D.ventR }));
 
   // shaft
   const Sh = D.shaft;
-  b.cylinder(Sh.rTop, Sh.rBottom, Sh.h, Sh.seg, S.hullDark, { y: y1 + Sh.h / 2 });
+  b.cylinder(Sh.rTop, Sh.rBottom, Sh.h, Sh.seg, S.teamPaint, { y: y1 + Sh.h / 2, detail: TEAM.detail });   // the shaft is the team-coloured main unit
   const rAt = (k) => Sh.rBottom + (Sh.rTop - Sh.rBottom) * k;
   for (const k of Sh.rings) neonRing(c, rAt(k) + 0.03, y1 + Sh.h * k);
   glows.get('pulse').segment([0, y1, Sh.rBottom + DETAIL.strip.out], [0, y1 + Sh.h, Sh.rTop + DETAIL.strip.out], DETAIL.strip.t);
@@ -207,16 +223,14 @@ BODIES.angular = (c) => {
   b.taperedBox(D.slope.w, D.slope.topW, D.slope.h, D.slope.w, S.hull, { y: L.padH + D.block.h }, D.slope.topW);
   const y1 = L.padH + D.block.h + D.slope.h;
   door(c, bh, L.padH, D.door.w, D.door.h);
-  for (const s of [-1, 1]) b.box(DETAIL.band.t, DETAIL.band.h, D.block.w * 0.95, S.team, { x: s * (bh + DETAIL.band.t / 2), y: L.padH + D.block.h * 0.6 });
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) spike(b, kit, { x: sx * D.spikes.x, y: L.padH + D.block.h, z: sz * D.spikes.z, h: D.spikes.h, r: D.spikes.r });
   for (const [x, z] of D.vents) c.vents.push(ventUnit(b, glows, kit, { x, y: y1, z, r: D.ventR }));
   for (const [x, z] of D.chimneys) chimney(b, kit, { x, y: y1, z, h: D.chimneyH, r: D.chimneyR });
 
   // tower: a massive tapered block with rust-coloured ribs on the front corners
   const T = D.tower;
-  b.taperedBox(T.w, T.topW, T.h, T.w, S.hullDark, { y: y1 }, T.topW);
+  b.taperedBox(T.w, T.topW, T.h, T.w, S.teamPaint, { y: y1, detail: TEAM.detail }, T.topW);   // the tower is the team-coloured main unit
   const halfAt = (yRel) => (T.w - (T.w - T.topW) * (yRel / T.h)) / 2;
-  b.box(halfAt(0) * 1.6, DETAIL.band.h, DETAIL.band.t, S.team, { y: y1 + T.h * 0.5, z: halfAt(T.h * 0.5) + DETAIL.band.t / 2 });
   emblemPlate(c, y1 + D.plate.y, halfAt(D.plate.y) - 0.1, D.plate.size);
   const top = y1 + T.h;
   b.box(D.platform.w, D.platform.h, D.platform.w, S.frame, { base: true, y: top });
@@ -235,10 +249,11 @@ BODIES.round = (c) => {
   const { b, S, kit, glows } = c;
   b.box(L.padHalf * 2, L.padH, L.padHalf * 2, S.ground, { base: true });
   b.cylinder(D.disc.r, D.disc.r, D.disc.h, 40, S.hull, { y: L.padH + D.disc.h / 2 });
-  b.torus(D.disc.r, DETAIL.band.h * 0.4, 4, 40, TAU, S.team, { rx: Math.PI / 2, y: L.padH + D.disc.h * 0.5 });
+  teamTrim(b, kit, { y: L.padH, r: D.disc.r + TEAM.ringOut, h: TEAM.ringH });
   neonRing(c, D.disc.r - 0.4, L.padH + D.disc.h, 0.08);
   const y0 = L.padH + D.disc.h;
-  for (const p of D.pods) b.sphere(p.r, 20, 12, S.hull, { y: y0 + p.y - D.disc.h, sy: p.sy });
+  D.pods.forEach((p, i) => b.sphere(p.r, 20, 12, i === TEAM.podIndex ? S.teamPaint : S.hull, { y: y0 + p.y - D.disc.h, sy: p.sy, detail: TEAM.detail }));
+  roofMark(b, kit, { y: y0, z: TEAM.marks.round.z, w: TEAM.marks.round.w, d: TEAM.marks.round.d });
   for (const s of D.seams) neonRing(c, s.r, y0 + s.y - D.disc.h, 0.07);
   if (kit.rich) {   // glowing veins up the lowest pod
     for (let i = 0; i < 6; i++) {
@@ -278,9 +293,10 @@ BODIES.faceted = (c) => {
   const laser = glows.get('laser');
   b.box(L.padHalf * 2, L.padH, L.padHalf * 2, S.ground, { base: true });
   const St = D.stage;
-  b.cylinder(St.rTop, St.rBottom, St.h, St.segments, S.hullDark, { y: L.padH + St.h / 2, ry: Math.PI / St.segments });
+  b.cylinder(St.rTop, St.rBottom, St.h, St.segments, S.teamPaint, { y: L.padH + St.h / 2, ry: Math.PI / St.segments, detail: TEAM.detail });
   neonRing(c, St.rTop, L.padH + St.h, St.neonTube);
   const y0 = L.padH + St.h;
+  roofMark(b, kit, { y: y0, z: TEAM.marks.faceted.z, w: TEAM.marks.faceted.w, d: TEAM.marks.faceted.d });
   let y = y0;
   const sections = [];
   for (const s of D.spire) {
@@ -313,7 +329,7 @@ BODIES.faceted = (c) => {
     for (const sz of [-1, 1]) {
       const x = sx * Py.x;
       const z = sz * Py.z;
-      b.cylinder(DETAIL.pylon.rTop, DETAIL.pylon.rBottom, Py.h, 6, S.hullDark, { x, y: L.padH + Py.h / 2, z });
+      b.cylinder(DETAIL.pylon.rTop, DETAIL.pylon.rBottom, Py.h, 6, S.teamPaint, { x, y: L.padH + Py.h / 2, z, detail: TEAM.detail });
       b.sphere(DETAIL.pylon.lensR, 8, 6, S.lens, { x, y: L.padH + Py.h, z });
       const k = faceHalfAt(hitY) / Math.SQRT2;
       laserLink(b, laser, kit, [x, L.padH + Py.h, z], [sx * k, hitY, sz * k]);

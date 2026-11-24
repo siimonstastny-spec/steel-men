@@ -1,4 +1,4 @@
-// Steel Mans – option grid page of a research facility (BuildMenu shows it for a finished, selected own
+// Steel Men – option grid page of a research facility (BuildMenu shows it for a finished, selected own
 // building with stats.produces 'research'):
 //   • one tab per research tier: the research the faction may do there (Research.available), with cost, time,
 //     effect, done / running / locked and why; a click pays the cost and queues it in the building's queue

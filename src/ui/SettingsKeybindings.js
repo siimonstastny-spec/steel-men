@@ -1,4 +1,4 @@
-// Steel Mans – remapping of KEYBINDINGS (config.js): validation, applying saved bindings, saving.
+// Steel Men – remapping of KEYBINDINGS (config.js): validation, applying saved bindings, saving.
 // KEYBINDINGS arrays are changed IN PLACE, so code that captured a reference keeps working.
 import { CAMERA_RESERVED_KEYS, FORBIDDEN_KEYS, KEYBINDINGS, KEY_ACTIONS } from '../config.js';
 import { getSettings, replaceSetting } from '../core/Profile.js';

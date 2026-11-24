@@ -1,11 +1,11 @@
-// Steel Mans – procedural heavy tank (roadmap U1). Big, slow tracked tank: large turret with a heavy cannon plus a
+// Steel Men – procedural heavy tank (roadmap U1). Big, slow tracked tank: large turret with a heavy cannon plus a
 // roof-mounted rotary machine gun for anti-air (weak). Shape table keyed by style.silhouette with only `rounded`
 // (other styles fall back to it – shape, not names).
 //   • sockets: muzzle (cannon), muzzle_2 (AA machine gun, fire('muzzle_2')), turret, aim, cargo, smoke
 //   • the AA gun bone `barrel_2` rests pitched up (AA_REST_PITCH); it is not driven by setBarrelPitch (that moves the cannon)
 // Model units (before VEHICLE.modelScale × stats.modelScale): ≈ 8.2 long, 4.4 wide, 3.7 high. Visual only.
 import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
-import { hull, tracks, turret, weapon, statusLamp } from './UnitModules.js';
+import { hull, tracks, turret, weapon, statusLamp, teamPanel } from './UnitModules.js';
 
 /** Shape by style.silhouette (unknown → rounded); sizes in model units */
 export const HEAVY_TANK_SHAPES = {
@@ -19,7 +19,8 @@ export const HEAVY_TANK_SHAPES = {
 
 const CHASSIS = { gauge: 0.88, tw: 0.26, th: 0.14, hullLift: 0.95, hullL: 0.92 };   // shares of L / W
 const BUSTLE = { w: 0.85, h: 0.65, d: 0.65, y: 0.5, z: -0.62 };    // turret rear box: shares of turret w / h / d, centre height share, z share of d
-const SIDE_ARMOR = { w: 0.1, h: 0.5, d: 0.7, x: 0.52, y: 0.5 };   // turret cheek plates: shares of turret w / h / d
+const SIDE_ARMOR = { w: 0.1, h: 0.5, d: 0.4, x: 0.52, y: 0.5, z: 0.25 };   // turret cheek plates (darker team lacquer): shares of turret w / h / d, z = centre share of d (in front of the side emblems)
+const BUSTLE_PANEL = { w: 0.6, h: 0.6 };   // team panel on the bustle's rear face: shares of the bustle width / height
 const AA_PEDESTAL = { r: 0.22, h: 0.18, flare: 1.2, seg: 8 };   // AA gun base cylinder (model units), bottom radius × flare
 const AA_REST_PITCH = 0.55;                              // rad, AA gun elevation at rest (bone rotation.x = −pitch)
 const AA_LIFT = 0.28;                                    // AA gun axis above the turret roof
@@ -36,15 +37,19 @@ function buildHeavyTank(kit) {
   const S = kit.S;
   const ub = new UnitBuilder(kit);
   const th = L * P.th;
-  tracks(ub, { L, gauge: W * P.gauge, tw: W * P.tw, th });
+  // team colour: module team layouts (skirts / plates / pods / blades, deck, roof mark, emblems on plates) + cheek plates + bustle panel
+  tracks(ub, { L, gauge: W * P.gauge, tw: W * P.tw, th, team: true });
   ub.bone('hull', 'root', [0, th * P.hullLift, 0]);
   ub.meta.hull = { bone: 'hull', bank: false };
-  const hl = hull(ub, { bone: 'hull', y: 0, L: L * P.hullL, W, H });
+  const hl = hull(ub, { bone: 'hull', y: 0, L: L * P.hullL, W, H, team: true });
   const t = s.turret;
-  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h });
+  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
   const tb = ub.paint('turret');
-  tb.box(t.w * BUSTLE.w, t.h * BUSTLE.h, t.d * BUSTLE.d, S.hull, { y: t.h * BUSTLE.y, z: t.d * BUSTLE.z });
-  for (const side of [1, -1]) tb.box(t.w * SIDE_ARMOR.w, t.h * SIDE_ARMOR.h, t.d * SIDE_ARMOR.d, S.hullDark, { x: side * t.w * SIDE_ARMOR.x, y: t.h * SIDE_ARMOR.y });
+  tb.box(t.w * BUSTLE.w, t.h * BUSTLE.h, t.d * BUSTLE.d, S.teamShade, { y: t.h * BUSTLE.y, z: t.d * BUSTLE.z });
+  teamPanel(ub, 'turret', t.w * BUSTLE.w * BUSTLE_PANEL.w, t.h * BUSTLE.h * BUSTLE_PANEL.h, {
+    y: t.h * BUSTLE.y, z: t.d * (BUSTLE.z - BUSTLE.d / 2), ry: Math.PI,
+  });
+  for (const side of [1, -1]) tb.box(t.w * SIDE_ARMOR.w, t.h * SIDE_ARMOR.h, t.d * SIDE_ARMOR.d, S.teamShade, { x: side * t.w * SIDE_ARMOR.x, y: t.h * SIDE_ARMOR.y, z: t.d * SIDE_ARMOR.z });
   weapon(ub, 'cannon', {
     parent: 'turret', position: [0, tr.mid, tr.front * WEAPON_MOUNT], length: s.gun.length, caliber: s.gun.caliber, pitch: s.gun.pitch,
   });

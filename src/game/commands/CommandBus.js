@@ -1,4 +1,4 @@
-// Steel Mans – the ONE way into the simulation. Every change a player (human UI, AI, remote player) makes to
+// Steel Men – the ONE way into the simulation. Every change a player (human UI, AI, remote player) makes to
 // the game is a command: a small plain-JSON object that is submitted here and executed at the start of a
 // simulation tick, identically on every client.
 //
@@ -20,6 +20,8 @@
 // Offline (single player, AI) the bus is local: a command submitted now runs at the next tick. In multiplayer
 // a transport (src/net/, later) replaces `schedule` and delivers everyone's commands for a tick in the same order.
 
+import { NET_LEAVE } from '../../config.js';
+
 const registry = new Map();
 
 /** Registers the executor of a command type (call once at module load) */
@@ -30,6 +32,9 @@ export function registerCommand(type, def) {
 }
 
 export const isRegistered = (type) => registry.has(type);
+
+/** [MP-SEC] Commands only the lockstep may inject (origin === null); anything with another origin is dropped at execution */
+const internalOnly = new Set([NET_LEAVE.commandType]);
 
 /** Resolves an entity id to the live object, or null when it is gone (destroyed / removed / unknown) */
 export function resolve(world, eid) {
@@ -78,6 +83,9 @@ class Bus {
     this.schedule({ ...cmd, origin: this.clientId });
   }
 
+  /** [MP-SEC] Is this command type registered? (Lockstep rejects unknown types from remote players) */
+  isKnown(type) { return registry.has(type); }
+
   /** Was this command submitted on this client? (for local UI feedback only – never in simulation code) */
   isOwn(cmd) { return cmd?.origin === this.clientId; }
 
@@ -99,6 +107,8 @@ class Bus {
     due.sort((a, b) => a.cmd.team - b.cmd.team || a.seq - b.seq);
     for (const { cmd } of due) {
       const def = registry.get(cmd.type);
+      if (!def) continue; // [MP-SEC] unknown type (remote garbage): silently skipped
+      if (internalOnly.has(cmd.type) && cmd.origin !== null) continue; // [MP-SEC] only the lockstep may inject it
       try {
         if (def.validate && !def.validate(world, cmd)) continue;
         const result = def.execute(world, cmd); // optional local result (e.g. ejected crews) – never sent anywhere

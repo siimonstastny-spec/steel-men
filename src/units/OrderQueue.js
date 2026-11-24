@@ -1,4 +1,4 @@
-// Steel Mans – order queue shared by all units that take orders (ModularMech, Crew, Vehicle, CombatVehicle).
+// Steel Men – order queue shared by all units that take orders (ModularMech, Crew, Vehicle, CombatVehicle).
 //   issueOrder(unit, entry, queued)  – queued (Shift held): waits behind the current order; otherwise replaces
 //                                       the queue and runs at once
 //   advanceQueue(unit)               – call at the start of the unit's update: an idle unit takes the next order

@@ -1,4 +1,4 @@
-// Steel Mans – shared fighting logic of armed units (target picking, behaviour, attack / attack-move / guard /
+// Steel Men – shared fighting logic of armed units (target picking, behaviour, attack / attack-move / guard /
 // patrol movement). Written from ModularMech's private methods so other armed units (CombatVehicle) behave the
 // same way; ModularMech still has its own copy (it can switch to these functions later).
 //

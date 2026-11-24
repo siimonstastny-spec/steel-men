@@ -1,4 +1,4 @@
-// Steel Mans – procedural deep ore extractor (tier 3, built on an ore deposit), model and animation only. Built in code
+// Steel Men – procedural deep ore extractor (tier 3, built on an ore deposit), model and animation only. Built in code
 // from the style modules (ProcModules.js) and the faction style (data/buildingStyles.json):
 //   • footprint: pad ±7.5 × ±7.5 around the model origin (an ore deposit has radius 7), front = +Z; the bore hole is in the centre
 //   • a rig over the bore and a drill string hanging from it; while `active` the string spins and feeds down into the bore
@@ -11,13 +11,40 @@
 //   • one merged static mesh (LODs) + emblem decals + glow layers (beacons, pulse, bore, radiator, beam) + animated parts
 // Visual only: update() takes the frame delta. No allocations in update().
 import * as THREE from 'three';
+import { PROC_TEAM_PAINT } from '../config.js';
 import { PartBuilder, GlowBuilder, Blinker, steppedEase, smootherstep } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
-  spike, pipeRun, tank, chimney, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES,
+  spike, pipeRun, tank, chimney, Levitator, emblemDecalGeometry, pulseWave, PROC_MODULES, teamTrim, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
+
+/**
+ * Team paint (S.teamPaint / S.teamShade = vertices with team = 1: no extra draw call, batching and setTeamColor work as
+ * before): the rig (derrick legs / arches / tripod legs), the plinth top (ring or frame), the drill string and the probes
+ * are painted, the rest stays neutral metal. detail = coarsest LOD the painted parts appear in (2 = far silhouette).
+ */
+const TEAM = {
+  detail: PROC_TEAM_PAINT.lod.panel,
+  ring: { w: 3.0, gap: 0.8, lift: 0.03, seg: 36 },    // flat team ring on a round plinth top: width, gap to the rim, lift
+  frame: { w: 1.5, inset: 1.0, h: 0.06 },             // flat team frame on a square plinth top (inset from the rim / spikes)
+  cabinetRoof: { wShare: 0.6, dShare: 0.6 },          // roof mark of the equipment cabinet (shares of its roof)
+};
+
+/** Flat ring (annulus) lying on a surface at height y, facing up */
+function flatRing(b, s, rIn, rOut, y, segments) {
+  return b.add(new THREE.RingGeometry(rIn, rOut, segments).rotateX(-Math.PI / 2), s, { y, detail: TEAM.detail });
+}
+
+/** Flat rectangular frame (four slabs) of half size `half`, width w, lying on y */
+function flatFrame(b, s, half, w, y, h) {
+  for (const e of [-1, 1]) {
+    b.box(half * 2, h, w, s, { y: y + h / 2, z: e * (half - w / 2), detail: TEAM.detail });
+    b.box(w, h, half * 2 - 2 * w, s, { x: e * (half - w / 2), y: y + h / 2, detail: TEAM.detail });
+  }
+  return b;
+}
 
 /** Animation tuning (visual only; the style's anim block multiplies speeds) */
 export const EXTRACTOR_ANIM = {
@@ -75,7 +102,7 @@ const DIM = {
     foundation: { kind: 'box' },
     cabinet: { kind: 'box', w: 3.2, h: 2.8, d: 3.0, x: 5.0, z: 5.0 },
     vents: [[-5.2, 5.2], [-5.2, -5.2]], ventR: 1.0,
-    rig: { kind: 'derrick', base: 3.0, top: 1.1, h: 11.5, legW: 0.45, braceW: 0.22, sections: 3, legS: 'accent', braceS: 'frame', crownW: 2.6, crownH: 0.9, spikes: false },
+    rig: { kind: 'derrick', base: 3.0, top: 1.1, h: 11.5, legW: 0.45, braceW: 0.22, sections: 3, legS: 'teamPaint', braceS: 'frame', crownW: 2.6, crownH: 0.9, spikes: false },
     string: { kind: 'rotary', spin: 1, swivelH: 0.7, pipeR: 0.38, pipeLen: 7.2, collars: 3, bitR: 0.55, bitLen: 1.1, teeth: 3 },
     tether: { kind: 'cable', r: 0.07 },
     probe: { kind: 'rod', seg: 10 },
@@ -85,7 +112,7 @@ const DIM = {
     foundation: { kind: 'armored' },
     cabinet: { kind: 'box', w: 3.2, h: 2.8, d: 3.0, x: 5.0, z: 5.0 },
     vents: [[-5.2, 5.2], [-5.2, -5.2]], ventR: 1.1,
-    rig: { kind: 'derrick', base: 3.4, top: 1.5, h: 12, legW: 0.9, braceW: 0.4, sections: 3, legS: 'hullDark', braceS: 'frame', crownW: 3.2, crownH: 1.1, spikes: true },
+    rig: { kind: 'derrick', base: 3.4, top: 1.5, h: 12, legW: 0.9, braceW: 0.4, sections: 3, legS: 'teamPaint', braceS: 'frame', crownW: 3.2, crownH: 1.1, spikes: true },
     string: { kind: 'hammer', spin: 0, swivelH: 0.9, shaft: 0.8, pipeLen: 6.8, flanges: 3, bitR: 0.9, bitLen: 1.5 },
     tether: { kind: 'cable', r: 0.12 },
     probe: { kind: 'piston', seg: 8, w: 0.55, tipH: 0.8, tipR: 0.2 },
@@ -121,7 +148,7 @@ const _sq = new THREE.Quaternion();
 const _sup = new THREE.Vector3(0, 1, 0);
 
 /** Square strut (box) from point p to point q, width w */
-function strut(b, p, q, w, s) {
+function strut(b, p, q, w, s, detail = null) {
   _sa.fromArray(p);
   _sb.fromArray(q);
   const len = _sa.distanceTo(_sb);
@@ -133,7 +160,7 @@ function strut(b, p, q, w, s) {
   _sq.setFromUnitVectors(_sup, _sb.sub(_sa).normalize());
   g.applyQuaternion(_sq);
   g.translate(mx, my, mz);
-  return b.add(g, s);
+  return b.add(g, s, { detail });
 }
 
 /** Pad + plinth by kind ('box' / 'armored' with spikes / 'round' disc / 'stage' low octagon), front marking, bore. Returns the top y. */
@@ -148,9 +175,13 @@ function foundation(c, F) {
   if (F.kind === 'round') {
     b.cylinder(half - 0.2, half - 0.2 + 0.3, L.plinthH, L.plinthSegments, S.hullDark, { y: y + L.plinthH / 2 });
     if (neon) b.torus(half - 0.6, L.neonTube, 4, L.plinthSegments * 2, TAU, S.neon, { rx: Math.PI / 2, y: top + 0.02 });
+    const rOut = half - 0.2 - TEAM.ring.gap;
+    flatRing(b, S.teamShade, rOut - TEAM.ring.w, rOut, top + TEAM.ring.lift, TEAM.ring.seg);   // team ring on the plinth top
   } else if (F.kind === 'stage') {
     b.cylinder(half - 0.2, half - 0.2 + DETAIL.stage.grow, L.plinthH, F.segments, S.hullDark, { y: y + L.plinthH / 2 });
     if (neon) b.torus(half - 0.2, L.neonTube, 4, F.segments * 2, TAU, S.neon, { rx: Math.PI / 2, y: top });
+    const rOut = (half - 0.2) * Math.cos(Math.PI / F.segments) - TEAM.ring.gap;   // inside the octagon
+    flatRing(b, S.teamShade, rOut - TEAM.ring.w, rOut, top + TEAM.ring.lift, TEAM.ring.seg);
   } else if (F.kind === 'armored') {
     const A = DETAIL.armored;
     const h = L.plinthH + A.skirtExtra;
@@ -159,10 +190,14 @@ function foundation(c, F) {
     for (const e of [-1, 1]) b.box(w * A.bandShare, A.bandH, A.bandT, S.lower, { y: y + A.bandY, z: e * (half - 0.3 + A.bandT / 2) });
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) spike(b, kit, { x: sx * (half - 0.3), y: y + h, z: sz * (half - 0.3), h: A.spikeH, r: A.spikeR });
     top = y + h;
+    flatFrame(b, S.teamShade, half - 0.3 - TEAM.frame.inset, TEAM.frame.w, top, TEAM.frame.h);
+    teamTrim(b, kit, { y: top, w, d: w });
   } else {
     styledBox(b, kit, (half - 0.3) * 2, L.plinthH, (half - 0.3) * 2, S.hullDark, { base: true, y });
     const F2 = DETAIL.front;
     marking(b, kit, F2.markLen, F2.markH, { y: y + F2.markY, z: half - 0.3 + F2.markOut });
+    flatFrame(b, S.teamShade, half - 0.3 - TEAM.frame.inset, TEAM.frame.w, top, TEAM.frame.h);
+    teamTrim(b, kit, { y: top, w: (half - 0.3) * 2, d: (half - 0.3) * 2 });
   }
   const B = L.bore;
   b.cylinder(B.r, B.r, B.discH, B.segments, S.hole, { y: top + B.discH / 2 });
@@ -182,7 +217,7 @@ function cabinet(c, K, baseY) {
   const size = LAYOUT.emblemSize;
   if (K.kind === 'dome') {
     b.cylinder(K.r, K.r, K.h, G.domeSegments, S.hull, { x: K.x, y: baseY + K.h / 2, z: K.z });
-    b.add(new THREE.SphereGeometry(K.r, G.domeSegments, G.domeRings, 0, TAU, 0, Math.PI / 2), S.hull, { x: K.x, y: baseY + K.h, z: K.z, sy: G.domeFlat });
+    b.add(new THREE.SphereGeometry(K.r, G.domeSegments, G.domeRings, 0, TAU, 0, Math.PI / 2), S.teamPaint, { x: K.x, y: baseY + K.h, z: K.z, sy: G.domeFlat, detail: TEAM.detail });   // team dome
     if (neon) b.cylinder(K.r + 0.04, K.r + 0.04, G.neonH, G.domeSegments, S.neon, { x: K.x, y: baseY + K.h * 0.85, z: K.z }, true);
     b.box(G.doorW, G.doorH, G.doorT, S.interior, {
       base: true, x: K.x - Math.sin(G.doorAngle) * K.r, y: baseY, z: K.z + Math.cos(G.doorAngle) * K.r, ry: -G.doorAngle,
@@ -203,6 +238,9 @@ function cabinet(c, K, baseY) {
   if (neon) neonStrip(b, kit, K.w * 0.85, G.neonH, G.neonT, { x: K.x, y: baseY + K.h - G.neonDrop, z: front + G.neonOut });
   const bx = (K.topW ?? K.w) / 2 - G.beaconInset;
   beacon(b, beaconA, kit, [K.x + bx, baseY + K.h, K.z + K.d / 2 - G.beaconInset]);
+  const roofW = K.topW ?? K.w;   // team lip + mark on the cabinet roof
+  teamTrim(b, kit, { x: K.x, y: baseY + K.h, z: K.z, w: roofW, d: K.d });
+  roofMark(b, kit, { x: K.x, y: baseY + K.h, z: K.z, w: roofW * TEAM.cabinetRoof.wShare, d: K.d * TEAM.cabinetRoof.dShare });
   c.decals.push({ position: [K.x + K.w * G.decalX, baseY + K.h * G.decalY, front], normal: [0, 0, 1], size });
   if (K.kind === 'box') c.decals.push({ position: [K.x + K.w / 2, baseY + K.h * G.decalY, K.z], normal: [1, 0, 0], size });
 }
@@ -213,7 +251,7 @@ function derrick(c, Dr, y0) {
   const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
   const half = (t) => Dr.base + (Dr.top - Dr.base) * t;
   const pt = (sx, sz, t) => [sx * half(t), y0 + Dr.h * t, sz * half(t)];
-  for (const [sx, sz] of corners) strut(b, pt(sx, sz, 0), pt(sx, sz, 1), Dr.legW, S[Dr.legS]);
+  for (const [sx, sz] of corners) strut(b, pt(sx, sz, 0), pt(sx, sz, 1), Dr.legW, S[Dr.legS], TEAM.detail);   // legs = team paint (see DIM)
   for (let i = 0; i <= Dr.sections; i++) {
     const t0 = (i - 1) / Dr.sections;
     const t1 = i / Dr.sections;
@@ -228,7 +266,7 @@ function derrick(c, Dr, y0) {
   }
   const yTop = y0 + Dr.h;
   const Cr = DETAIL.crown;
-  styledBox(b, kit, Dr.crownW, Dr.crownH, Dr.crownW, S.hull, { base: true, y: yTop });
+  styledBox(b, kit, Dr.crownW, Dr.crownH, Dr.crownW, S.teamShade, { base: true, y: yTop, detail: TEAM.detail });
   b.cylinder(Dr.crownW * Cr.sheaveShare, Dr.crownW * Cr.sheaveShare, Dr.crownW * 0.8, 12, S.frame, { y: yTop + Dr.crownH + Dr.crownW * Cr.sheaveShare * Cr.sheaveLift, rz: Math.PI / 2 });
   beacon(b, glows.get('beaconA'), kit, [0, yTop + Dr.crownH, 0]);
   if (Dr.spikes) {
@@ -241,7 +279,7 @@ function derrick(c, Dr, y0) {
 /** Three plasma arches rising from the pad and meeting above the bore, crown orb with a ring and halo */
 function arches(c, A, y0) {
   const { b, S, glows } = c;
-  for (let k = 0; k < 3; k++) b.torus(A.R, A.tube, 6, 24, Math.PI / 2, S.hull, { ry: A.phase + (k * TAU) / 3, sy: A.stretch, y: y0 });
+  for (let k = 0; k < 3; k++) b.torus(A.R, A.tube, 6, 24, Math.PI / 2, S.teamPaint, { ry: A.phase + (k * TAU) / 3, sy: A.stretch, y: y0, detail: TEAM.detail });   // team arches
   const top = y0 + A.R * A.stretch;
   b.sphere(A.crownR, 16, 10, S.plasma, { y: top });
   b.torus(A.ringR, A.ringTube, 4, 24, TAU, S.neon, { rx: Math.PI / 2, y: top });
@@ -258,9 +296,9 @@ function tripod(c, T, y0) {
     return [Math.cos(a) * r, y0 + T.h * t, Math.sin(a) * r];
   };
   const angles = [0, 1, 2].map((i) => T.phase + (i * TAU) / 3);
-  for (const a of angles) strut(b, at(a, 0), at(a, 1), T.legW, S.hullDark);
+  for (const a of angles) strut(b, at(a, 0), at(a, 1), T.legW, S.teamPaint, TEAM.detail);   // team legs
   for (const t of T.levels) for (let i = 0; i < 3; i++) strut(b, at(angles[i], t), at(angles[(i + 1) % 3], t), T.braceW, S.frame);
-  b.cylinder(T.crownR, T.crownR * 0.8, T.crownH, 6, S.trim, { y: yTop + T.crownH / 2 });
+  b.cylinder(T.crownR, T.crownR * 0.8, T.crownH, 6, S.teamShade, { y: yTop + T.crownH / 2, detail: TEAM.detail });
   const g = new THREE.OctahedronGeometry(T.lensSize, 0);
   g.scale(1, T.lensStretch, 1);
   b.add(g, S.lens, { y: yTop - T.lensSize * 0.4 });
@@ -279,10 +317,10 @@ function buildString(kit, K) {
   if (K.kind === 'rotary') {
     const top = -K.swivelH;
     b.box(K.pipeR * 2.5, K.swivelH, K.pipeR * 2.5, S.hullDark, { y: -K.swivelH / 2 });
-    b.cylinder(K.pipeR, K.pipeR, K.pipeLen, 10, S.trim, { y: top - K.pipeLen / 2 });
+    b.cylinder(K.pipeR, K.pipeR, K.pipeLen, 10, S.teamPaint, { y: top - K.pipeLen / 2 });   // the drill pipe is team paint
     for (let i = 1; i <= K.collars; i++) b.cylinder(K.pipeR * 1.35, K.pipeR * 1.35, 0.22, 10, S.frame, { y: top - (K.pipeLen * i) / (K.collars + 1) });
     b.box(K.pipeR * 1.4, 0.8, 0.15, S.accent, { x: K.pipeR * 1.2, y: top - K.pipeLen * 0.55 });
-    b.cylinder(K.pipeR * 1.1, K.pipeR * 1.1, 0.5, 10, S.team, { y: top - K.pipeLen * 0.25 });
+    b.cylinder(K.pipeR * 1.1, K.pipeR * 1.1, 0.5, 10, S.teamShade, { y: top - K.pipeLen * 0.25 });
     const y1 = top - K.pipeLen;
     b.cylinder(K.bitR, 0.12, K.bitLen, 10, S.frame, { y: y1 - K.bitLen / 2 });
     for (let k = 0; k < K.teeth; k++) {
@@ -293,9 +331,9 @@ function buildString(kit, K) {
   } else if (K.kind === 'hammer') {
     const top = -K.swivelH;
     b.box(K.shaft * 1.5, K.swivelH, K.shaft * 1.5, S.hullDark, { y: -K.swivelH / 2 });
-    b.box(K.shaft, K.pipeLen, K.shaft, S.hullDark, { y: top - K.pipeLen / 2 });
+    b.box(K.shaft, K.pipeLen, K.shaft, S.teamPaint, { y: top - K.pipeLen / 2 });
     for (let i = 1; i <= K.flanges; i++) b.box(K.shaft * 1.7, 0.25, K.shaft * 1.7, S.frame, { y: top - (K.pipeLen * i) / (K.flanges + 1) });
-    b.box(K.shaft * 1.05, 0.5, K.shaft * 1.05, S.team, { y: top - K.pipeLen * 0.25 });
+    b.box(K.shaft * 1.05, 0.5, K.shaft * 1.05, S.teamShade, { y: top - K.pipeLen * 0.25 });
     const y1 = top - K.pipeLen;
     b.cylinder(K.bitR, 0.05, K.bitLen, 4, S.frame, { y: y1 - K.bitLen / 2, ry: Math.PI / 4 });
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) spike(b, kit, { x: sx * K.bitR * 0.6, y: y1, z: sz * K.bitR * 0.6, h: 0.7, r: 0.16 });
@@ -305,7 +343,7 @@ function buildString(kit, K) {
     const top = -K.orbR * 2;
     b.cylinder(K.stemR, K.stemR, K.pipeLen, 10, S.trim, { y: top - K.pipeLen / 2 });
     const y1 = top - K.pipeLen;
-    b.cylinder(K.coneR, 0.06, K.coneLen, 14, S.hull, { y: y1 - K.coneLen / 2 });
+    b.cylinder(K.coneR, 0.06, K.coneLen, 14, S.teamPaint, { y: y1 - K.coneLen / 2 });
     for (let k = 0; k < K.fins; k++) {
       const a = (k / K.fins) * TAU;
       b.box(0.08, K.coneLen * 0.8, 0.55, S.trim, { x: Math.cos(a) * K.coneR * 0.45, y: y1 - K.coneLen * 0.45, z: Math.sin(a) * K.coneR * 0.45, ry: -a });
@@ -317,16 +355,16 @@ function buildString(kit, K) {
     b.sphere(0.2, 8, 6, S.plasma, { y: y1 - K.coneLen });
     length = K.orbR * 2 + K.pipeLen + K.coneLen;
   } else {
-    b.box(K.plateW, K.plateH, K.plateW, S.trim, { y: -K.plateH / 2, ry: Math.PI / 4 });
+    b.box(K.plateW, K.plateH, K.plateW, S.teamPaint, { y: -K.plateH / 2, ry: Math.PI / 4 });
     const top = -K.plateH;
-    b.cylinder(K.stemR, K.stemR, K.pipeLen, 6, S.trim, { y: top - K.pipeLen / 2 });
+    b.cylinder(K.stemR, K.stemR, K.pipeLen, 6, S.teamPaint, { y: top - K.pipeLen / 2 });
     const y1 = top - K.pipeLen;
     const g = new THREE.OctahedronGeometry(K.size, 0);
     g.scale(1, K.stretch, 1);
     b.add(g, S.lens, { y: y1 - K.size * K.stretch });
     for (let k = 0; k < K.plates; k++) {
       const a = (k / K.plates) * TAU;
-      b.box(0.5, 0.05, 0.9, S.trim, { x: Math.cos(a) * K.plateR, y: y1 - K.size * K.stretch, z: Math.sin(a) * K.plateR, ry: -a });
+      b.box(0.5, 0.05, 0.9, S.teamPaint, { x: Math.cos(a) * K.plateR, y: y1 - K.size * K.stretch, z: Math.sin(a) * K.plateR, ry: -a });
     }
     length = K.plateH + K.pipeLen + K.size * K.stretch * 2;
   }
@@ -359,20 +397,20 @@ function buildProbes(kit, P) {
   for (const e of [-1, 1]) {
     const x = e * PROBE.r;
     if (P.kind === 'piston') {
-      b.box(P.w, len, P.w, S.hullDark, { base: true, x });
+      b.box(P.w, len, P.w, S.teamPaint, { base: true, x });
       b.box(P.w * 1.6, 0.3, P.w * 1.6, S.frame, { x, y: len * 0.55 });
       spike(b, kit, { x, y: len, z: 0, h: P.tipH, r: P.tipR });
     } else if (P.kind === 'needle') {
-      b.cylinder(0.05, 0.2, len, P.seg, S.hull, { x, y: len / 2 });
+      b.cylinder(0.05, 0.2, len, P.seg, S.teamPaint, { x, y: len / 2 });
       b.sphere(0.35, 10, 8, S.plasma, { x, y: len + 0.2 });
       b.torus(0.5, 0.05, 4, 16, TAU, S.neon, { rx: Math.PI / 2, x, y: len * 0.6 });
     } else if (P.kind === 'lance') {
       const g = new THREE.OctahedronGeometry(0.45, 0);
       g.scale(1, 3.4, 1);
       b.add(g, S.lens, { x, y: len * 0.5 + 0.5 });
-      b.cylinder(0.06, 0.06, len * 0.6, P.seg, S.trim, { x, y: len * 0.3 });
+      b.cylinder(0.06, 0.06, len * 0.6, P.seg, S.teamPaint, { x, y: len * 0.3 });
     } else {
-      b.cylinder(0.22, 0.22, len, P.seg, S.trim, { x, y: len / 2 });
+      b.cylinder(0.22, 0.22, len, P.seg, S.teamPaint, { x, y: len / 2 });
       b.cylinder(0.4, 0.4, 0.35, P.seg, S.frame, { x, y: len });
       spike(b, kit, { x, y: len + 0.175, z: 0, h: 0.8, r: 0.18 });
     }
@@ -384,7 +422,7 @@ function buildProbes(kit, P) {
 function probeSleeves(c, P, y0) {
   const { b, S } = c;
   for (const [x, z] of [[PROBE.r, 0], [-PROBE.r, 0], [0, PROBE.r], [0, -PROBE.r]]) {
-    b.cylinder(PROBE.sleeveR, PROBE.sleeveR * 1.15, PROBE.sleeveH, P.seg, S.hullDark, { x, y: y0 + PROBE.sleeveH / 2, z });
+    b.cylinder(PROBE.sleeveR, PROBE.sleeveR * 1.15, PROBE.sleeveH, P.seg, S.teamShade, { x, y: y0 + PROBE.sleeveH / 2, z, detail: TEAM.detail });
   }
 }
 

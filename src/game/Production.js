@@ -1,4 +1,4 @@
-// Steel Mans – production of every team, inside the simulation (world.production, ticked by World.update).
+// Steel Men – production of every team, inside the simulation (world.production, ticked by World.update).
 // The UI (BuildMenu, RobotProduction, ResearchView, Hud) only reads this state and submits commands
 // (src/game/commands/productionCommands.js); the AI and remote players use exactly the same commands.
 //

@@ -1,4 +1,4 @@
-// Steel Mans – hover highlight of whole units (mech, vehicle, building) – SIT
+// Steel Men – hover highlight of whole units (mech, vehicle, building) – SIT
 // Mechs highlight all their parts (MechPart owns its cloned materials). Vehicles and buildings may share materials
 // with other instances, so a highlighted mesh gets a private material clone that is swapped back on release –
 // the shared material itself is never touched (otherwise every unit sharing it would stay lit).
@@ -10,6 +10,7 @@ const ORIGINAL = 'highlightOriginal';
 export function setUnitHighlight(unit, on) {
   if (!unit) return;
   unit.procModel?.setHighlighted?.(on); // [18P] batched procedural body: instance attribute (other meshes continue below)
+  if (unit.procModel?.isProcUnit) return; // procedural units: highlight is the instance attribute only (no material clones)
   if (unit.parts) { // mech
     for (const part of Object.values(unit.parts)) part?.setHighlighted(on);
     return;

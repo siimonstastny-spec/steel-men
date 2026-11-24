@@ -1,7 +1,7 @@
-// Steel Mans – start menu: title screen, new game setup (faction + team colour per team, fog of war, rules)
+// Steel Men – start menu: title screen, new game setup (faction + team colour per team, fog of war, rules)
 // and the Settings screen (SettingsScreen.js). The last new-game choice is kept in the player profile
 // (src/core/Profile.js) and handed to the game through onStart(settings). All texts go through i18n.
-import { MENU, ECONOMY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, GAME_VERSION } from '../config.js';
+import { MENU, ECONOMY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, GAME_VERSION, GAME_NAME } from '../config.js';
 import { pickAiNames } from '../ai/AiProfiles.js'; // [N6] call signs of computer players
 import { avatarHtml, humanAvatarHtml } from './Avatar.js';
 import { validPrebuild } from '../game/PreBuild.js'; // [N8] pre-build phase option
@@ -391,7 +391,7 @@ export class MainMenu {
       <div class="menu-bg"></div>
       <div class="menu-content">
         <header class="menu-title">
-          <h1>Steel Men</h1>
+          <h1>${GAME_NAME}</h1>
           <p>${t('menu.title.tagline')}</p>
         </header>
 

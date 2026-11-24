@@ -1,8 +1,8 @@
-// Steel Mans – keeps the camera look-at point (OrbitControls target) inside the map.
+// Steel Men – keeps the camera look-at point (OrbitControls target) inside the map.
 // The map is a square centred on the origin with side world.map.size (the same convention as Minimap.toMini).
 import { CAMERA_BOUNDS } from '../config.js';
 
-let sizeProvider = () => globalThis.steelMans?.world?.map?.size; // lazy: the map can be rebuilt per game
+let sizeProvider = () => globalThis.steelMen?.world?.map?.size; // lazy: the map can be rebuilt per game
 
 /** Optional explicit wiring (e.g. from main.js): fn() returns the current map side length */
 export function setMapSizeProvider(fn) { sizeProvider = fn; }

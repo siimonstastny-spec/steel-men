@@ -1,8 +1,8 @@
-// Steel Mans – combat rules: who can hit whom, engagement range, firing and resolving hits.
+// Steel Men – combat rules: who can hit whom, engagement range, firing and resolving hits.
 // All numbers come from data/stats.json (weapon stats and rules.combat).
 import * as THREE from 'three';
 import { getStats, applyArmor, teamRule } from '../data/Stats.js';
-import { VFX, AUDIO, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY, LOS } from '../config.js';
+import { VFX, GENERATOR_BLAST, AUDIO, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY, LOS } from '../config.js';
 import { play } from '../audio/Sound.js';
 import { applyWeaponEffects } from './StatusEffects.js';
 import { areAllies } from './Alliances.js';
@@ -359,7 +359,7 @@ export function releaseAttack(world, attacker, weapon, target, { hit = 'single' 
       if (!attacker.airborne && !target.airborne && losImpact(world, from, aim)) { // aircraft fly over obstacles (as clearShot)
         const stop = _losHit.clone(); // allocation only on a blocked shot
         if (s.projectileSpeed > 0) world.effects.projectile(from, () => stop, s.projectileSpeed, color, () => {}, projectileLook(s));
-        else world.effects.tracer(from, stop, color);
+        else world.effects.tracer(from, stop, s.projectileColor || color);
         return;
       }
       if (s.spread > 0) { firePellet(world, attacker, s, from, aim, color); return; }
@@ -384,7 +384,7 @@ export function releaseAttack(world, attacker, weapon, target, { hit = 'single' 
         const homing = () => (isTargetable(target) ? aimPoint(target, _v) : aim);
         world.effects.projectile(from, miss ? () => miss : homing, s.projectileSpeed, color, land, projectileLook(s));
       } else {
-        world.effects.tracer(from, miss ?? aim, color);
+        world.effects.tracer(from, miss ?? aim, s.projectileColor || color); // data colour (e.g. laser beams) overrides the damage-type colour
         land(miss ?? aim);
       }
     });
@@ -485,7 +485,7 @@ function resolveWreckImpact(world, attacker, s, wreck, point) {
 /**
  * Console test: hit statistics of a weapon (stats object, e.g. one of mech.weapons[i].stats) against a target at
  * several shares of its range – uses the formula (hitChance) and 'shots' real rolls of world.rng.
- * Changes the rng state: only for tests (steelMans.world is not advanced otherwise). Target speed is read from `target`.
+ * Changes the rng state: only for tests (steelMen.world is not advanced otherwise). Target speed is read from `target`.
  * @returns {{ rangeShare, distance, chance, hitRate }[]}
  */
 export function accuracyReport(world, attacker, s, target, shots = ACCURACY.testShots) {
@@ -579,6 +579,31 @@ function explode(world, attacker, s, point, exclude, score) {
 }
 
 /**
+ * Death blast of a building (stats.structures[id].explosion, e.g. powerGenerator): hurts everything within
+ * `radius` of `origin` – own and other buildings (different damage), units of every team (friendly fire setting
+ * is ignored on purpose). Damage falls linearly from full at the centre to × `falloff` at the edge, measured to the
+ * nearest point of each body. Generators in range are blown up too when `chainsToGenerators` (their own blast
+ * is scheduled by Structure.destroy, so chains never recurse). Deterministic: world.units order, no attacker (no XP).
+ */
+export function structureBlast(world, source, origin, ex) {
+  world.effects.burst(GENERATOR_BLAST.layers, groundPoint(world, origin), {
+    size: ex.radius * GENERATOR_BLAST.visualSizePerRadius, heightUnit: GENERATOR_BLAST.heightUnit,
+  });
+  const type = ex.damageType ?? 'energy';
+  const chained = ex.chainsToGenerators ? [] : null;
+  for (const unit of world.units) {
+    if (unit === source) continue;
+    const d = distanceToBody(unit, origin);
+    if (d > ex.radius) continue;
+    const base = !unit.isStructure ? ex.damageUnits : unit.team === source.team ? ex.damageOwnBuildings : ex.damageOtherBuildings;
+    const amount = base * THREE.MathUtils.lerp(1, ex.falloff, d / ex.radius);
+    if (amount > 0) dealDamage(null, unit, { [type]: amount }, origin);
+    if (chained && unit.isStructure && unit.complete && unit.stats?.explosion?.chainsToGenerators) chained.push(unit);
+  }
+  if (chained) for (const unit of chained) if (!unit.dead) unit.destroy();
+}
+
+/**
  * Damage to a wreck on the ground (arm / legs / torso): weapon damage × factor × rules.wrecks.damageFactor,
  * reduced by the part's armour. At 0 HP the wreck explodes and disappears (World.destroyWreck).
  */
@@ -649,7 +674,7 @@ function pierce(world, attacker, s, from, point, target, score) {
   const hits = traceUnits(world, attacker, s, point, dir, p.length, [attacker, target], p.count);
   for (const h of hits) applyHit(world, attacker, s, h.unit, p.damageFactor * h.factor, point, 1, score);
   const color = (s.damage.energy ?? 0) > (s.damage.physical ?? 0) ? COLOR_ENERGY : COLOR_PHYSICAL;
-  world.effects.tracer(point, hits.at(-1)?.point ?? point.clone().addScaledVector(dir, p.length), color);
+  world.effects.tracer(point, hits.at(-1)?.point ?? point.clone().addScaledVector(dir, p.length), s.projectileColor || color);
 }
 
 /**

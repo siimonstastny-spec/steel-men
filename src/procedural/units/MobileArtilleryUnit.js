@@ -1,11 +1,11 @@
-// Steel Mans – procedural mobile artillery (roadmap U2): long-range tracked gun that must anchor before firing.
+// Steel Men – procedural mobile artillery (roadmap U2): long-range tracked gun that must anchor before firing.
 //   • setDeployed(0..1): four outriggers swing down to the ground and the whole gun cradle lifts (bone `cradle`, deploy
 //     channel rx); setBarrelPitch(rad) pitches the barrel on top of the lift (limits ARTILLERY_SHAPES.gun.pitch)
 //   • long heavy cannon (muzzle socket, recoil, flash), sensor mast for the long sight range, status lamp
 //   • sockets: muzzle, turret, aim, cargo, smoke; bones: turret, cradle, barrel, recoil, leg_1..4
 // Model units (before VEHICLE.modelScale × stats.modelScale): ≈ 8.8 long (+ barrel), 5.2 wide, 3.2 high. Visual only.
-import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit } from './UnitKit.js';
-import { hull, tracks, turret, weapon, statusLamp, outriggers, UNIT_MODULES } from './UnitModules.js';
+import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit, UNIT_KIT } from './UnitKit.js';
+import { hull, tracks, turret, weapon, statusLamp, outriggers, roofMark, UNIT_MODULES } from './UnitModules.js';
 
 /** Shapes by style.silhouette (sizes in model units; shares of L / W where noted) */
 export const ARTILLERY_SHAPES = {
@@ -21,6 +21,13 @@ export const ARTILLERY_SHAPES = {
   },
 };
 
+// team mark in front of the turret (roofMark; round / faceted hulls have no flat deck: module caps / strakes are their team paint).
+// z, d = shares of the hull length, w = share of W; ledge = angular hull: on the flat lower-hull ledge ahead of the deck (else on the deck top)
+// cover = darker team deck cover under / around the turret (shares of W, hull length, hull length); the deck mark stands on it
+const DECK_MARK = {
+  rounded: { z: 0.216, d: 0.2, w: 0.6, ledge: false, cover: { w: 0.7, d: 0.7, z: -0.05 } },
+  angular: { z: 0.37, d: 0.12, w: 0.7, ledge: true, cover: { w: 0.64, d: 0.58, z: -0.06 } },
+};
 const SOCKET_AIM = 0.5;   // aim socket at hull top + turret height × this
 const LEG_SPADE = 0.06;   // reserve below the leg length for the spade thickness
 const SMOKE_Z = 0.45;     // smoke socket z share of the hull length (behind the centre)
@@ -33,13 +40,22 @@ function buildArtillery(kit) {
   const S = kit.S;
   const ub = new UnitBuilder(kit);
   const th = L * s.trackH;
-  tracks(ub, { L, gauge: W * s.gauge, tw: W * s.trackW, th });
+  // team colour: module team layouts (skirts / plates / caps, roof marks, emblems on plates) + a deck mark
+  tracks(ub, { L, gauge: W * s.gauge, tw: W * s.trackW, th, team: true });
   const hullY = th * s.hullLift;
   ub.bone('hull', 'root', [0, hullY, 0]);
   ub.meta.hull = { bone: 'hull', bank: false };
-  const hl = hull(ub, { bone: 'hull', y: 0, L: L * s.hullL, W, H });
+  const hullLen = L * s.hullL;
+  const hl = hull(ub, { bone: 'hull', y: 0, L: hullLen, W, H, team: true });
+  const dm = DECK_MARK[kit.style.silhouette];
+  const coverH = dm ? UNIT_KIT.teamPaint.roofMark.h : 0;
+  if (dm) {
+    const c = dm.cover;
+    ub.paint('hull').box(W * c.w, coverH, hullLen * c.d, S.teamShade, { y: hl.top + coverH / 2, z: hullLen * c.z, detail: UNIT_KIT.teamPaint.lod.roofMark });
+    roofMark(ub, 'hull', { y: dm.ledge ? H * UNIT_MODULES.hull.angular.lowerShare : hl.top + coverH, z: hullLen * dm.z, w: W * dm.w, d: hullLen * dm.d });
+  }
   const t = s.turret;
-  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h });
+  const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
   // cradle: lifts with setDeployed, the weapon's own barrel bone pitches on top of it
   ub.bone('cradle', 'turret', [0, tr.mid, tr.front * s.cradleZ]);
   ub.deploy('cradle', 'rx', -s.liftAngle);

@@ -1,4 +1,4 @@
-// Steel Mans – beam into the sky above every finished main building (stats.json `hq: true`) in its owner's colour.
+// Steel Men – beam into the sky above every finished main building (stats.json `hq: true`) in its owner's colour.
 // Purely visual: it reads the world, never changes it. Wiring (main.js): `const hqBeams = new HqBeams(world)` once,
 // then `hqBeams.update()` every simulation tick or frame – it creates a beam for each finished hq (also a captured
 // or late-built one) and Effects.beam releases it when the building is destroyed. Look: R2.hqBeam in config.js.

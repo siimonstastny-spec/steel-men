@@ -1,4 +1,4 @@
-// Steel Mans – edge scrolling: the cursor at a window edge pans the camera along the ground.
+// Steel Men – edge scrolling: the cursor at a window edge pans the camera along the ground.
 // Runs only when Settings → Game → edge scrolling is on (profile settings.ui.edgeScroll, read live),
 // the window has focus, the cursor is over the map (not a HUD panel, not outside the window) and no menu is open.
 import * as THREE from 'three';

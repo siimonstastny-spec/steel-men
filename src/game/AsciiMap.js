@@ -1,4 +1,4 @@
-// Steel Mans – ASCII map grid -> map data (used by GameMap for files with a "rows" array, see docs/notes/maps.md).
+// Steel Men – ASCII map grid -> map data (used by GameMap for files with a "rows" array, see docs/notes/maps.md).
 //
 //   '#' wall (high, impassable)     '?' grass        '.' concrete
 //   'S' start (touching S cells = one start)          '-' rift: only hover / air units cross it

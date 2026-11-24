@@ -1,4 +1,4 @@
-// Steel Mans – ore deposit on the map (data/maps/*.json → oreDeposits, superNode.ore). DrillTrucks park next
+// Steel Men – ore deposit on the map (data/maps/*.json → oreDeposits, superNode.ore). DrillTrucks park next
 // to it and mine directly: ore goes straight to the team account (Vehicle harvest order). The deposit runs out
 // unless the game has infinite deposits (world.settings.economy.infiniteDeposits).
 //   def: { x, z, radius, amount, rateFactor, maxHarvesters, superNode? }

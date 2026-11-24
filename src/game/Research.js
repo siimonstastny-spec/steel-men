@@ -1,4 +1,4 @@
-// Steel Mans – research of every team (stats.json → research, rules.research, rules.salvageResearch).
+// Steel Men – research of every team (stats.json → research, rules.research, rules.salvageResearch).
 // The code knows no research ids or factions, everything comes from the data:
 //   • which research a team sees: races[*].exclusive.research (canProduce 'research'), common ones for all
 //   • tiers: rules.research.tiers[tier] { requiresStructures, requiresCompleted { tier, count } }

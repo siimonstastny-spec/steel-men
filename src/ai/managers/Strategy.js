@@ -1,4 +1,4 @@
-// Steel Mans AI – strategy: a small state machine over the blackboard.
+// Steel Men AI – strategy: a small state machine over the blackboard.
 //   build  – economy and army grow (the opening build order runs in Construction)
 //   attack – Military forms a wave and attacks; ends when the wave is spent or retreats
 //   defend – enemies at the base for longer than the reaction delay; ends when the threat is gone

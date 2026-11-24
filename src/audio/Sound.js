@@ -1,4 +1,4 @@
-// Steel Mans – sound hook. Game code calls play('shotCannon', { position }) – nothing else is needed.
+// Steel Men – sound hook. Game code calls play('shotCannon', { position }) – nothing else is needed.
 // eventName -> file is the map AUDIO.events in config.js. A missing file (or an unknown event) is skipped silently,
 // so sounds can be added later by just dropping files into sounds/ – no game code changes.
 // Volume = master × category (effects / music) × distance falloff when a position is given.

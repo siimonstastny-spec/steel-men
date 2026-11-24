@@ -1,4 +1,4 @@
-// Steel Mans – HUD v2 robot panel (bottom centre, exactly one mech selected): artwork robot-panel.png with
+// Steel Men – HUD v2 robot panel (bottom centre, exactly one mech selected): artwork robot-panel.png with
 //   left column (arm / arm / crew boxes + EJECT buttons), hologram (5 masks tinted by --hud-neon, a missing part = no mask),
 //   right labels (crew, torso, right arm, left arm, legs). Layout numbers: config.js HUD_PANELS.robot, styles selection-panel.css.
 // Pure view: html(mech) returns the markup, onPointer(e) handles the EJECT buttons through the input command path.

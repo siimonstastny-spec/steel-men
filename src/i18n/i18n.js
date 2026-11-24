@@ -1,4 +1,4 @@
-// Steel Mans – localisation. Keys are flat dotted strings ('menu.newGame'); tables are in cs.js and en.js.
+// Steel Men – localisation. Keys are flat dotted strings ('menu.newGame'); tables are in cs.js and en.js.
 //   t('key')                      -> translated text (missing key: fallback language, then the key itself)
 //   t('hud.population', { value: 5 }) -> '{value}' placeholders are replaced
 //   setLanguage('en'), getLanguage(), onLanguageChange(fn), applyTranslations(root)

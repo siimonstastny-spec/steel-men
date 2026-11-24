@@ -1,4 +1,4 @@
-// Steel Mans – registry of procedural building models (roadmap 18). Structure.js and the preview ask here whether a
+// Steel Men – registry of procedural building models (roadmap 18). Structure.js and the preview ask here whether a
 // structure id has a procedural model and create it. A new building registers with one line in
 // PROCEDURAL_STRUCTURES (id = stats.json → structures key). Visual only.
 import { PROC_BUILDINGS } from '../config.js';
@@ -24,6 +24,7 @@ import { MobileWallProc } from './MobileWallProc.js';
 import { WallSegmentProc } from './WallSegmentProc.js';
 import { MobileWallGunTurretProc, MobileWallLaserTurretProc } from './WallTurretProc.js';
 import { WallGateProc } from './WallGateProc.js';
+import { CrewQuartersProc } from './CrewQuartersProc.js';
 
 export { loadBuildingStyles } from './BuildingStyle.js';
 
@@ -52,6 +53,7 @@ const PROCEDURAL_STRUCTURES = {
   mobileWallGunTurret: (race, teamColor) => new MobileWallGunTurretProc({ race, teamColor }),
   mobileWallLaserTurret: (race, teamColor) => new MobileWallLaserTurretProc({ race, teamColor }),
   wallGate: (race, teamColor) => new WallGateProc({ race, teamColor }),
+  crewQuarters: (race, teamColor) => new CrewQuartersProc({ race, teamColor }),
 };
 
 /** Structure ids that have a procedural model */
@@ -60,8 +62,8 @@ export const proceduralIds = () => Object.keys(PROCEDURAL_STRUCTURES);
 /** Has this structure id a procedural model? */
 export const hasProceduralModel = (id) => Object.hasOwn(PROCEDURAL_STRUCTURES, id);
 
-/** Procedural models switched on: PROC_BUILDINGS.enabled, and `window.steelMans.procedural = false` turns them off (comparison) */
-export const proceduralEnabled = () => PROC_BUILDINGS.enabled && globalThis.window?.steelMans?.procedural !== false;
+/** Procedural models switched on: PROC_BUILDINGS.enabled, and `window.steelMen.procedural = false` turns them off (comparison) */
+export const proceduralEnabled = () => PROC_BUILDINGS.enabled && globalThis.window?.steelMen?.procedural !== false;
 
 /** Should this structure use its procedural model now? */
 export const useProceduralModel = (id) => proceduralEnabled() && hasProceduralModel(id);

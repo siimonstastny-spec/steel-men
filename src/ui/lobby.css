@@ -1,9 +1,10 @@
-/* Steel Mans – multiplayer lobby screen (LobbyScreen.js). Uses the --menu-* variables and the shared classes
+/* Steel Men – multiplayer lobby screen (LobbyScreen.js). Uses the --menu-* variables and the shared classes
    (.menu-card, .menu-btn, .faction, .swatch, .rule, ...) of menu.css; only lobby-specific rules live here. */
 .menu-card.lobby { max-width: 1120px; width: 100%; box-sizing: border-box; } /* [B1] seat grid + settings column, see setup.css */
 
 .lobby-choose { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 4px; }
 .lobby-choose .menu-btn { flex: 1 1 200px; text-align: center; }
+.lobby-choose .menu-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); } /* [LOBBY_LIST] list outside P2P */
 
 .lobby-status { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; color: var(--menu-muted); font-size: 14px; }
 .lobby-spinner {
@@ -69,8 +70,46 @@
 .faction:disabled.on { opacity: 1; }
 .rule:has(input:disabled) { cursor: default; }
 
+/* [LOBBY_LIST] create form, game list, lobby title, kick */
+.lobby-form { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; max-width: 420px; }
+.lobby-form .row-label { margin: 8px 0 0; }
+.lobby-text {
+  box-sizing: border-box; width: 100%; padding: 8px 10px;
+  border: 1px solid var(--menu-border); border-radius: 0; background: var(--menu-faction-bg); color: var(--menu-text-bright);
+  box-shadow: inset 1px 1px 4px rgba(0,0,0,0.7); font: 15px var(--menu-font);
+}
+.lobby-text:focus { outline: none; border-color: var(--menu-accent); box-shadow: inset 1px 1px 4px rgba(0,0,0,0.7), var(--menu-neon-glow); }
+.lobby-text:disabled { opacity: 0.5; cursor: not-allowed; }
+.lobby-visibility { display: flex; flex-wrap: wrap; gap: 6px; }
+.lobby-pass-ask { margin-top: 12px; }
+.lobby-pass-ask .lobby-buttons { margin-left: 0; margin-top: 6px; }
+
+.lobby-browse { margin: 8px 0; min-height: 60px; }
+.lobby-games { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
+.lobby-game {
+  display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr) minmax(0, 1.2fr) 64px 28px; gap: 8px; align-items: center;
+  width: 100%; box-sizing: border-box; padding: 8px 10px; text-align: left;
+  border: 1px solid var(--menu-border); border-radius: 0; background: var(--menu-brushed), var(--menu-faction-bg);
+  color: var(--menu-text); font: 14px var(--menu-font); cursor: pointer; box-shadow: var(--menu-edge);
+}
+.lobby-game > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lobby-game:hover:not(:disabled), .lobby-game:focus-visible { border-color: var(--menu-accent); outline: none; box-shadow: var(--menu-edge), var(--menu-neon-glow); }
+.lobby-game.on { border-color: var(--menu-accent); background: var(--menu-selected-bg); }
+.lobby-game.off, .lobby-game:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(1); }
+.lobby-game.head { background: none; border-color: transparent; box-shadow: none; cursor: default; color: var(--menu-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; padding-top: 0; padding-bottom: 0; }
+.lobby-lock { text-align: center; }
+
+.lobby-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding-bottom: 10px; }
+.lobby-name { margin: 0; color: var(--menu-text-bright); font-size: 20px; overflow-wrap: anywhere; }
+.lobby-visibility-box { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.lobby-visibility-box .row-label { margin: 0; }
+.lobby-kick.armed { border-color: #d65a4a; color: #ff8a7a; }
+
 /* narrow window */
 @media (max-width: 520px) {
+  .lobby-game { grid-template-columns: minmax(0, 1fr) 52px 24px; }
+  .lobby-game > :nth-child(2), .lobby-game > :nth-child(3) { display: none; }
+  .lobby-visibility-box { margin-left: 0; }
   .lobby-controls { flex-direction: column; align-items: stretch; }
   .lobby-buttons { margin-left: 0; }
   .lobby-buttons .menu-btn, .lobby-controls > .menu-btn { flex: 1 1 auto; }

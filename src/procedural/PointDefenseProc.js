@@ -1,4 +1,4 @@
-// Steel Mans – procedural point defense system (roadmap 18, defence buildings). Drop-in alternative to
+// Steel Men – procedural point defense system (roadmap 18, defence buildings). Drop-in alternative to
 // models/3DStructures{race}/PointDefenseSystem{race}_Anim.glb, built from the style modules (ProcModules.js):
 //   • plinth + tower (static, buildLods) → turret head on a slew ring (one mesh, turns) → 3 flak barrels (one mesh, recoil)
 //   • launch sockets: Object3D nodes named like the GLB nodes (PDS_SOCKETS = stats.json launchSockets), children of the
@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { PartBuilder, Spinner, Blinker } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, neonStrip, beacon, ventUnit, fanBladesGeometry, ringGeometry,
-  spike, emblemDecalGeometry, Levitator, pulseWave, PROC_MODULES,
+  spike, emblemDecalGeometry, Levitator, pulseWave, PROC_MODULES, teamTrim, roofMark,
 } from './ProcModules.js';
 
 const TAU = Math.PI * 2;
@@ -56,6 +56,22 @@ export const DEFENSE_DETAIL = {
   hsRatio: { neonLen: 0.6, neonZ: -0.1, turretBeacon: 0.55, mastFlare: 1.2, lensR: 1.4, weightH: 2, weightD: 1.4 },
   towerRing: { tube: 0.05, ys: [0.35, 0.7], over: 0.04 },
   sensor: { mastR: 0.25, dishR: 1.5, dishDepth: 0.35, dishTilt: 0.7, armR: 0.14, barLen: 3.6, barH: 0.25, barD: 0.35, weight: 0.5, crystalR: 0.8, crystalStretch: 1.7 },
+};
+
+/**
+ * Team paint of the defence kit (large surfaces; docs/notes/proc-teampaint-d.md). Plinth: belt / armoured base / disc skirt /
+ * faceted skirt + lip + roof mark, tower: collar; head: slew ring, top plate / back panel / dome drum. Parts that turn
+ * (head, barrels) use the shared paint material, so setTeamColor recolours them; static parts are team = 1 vertices.
+ */
+export const DEFENSE_TEAM = {
+  detail: 2,                                          // coarsest LOD the team parts appear in
+  belt: { yShare: 0.7, hShare: 0.6, out: 0.02 },      // box plinth: belt round the four faces (share of plinth h)
+  skirt: { hShare: 0.5, out: 0.05 },                  // faceted plinth: team skirt box (share of plinth h)
+  lip: { inset: 0.15 },                               // lip (teamTrim) on the plinth top edge: inset from the plinth edge
+  mark: { zShare: { box: 0.62, armored: 0.52 }, wShare: 0.8, dShare: 0.26 },   // roof mark in front of the tower (share of R)
+  collar: { h: 0.6, hMaxShare: 0.4, over: 1.04 },     // tower base collar
+  headPlate: { wShare: 0.4, dShare: 0.4, zShare: 0.15, t: 0.08 },   // team plate on the head top (box / wedge)
+  headBack: { wShare: 0.7, hShare: 0.4, t: 0.08 },    // team panel on the back face of a box head
 };
 
 /** Point defence shapes by style.silhouette (code knows shapes, the style data picks one; unknown → rounded).
@@ -105,49 +121,51 @@ const shapeOf = (style) => PDS_SHAPES[style.silhouette] ?? PDS_SHAPES.rounded;
  */
 export function defensePlinth(b, glows, kit, spec) {
   const D = DEFENSE_DETAIL;
+  const T = DEFENSE_TEAM;
   const S = kit.S;
   const { R, h } = spec;
   const neon = kit.style.neon >= D.neonMin;
   const lamp = glows.get(kit.style.lights === 'lamp' ? 'beacon' : 'pulse');
   let face = R;
-  let bandY = h * D.bandYShare;
   let top = h;
   switch (spec.kind) {
     case 'armored': {
       const body = R * 2 * D.armor.bodyShare;
       const topW = R * 2 * D.armor.topShare;
-      b.box(R * 2, spec.baseH, R * 2, S.hullDark, { base: true });
+      b.box(R * 2, spec.baseH, R * 2, S.teamPaint, { base: true, detail: T.detail });   // armoured base = team paint
       b.taperedBox(body, topW, h - spec.baseH, body, S.hull, { y: spec.baseH }, topW);
       for (const sx of [-1, 1]) for (const sz of [-1, 1]) spike(b, kit, { x: sx * (R - D.armor.spikeInset), y: spec.baseH, z: sz * (R - D.armor.spikeInset), h: D.armor.spikeH, r: D.armor.spikeR });
-      bandY = spec.baseH / 2;
       break;
     }
     case 'disc': {
       const lower = h * D.disc.lowerShare;
       const upper = h - lower;
-      b.cylinder(R * D.disc.lowerTop, R, lower, D.disc.seg, S.hull, { y: lower / 2 });
+      b.cylinder(R * D.disc.lowerTop, R, lower, D.disc.seg, S.teamPaint, { y: lower / 2, detail: T.detail });   // lower disc = team paint
       b.cylinder(R * D.disc.upperTop, R * D.disc.upperBottom, upper, D.disc.seg, S.hullDark, { y: lower + upper / 2 });
-      b.torus(R * D.disc.bandR, D.band.h / 2, 4, D.disc.seg, TAU, S.team, { rx: HALF_PI, y: h * D.disc.bandY });
+      b.torus(R * D.disc.bandR, D.band.h / 2, 4, D.disc.seg, TAU, S.teamShade, { rx: HALF_PI, y: h * D.disc.bandY, detail: T.detail });
       if (neon) b.torus(R * D.disc.neonR, D.neonBand.h / 2, 4, D.disc.seg, TAU, S.neon, { rx: HALF_PI, y: h * D.neonBand.yShare });
       break;
     }
     case 'faceted': {
       face = R * D.facet.bodyShare;
       styledBox(b, kit, face * 2, h, face * 2, S.hull, { base: true }, 1);
+      b.box(face * 2 + 2 * T.skirt.out, h * T.skirt.hShare, face * 2 + 2 * T.skirt.out, S.teamPaint, { base: true, detail: T.detail });
+      teamTrim(b, kit, { y: h, w: face * 2 - T.lip.inset, d: face * 2 - T.lip.inset }, { detail: T.detail });
       b.box(R * Math.SQRT2, D.facet.capH, R * Math.SQRT2, S.hullDark, { y: h + D.facet.capH / 2, ry: Math.PI / 4 });
       top = h + D.facet.capH;
       break;
     }
     default:
       styledBox(b, kit, R * 2, h, R * 2, S.hull, { base: true }, 1);
+      b.box(R * 2 + 2 * T.belt.out, h * T.belt.hShare, R * 2 + 2 * T.belt.out, S.teamPaint, { y: h * T.belt.yShare, detail: T.detail });
+      teamTrim(b, kit, { y: h, w: R * 2 - T.lip.inset, d: R * 2 - T.lip.inset }, { detail: T.detail });
   }
-  if (spec.kind !== 'disc') {   // team band round the four faces, neon line + markings on the front
+  if (spec.kind === 'box' || spec.kind === 'armored') {   // big roof mark (RTS camera) in front of the tower, clear of the beacons
+    roofMark(b, kit, { y: h, z: R * T.mark.zShare[spec.kind], w: R * T.mark.wShare, d: R * T.mark.dShare }, { detail: T.detail });
+  }
+  if (spec.kind !== 'disc') {   // neon line + markings on the front (the team paint sits in the belt / base / skirt above)
     const out = D.band.t / 2;
     const w = face * 2 * D.band.inset;
-    for (const e of [-1, 1]) {
-      b.box(w, D.band.h, D.band.t, S.team, { y: bandY, z: e * (face + out) });
-      b.box(D.band.t, D.band.h, w, S.team, { x: e * (face + out), y: bandY });
-    }
     if (neon && spec.kind !== 'armored') neonStrip(b, kit, w, D.neonBand.h, D.neonBand.t, { y: h * D.neonBand.yShare, z: face + out });
     marking(b, kit, face * D.mark.lenShare, D.mark.h, { y: h * D.mark.yShare, z: face + D.mark.out });
   }
@@ -162,7 +180,11 @@ export function defensePlinth(b, glows, kit, spec) {
 /** Tower (cylinder with `seg` sides; 4 = square pillar) from y0 up to y0 + h, neon rings for neon-rich styles */
 export function defenseTower(b, kit, t, y0) {
   const D = DEFENSE_DETAIL;
-  b.cylinder(t.rTop, t.rBottom, t.h, t.seg, kit.S.hullDark, { y: y0 + t.h / 2, ry: t.seg === 4 ? Math.PI / 4 : 0 });
+  const T = DEFENSE_TEAM.collar;
+  const ry = t.seg === 4 ? Math.PI / 4 : 0;
+  b.cylinder(t.rTop, t.rBottom, t.h, t.seg, kit.S.hullDark, { y: y0 + t.h / 2, ry });
+  const ch = Math.min(T.h, t.h * T.hMaxShare);   // team collar at the tower foot
+  b.cylinder(t.rBottom * T.over, t.rBottom * T.over, ch, t.seg, kit.S.teamShade, { y: y0 + ch / 2, ry, detail: DEFENSE_TEAM.detail });
   if (kit.rich) {
     for (const k of D.towerRing.ys) {
       const rr = t.rBottom + (t.rTop - t.rBottom) * k + D.towerRing.over;
@@ -189,19 +211,23 @@ export function turretHead(b, kit, hd) {
   const y0 = D.ringH;
   const hh = headHeight(hd);
   const faceX = headFaceX(hd);
-  b.cylinder(hd.ring, hd.ring * D.ringFlare, D.ringH, D.seg.ring, S.hullDark, { y: D.ringH / 2 });
+  const T = DEFENSE_TEAM;
+  b.cylinder(hd.ring, hd.ring * D.ringFlare, D.ringH, D.seg.ring, S.teamShade, { y: D.ringH / 2 });   // slew ring = team paint (turns with the head)
   switch (hd.kind) {
     case 'wedge':
       b.taperedBox(hd.w, hd.topW, hd.h, hd.d, S.hull, { y: y0 }, hd.topD);
+      b.box(hd.topW * T.headPlate.wShare, T.headPlate.t, hd.topD * T.headPlate.dShare, S.teamPaint, { y: y0 + hh + T.headPlate.t / 2, z: hd.topD * T.headPlate.zShare });
       break;
     case 'dome': {
       const drum = hd.r * hd.flat;
-      b.cylinder(hd.r, hd.r * D.ringFlare, drum, D.seg.dome, S.hull, { y: y0 + drum / 2 });
+      b.cylinder(hd.r, hd.r * D.ringFlare, drum, D.seg.dome, S.teamPaint, { y: y0 + drum / 2 });   // drum = team paint
       b.sphere(hd.r, D.seg.dome, D.seg.domeV, S.hull, { y: y0 + drum, sy: hd.flat });
       break;
     }
     default:
       styledBox(b, kit, hd.w, hd.h, hd.d, S.hull, { base: true, y: y0 }, hd.edge ?? 1);
+      b.box(hd.w * T.headPlate.wShare, T.headPlate.t, hd.d * T.headPlate.dShare, S.teamPaint, { y: y0 + hh + T.headPlate.t / 2, z: hd.d * T.headPlate.zShare });
+      b.box(hd.w * T.headBack.wShare, hh * T.headBack.hShare, T.headBack.t, S.teamPaint, { y: y0 + hh / 2, z: -hd.d / 2 });
   }
   const mid = y0 + (hd.kind === 'dome' ? (hd.r * hd.flat) / 2 : hh / 2);
   const placements = [];

@@ -1,4 +1,4 @@
-// Steel Mans AI – research (v2): queueResearch by the plan of the difficulty (data/ai/research.json): research is
+// Steel Men AI – research (v2): queueResearch by the plan of the difficulty (data/ai/research.json): research is
 // chosen by ROLE derived from its stats.json effects (AiData.researchRolesOf), never by name; weapon research only when
 // own units use the weapons it improves. Captured parts at the research facility are analysed (queueAnalysis), and
 // spare HoverTrucks fetch legs / torso wrecks (salvage) – a full truck drives to the research facility by itself, a

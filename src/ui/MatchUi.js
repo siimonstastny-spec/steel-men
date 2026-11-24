@@ -1,4 +1,4 @@
-// Steel Mans – in-game menu (Esc when there is nothing to cancel, F10, or the ☰ button) and the end-of-match
+// Steel Men – in-game menu (Esc when there is nothing to cancel, F10, or the ☰ button) and the end-of-match
 // screen with the statistics of all teams.
 //   resume · [multiplayer: pause] · settings (the start menu's Settings screen, returns here) · surrender (confirm)
 //   · quit to menu (confirm)

@@ -1,4 +1,4 @@
-// Steel Mans – faction styles of procedural buildings (data/buildingStyles.json). Loaded once (cached promise, like
+// Steel Men – faction styles of procedural buildings (data/buildingStyles.json). Loaded once (cached promise, like
 // data/Stats.js); building models read a style synchronously, so loadBuildingStyles() must have finished before the
 // first procedural model is created (main.js at start, Structure.load and ProcPreview also await it).
 // Code never names factions: a race key that is not in the data uses the first style. Visual only.

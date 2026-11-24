@@ -1,4 +1,4 @@
-// Steel Mans – vstupní bod – SIT
+// Steel Men – vstupní bod – SIT
 import * as THREE from 'three';
 import { createScene } from './core/SceneSetup.js';
 import { World } from './game/World.js';
@@ -54,7 +54,7 @@ import { installAiConsole } from './ai/aiVsAi.js';
 import { setPlayerLabels, playerLabel } from './core/PlayerLabels.js';
 import { setPingNameResolver } from './ui/Pings.js';
 // [N7] ping messages name AI allies by their N6 name, humans "Player N" (lobby nicknames: later)
-setPingNameResolver((team) => playerLabel(team) || window.steelMans?.net?.nameOf(team) || t('ping.player', { n: team + 1 })); // [MP-LEAVE] lobby nickname
+setPingNameResolver((team) => playerLabel(team) || window.steelMen?.net?.nameOf(team) || t('ping.player', { n: team + 1 })); // [MP-LEAVE] lobby nickname
 // Command executors register themselves on import (src/game/commands/CommandBus.js)
 import './game/commands/unitCommands.js';
 import './game/commands/productionCommands.js';
@@ -69,6 +69,7 @@ import { startMultiplierFromSettings } from './game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings, applyStartResearch } from './game/StartResearch.js';
 import { EconomyAlerts } from './ui/EconomyAlerts.js'; // [D2]
 import { spawnProceduralPreview } from './procedural/ProcPreview.js'; // [N3] prototype, console only
+import { spawnRobotPreview } from './procedural/robots/RobotPreview.js'; // [proc-robot] experiment, console only
 import { loadBuildingStyles } from './procedural/BuildingStyle.js'; // [18A] faction building styles (data/buildingStyles.json)
 
 const { renderer, scene, camera, controls, ground } = createScene(document.getElementById('app'));
@@ -107,7 +108,7 @@ const game = {
 };
 const raceOf = (team) => game.races[team] ?? game.races[0];
 
-const RESTART_KEY = 'steelMans.restart'; // sessionStorage: settings of a solo restart (survives the reload only)
+const RESTART_KEY = 'steelMen.restart'; // sessionStorage: settings of a solo restart (survives the reload only)
 let lastSoloSettings = null;             // settings of the running solo match (for Restart)
 
 // Game menu (Esc / ☰) and the end-of-match screen; quit = reload (the start menu remembers the last choice)
@@ -129,21 +130,25 @@ const matchUi = new MatchUi({
 input.onGameMenu = () => matchUi.toggleMenu();
 // [B4] player score bar above the minimap and the diplomacy menu (U / HUD button)
 const nameOf = (team) => playerLabel(team) || (isLocal(team) ? (getSettings().nickname || t('common.player'))
-  : window.steelMans?.net?.nameOf?.(team) || t('ping.player', { n: team + 1 }));
+  : window.steelMen?.net?.nameOf?.(team) || t('ping.player', { n: team + 1 }));
 const statsBar = new PlayerStatsBar({ nameOf });
 const diplomacy = new DiplomacyView({ nameOf });
 const stockWindow = new StockWindow(); // [F1]
 input.onStockWindow = () => stockWindow.toggle();
 let econAlerts = null; // [D2] no main building / low energy; created at the first match (needs loaded stats)
 
-// Debug handle for the browser console, e.g. steelMans.input.selection, steelMans.game.playerRace
-// commandBus: steelMans.commandBus.submit({...}); world.stateHash() / world.rng / world.tick for determinism checks
-// startGame(settings): console tests of N players, e.g. steelMans.startGame({ playerCount: 4, alliances: [0, 0, 1, 1], … })
-window.steelMans = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow };
-installAiConsole(); // steelMans.ai.start / fastForward / report / log / stop (AI vs AI test)
-// [N3] procedural factory preview: p = await steelMans.spawnProceduralPreview('Y', '#c8302c', {x, y, z}); p.dispose()
-window.steelMans.spawnProceduralPreview = (race = 'X', color = '#3a5ccc', pos = { x: 0, y: 0, z: 0 }, opts) =>
+// Debug handle for the browser console, e.g. steelMen.input.selection, steelMen.game.playerRace
+// commandBus: steelMen.commandBus.submit({...}); world.stateHash() / world.rng / world.tick for determinism checks
+// startGame(settings): console tests of N players, e.g. steelMen.startGame({ playerCount: 4, alliances: [0, 0, 1, 1], … })
+window.steelMen = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow };
+window.steelMans = window.steelMen; // TEMP alias after the rename to STEEL MEN (old console scripts / briefs); remove in v28
+installAiConsole(); // steelMen.ai.start / fastForward / report / log / stop (AI vs AI test)
+// [N3] procedural factory preview: p = await steelMen.spawnProceduralPreview('Y', '#c8302c', {x, y, z}); p.dispose()
+window.steelMen.spawnProceduralPreview = (race = 'X', color = '#3a5ccc', pos = { x: 0, y: 0, z: 0 }, opts) =>
   spawnProceduralPreview(scene, pos, race, color, opts);
+// [proc-robot] p = await steelMen.spawnRobotPreview('W', '#3a5ccc', {x, y, z}, { combos: 'all', original: true }); p.dispose()
+window.steelMen.spawnRobotPreview = (race = 'W', color = '#3a5ccc', pos = { x: 0, y: 0, z: 0 }, opts) =>
+  spawnRobotPreview(scene, race, color, pos, opts);
 
 // Místa pro nové roboty: řady po 5 vedle sebe
 // Spawn areas = map start positions (world.map.startPositions): player at 0, enemy at the opposite one
@@ -323,7 +328,7 @@ function startingBaseJobs(team, race, base, catalog) {
   return jobs;
 }
 
-/** Test scene (?test=1 / steelMans.startTestScene()): the player also gets the finished robot production buildings (TEST_SCENE.structures) */
+/** Test scene (?test=1 / steelMen.startTestScene()): the player also gets the finished robot production buildings (TEST_SCENE.structures) */
 function testStructureJobs(team, race, base) {
   return TEST_SCENE.structures.map((id) => ({
     load: () => new Structure(id, race, { team, complete: true, yaw: base.yaw, name: unitName('structures', id) }).load(),
@@ -417,7 +422,7 @@ async function startGame(settings) {
   await Promise.all([loadStats(), loadBuildingStyles()]); // [18A] styles before any procedural building is created
   game.startSet = validStartSet(settings.startSet, getStats()); // [N15] multiplayer: the host's settings.startSet
   game.victory = validConditionForSet(game.victory, game.startSet, getStats()); // a set without a main building cannot play 'mainBuilding'
-  world.economy = new Economy(world, { races: game.races, ...world.settings.economy });
+  world.economy = new Economy(world, { races: game.races, startSet: game.startSet, ...world.settings.economy });
   map.placeDeposits?.(seed); // ASCII maps: deposits on random field cells from the match seed
   world.economy.setupDeposits(map);
   // Research per team (src/game/Research.js): no sharing with allies, unlocks go into game.unlocks[team]
@@ -467,7 +472,7 @@ async function startGame(settings) {
 }
 
 /**
- * Test scene (development only: ?test=1 or steelMans.startTestScene()): robot production buildings of seat 0, two
+ * Test scene (development only: ?test=1 or steelMen.startTestScene()): robot production buildings of seat 0, two
  * crewed robots + a spare crew of seat 0 and a crewed enemy squad. Not part of a normal start (start sets).
  */
 async function startTestScene() {
@@ -505,7 +510,7 @@ async function startTestScene() {
     hud.message(t('menu.errorLoading'));
   }
 }
-window.steelMans.startTestScene = startTestScene;
+window.steelMen.startTestScene = startTestScene;
 
 /** In-game UI of a match: build / production / research menus, HUD, match end (the units exist already) */
 async function initUi() {
@@ -603,7 +608,7 @@ function stopNet() {
   netChannel?.leave();
   net = null;
   netChannel = null;
-  window.steelMans.net = null;
+  window.steelMen.net = null;
 }
 
 /** lobby.onStart → same world on every client: seed and seats from the host, then the lockstep starts ticking */
@@ -625,7 +630,7 @@ async function startMultiplayer(info) {
     aiTeams: byTeam.map((seat, team) => (seat.controller === 'ai' ? team : -1)).filter((team) => team >= 0), // [MP-LEAVE] they idle with the host when it leaves
   });
   netChannel = info.channel;
-  window.steelMans.net = net;
+  window.steelMen.net = net;
   // [N11] text chat next to the lockstep (same channel, topic 'chat', outside the simulation)
   chat = new Chat({ channel: info.channel, players: info.players, localTeam: info.localTeam, isAlly: areAllies });
   chatBox = new ChatBox({ chat, t, getColor: (team) => TEAMS[team]?.color });

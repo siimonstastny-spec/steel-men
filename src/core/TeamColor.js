@@ -1,4 +1,4 @@
-// Steel Mans – team colours. All models share one "team blue" painted into their textures
+// Steel Men – team colours. All models share one "team blue" painted into their textures
 // (hue ~222°). applyTeamColor() re-hues exactly that blue to the player's colour and keeps
 // the shading, so robots, crews, vehicles and buildings all recolour the same way.
 import * as THREE from 'three';

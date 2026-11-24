@@ -1,4 +1,4 @@
-// Steel Mans – multiplayer lobby screen (opened from MainMenu). Talks only to the Lobby API of
+// Steel Men – multiplayer lobby screen (opened from MainMenu). Talks only to the Lobby API of
 // docs/MULTIPLAYER.md (src/net/Lobby.js): create / join, seat list, own faction + colour + ready,
 // host game settings, Start. Texts go through t('lobby.*'); styles in lobby.css (loaded by this module).
 import { NET, MENU, ECONOMY, VICTORY, LOBBY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS } from '../config.js';
@@ -14,13 +14,15 @@ import { startResearchFromSettings } from '../game/StartResearch.js';
 import { optionsHtml, mapSelectHtml, readOptionChange, friendlyFireHtml } from './GameOptions.js'; // [B1]
 import { allianceLetter, ffaAlliances, hasEnoughAlliances, normalizeAlliances, presetAlliances } from '../core/AllianceSetup.js';
 import { colorsTooSimilar, firstDistinctColor } from '../core/ColorCheck.js';
-import { getAvatarImage, getSettings } from '../core/Profile.js';
+import { getAvatarImage, getSettings, getLobbyPrefs, saveLobbyPrefs } from '../core/Profile.js';
 import { t } from '../i18n/i18n.js';
 import { loadMapCatalog, validMapId, validMapChoice, isRandomMap, maxMapPlayers } from '../game/MapCatalog.js'; // [MAPS]
 import { cleanPicks } from '../game/MapStarts.js';
 import { MapPreview, applyStartPick } from './MapPreview.js';
-import { getNetDiagnosis, inArtifact } from '../net/transports/index.js';
+import { getNetDiagnosis, inArtifact, supportsDirectory } from '../net/transports/index.js';
 import { startNetProbe } from '../net/netProbe.js';
+import { LobbyDirectory } from '../net/LobbyDirectory.js'; // [LOBBY_LIST] list of public games (P2P only)
+import { cleanGameName } from '../net/Lobby.js';
 
 // Network chosen in the lobby inside an artifact ('room' = platform, 'p2p' = WebRTC over Nostr relays, null = default).
 // Kept for this page load only (no profile): both players must pick the same one.
@@ -59,7 +61,18 @@ export class LobbyScreen {
     this.onStart = onStart;
     this.onBack = onBack;
     this.onUnavailable = onUnavailable;
-    this.phase = 'choose'; // 'choose' | 'join' | 'connecting' | 'lobby' | 'error' | 'unavailable'
+    // 'choose' | 'createForm' | 'joinMenu' | 'browse' | 'join' (code) | 'connecting' | 'lobby' | 'error' | 'unavailable'
+    this.phase = 'choose';
+    this.errorView = 'choose'; // [LOBBY_LIST] phase 'error' shows this view (where the failed attempt started) + the error
+    this.form = { name: '', visibility: LOBBY.defaultVisibility, password: '' }; // create form (password never stored)
+    this.joinPassword = '';    // code form
+    this.browseSel = null;     // browse: locked game picked { key, code, name } (asks for its password)
+    this.browsePassword = '';
+    this.directory = null;     // LobbyDirectory while the game list is shown
+    this.directoryToken = 0;   // bumped when the directory is dropped (a create still in flight is discarded)
+    this.directoryPending = false;
+    this.directoryFailed = false;
+    this.kickArm = null;       // host: player id whose Kick button waits for the confirming second click
     this.error = '';
     this.errorTech = ''; // technical code of the error (room error code, …) shown next to it
     this.failLine = ''; // network line captured when a connection attempt failed (the transport is replaced on retry)
@@ -85,9 +98,20 @@ export class LobbyScreen {
     el.addEventListener('focusout', () => { if (this.renderPending) setTimeout(() => this.#render(), 0); });
     el.addEventListener('click', (e) => this.#onClick(e));
     el.addEventListener('change', (e) => this.#onChange(e));
-    el.addEventListener('input', (e) => { if (e.target.dataset.lbCode !== undefined) this.codeValue = e.target.value; });
+    el.addEventListener('input', (e) => {
+      const d = e.target.dataset;
+      if (d.lbCode !== undefined) this.codeValue = e.target.value;
+      else if (d.lbInput === 'name') this.form.name = e.target.value; // [LOBBY_LIST]
+      else if (d.lbInput === 'password') this.form.password = e.target.value;
+      else if (d.lbInput === 'joinPassword') this.joinPassword = e.target.value;
+      else if (d.lbInput === 'browsePassword') this.browsePassword = e.target.value;
+    });
     el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target.dataset.lbCode !== undefined) { e.preventDefault(); this.#join(); }
+      if (e.key !== 'Enter') return;
+      const d = e.target.dataset;
+      if (d.lbCode !== undefined || d.lbInput === 'joinPassword') { e.preventDefault(); this.#join(); }
+      else if (d.lbInput === 'name' || d.lbInput === 'password') { e.preventDefault(); this.#create(); } // [LOBBY_LIST]
+      else if (d.lbInput === 'browsePassword') { e.preventDefault(); this.#joinPicked(); }
     });
     this.#render();
   }
@@ -103,6 +127,11 @@ export class LobbyScreen {
     this.errorTech = '';
     this.failLine = '';
     this.codeValue = '';
+    this.joinPassword = '';  // [LOBBY_LIST]
+    this.browseSel = null;
+    this.browsePassword = '';
+    this.form.password = '';
+    this.errorView = 'choose';
     this.phase = 'connecting'; // no clicks while claude.use / selfId are awaited (up to several seconds)
     this.#render();
     const session = this.session;
@@ -162,6 +191,36 @@ export class LobbyScreen {
     try { this.transport?.dispose?.(); } catch { /* already gone */ }
     this.transport = null;
     this.#disposePreview();
+    this.#disposeDirectory(); // [LOBBY_LIST]
+    this.kickArm = null;
+  }
+
+  // ---- [LOBBY_LIST] game list: subscribed only while the list is on screen ----
+  #isBrowsing() { return this.phase === 'browse' || (this.phase === 'error' && this.errorView === 'browse'); }
+
+  /** Called after every render: starts the directory when the list is shown (P2P), drops it otherwise */
+  #syncDirectory() {
+    const want = this.#isBrowsing() && supportsDirectory(this.transport);
+    if (!want) { this.#disposeDirectory(); return; }
+    if (this.directory || this.directoryPending || this.directoryFailed) return;
+    this.directoryPending = true;
+    const token = this.directoryToken;
+    LobbyDirectory.create().then((dir) => {
+      if (token !== this.directoryToken) { dir?.dispose(); return; }
+      this.directoryPending = false;
+      if (!dir) { this.directoryFailed = true; this.#renderBrowseList(); return; }
+      this.directory = dir;
+      dir.onChange(() => this.#renderBrowseList());
+      this.#renderBrowseList();
+    });
+  }
+
+  #disposeDirectory() {
+    this.directoryToken++;
+    this.directoryPending = false;
+    this.directoryFailed = false;
+    this.directory?.dispose();
+    this.directory = null;
   }
 
   #disposePreview() {
@@ -176,6 +235,7 @@ export class LobbyScreen {
     if (!this.transport) return;
     const session = this.session;
     if (this.transport.diag) { delete this.transport.diag.lastLeave; delete this.transport.diag.joinError; }
+    const from = this.phase === 'error' ? this.errorView : this.phase; // [LOBBY_LIST] a failure returns to this view
     this.phase = 'connecting';
     this.error = '';
     this.errorTech = '';
@@ -183,7 +243,11 @@ export class LobbyScreen {
     this.#render();
     try {
       this.lobby = new this.mp.Lobby(this.transport);
-      this.unsub = this.lobby.onChange(() => this.#render());
+      this.unsub = this.lobby.onChange((st) => {
+        // [LOBBY_LIST] the host kicked us: leave and say so on the first screen
+        if (st?.kicked && this.lobby && !this.lobby.isHost) { this.#fail(new Error(t('lobby.error.kicked')), 'choose'); return; }
+        this.#render();
+      });
       this.lobby.onStart((info) => {
         // The game takes over the connection: do not leave the lobby here (open()/close() would)
         const net = { transport: this.transport, lobby: this.lobby };
@@ -201,33 +265,87 @@ export class LobbyScreen {
       this.phase = 'lobby';
     } catch (err) {
       if (session !== this.session) return; // leaving while connecting makes the join fail: nothing to show
-      this.phase = 'error';
-      // RoomError carries i18nKey + code (not_permitted, limit_reached …); other errors already hold a translated text
-      this.error = err?.i18nKey ? t(err.i18nKey) : err?.message ? String(err.message) : t('lobby.error.generic');
-      this.errorTech = String(err?.code ?? err?.detail ?? (err?.name === 'P2PError' ? String(err.i18nKey).split('.').pop() : ''));
-      this.failLine = this.#netLine(); // what we used and how many peers the room had (before the teardown)
-      this.#teardown();
-      const retry = this.session;
-      // a failed attempt needs a fresh transport on retry
-      let fresh = null;
-      try { fresh = await this.mp.createTransport(netChoice ? { prefer: netChoice } : undefined); } catch { fresh = null; }
-      if (retry !== this.session) { try { fresh?.dispose?.(); } catch { /* gone */ } return; }
-      this.transport = fresh;
-      if (!this.transport && this.#showUnavailable()) return;
-      if (!this.transport) { this.onUnavailable?.(); return; }
+      await this.#fail(err, from);
+      return;
     }
+    this.#render();
+  }
+
+  /** A connection attempt failed (or we were kicked): show the error on `view`, drop the connection, new transport */
+  async #fail(err, view) {
+    this.phase = 'error';
+    this.errorView = ['createForm', 'joinMenu', 'browse', 'join'].includes(view) ? view : 'choose';
+    // RoomError carries i18nKey + code (not_permitted, limit_reached …); other errors already hold a translated text
+    this.error = err?.i18nKey ? t(err.i18nKey) : err?.message ? String(err.message) : t('lobby.error.generic');
+    this.errorTech = String(err?.code ?? err?.detail ?? (err?.name === 'P2PError' ? String(err.i18nKey).split('.').pop() : ''));
+    this.failLine = this.#netLine(); // what we used and how many peers the room had (before the teardown)
+    this.browsePassword = '';
+    this.#teardown();
+    this.#render();
+    const retry = this.session;
+    // a failed attempt needs a fresh transport on retry
+    let fresh = null;
+    try { fresh = await this.mp.createTransport(netChoice ? { prefer: netChoice } : undefined); } catch { fresh = null; }
+    if (retry !== this.session) { try { fresh?.dispose?.(); } catch { /* gone */ } return; }
+    this.transport = fresh;
+    if (!this.transport && this.#showUnavailable()) return;
+    if (!this.transport) { this.onUnavailable?.(); return; }
     this.#render();
   }
 
   // [UISMALL] own picture as a tiny thumbnail for the others ('' = silhouette)
   async #identity() { return { name: this.#nickname(), avatarImg: await avatarForNetwork(getAvatarImage()) }; }
 
-  #create() { return this.#connect(async (l) => l.create(await this.#identity())); }
+  // [LOBBY_LIST] default game name follows the current nickname (profile name null)
+  #defaultGameName() { return cleanGameName(t('lobby.defaultName', { name: this.#nickname() })); }
+
+  #openCreateForm() {
+    const prefs = getLobbyPrefs();
+    this.form = { name: prefs.name ?? this.#defaultGameName(), visibility: prefs.visibility, password: '' };
+    this.phase = 'createForm';
+    this.error = '';
+    this.#render();
+  }
+
+  #create() {
+    const def = this.#defaultGameName();
+    const typed = cleanGameName(this.form.name);
+    // outside P2P 'public' cannot work: the stored choice stays as it was
+    saveLobbyPrefs({ name: typed && typed !== def ? typed : null, visibility: supportsDirectory(this.transport) ? this.form.visibility : undefined });
+    const opts = { gameName: typed || def, visibility: this.form.visibility, password: this.form.password };
+    this.form.password = ''; // used once, never kept
+    return this.#connect(async (l) => l.create({ ...(await this.#identity()), ...opts }));
+  }
 
   #join() {
     const code = this.codeValue.trim();
     if (!code) return;
-    return this.#connect(async (l) => l.join(code, await this.#identity()));
+    const password = this.joinPassword;
+    this.joinPassword = ''; // used once, never kept
+    return this.#connect(async (l) => l.join(code, { ...(await this.#identity()), password }));
+  }
+
+  /** Browse: a game row was clicked (locked → ask for the password first) */
+  #pickGame(key) {
+    const e = this.directory?.entries().find((x) => x.key === key);
+    if (!e || !e.compatible || e.full) return;
+    if (e.lock) {
+      this.browseSel = { key: e.key, code: e.code, name: e.name };
+      this.browsePassword = '';
+      this.error = '';
+      this.#render();
+      return;
+    }
+    this.browseSel = null;
+    this.#connect(async (l) => l.join(e.code, { ...(await this.#identity()), password: '' }));
+  }
+
+  #joinPicked() {
+    const sel = this.browseSel;
+    if (!sel) return;
+    const password = this.browsePassword;
+    this.browsePassword = ''; // used once, never kept
+    this.#connect(async (l) => l.join(sel.code, { ...(await this.#identity()), password }));
   }
 
   // ---- events ----
@@ -248,10 +366,30 @@ export class LobbyScreen {
     const d = btn.dataset;
     const lobby = this.lobby;
     switch (d.lb) {
-      case 'create': this.#create(); break;
+      // [LOBBY_LIST] create form, join menu (list / code), game list
+      case 'create': this.#openCreateForm(); break;
+      case 'createGo': this.#create(); break;
+      case 'visibility':
+        if (LOBBY.visibilities.includes(d.value)) {
+          this.form.visibility = d.value;
+          if (this.phase === 'lobby' && lobby && this.#isHost()) { saveLobbyPrefs({ visibility: d.value }); this.#call(() => lobby.setVisibility(d.value)); }
+          else this.#render();
+        }
+        break;
+      case 'joinMenu': this.phase = 'joinMenu'; this.error = ''; this.browseSel = null; this.#render(); break;
+      case 'browse': if (supportsDirectory(this.transport)) { this.phase = 'browse'; this.error = ''; this.browseSel = null; this.#render(); } break;
+      case 'pickGame': this.#pickGame(d.key); break;
+      case 'browseJoin': this.#joinPicked(); break;
+      case 'browseCancel': this.browseSel = null; this.browsePassword = ''; this.error = ''; this.#render(); break;
       case 'joinForm': this.phase = 'join'; this.error = ''; this.#render(); break;
       case 'join': this.#join(); break;
       case 'chooseBack': this.phase = 'choose'; this.error = ''; this.#render(); break;
+      case 'kick':
+        if (!this.#isHost() || !d.id) break;
+        if (this.kickArm !== d.id) { this.kickArm = d.id; this.#render(); break; } // first click arms, second kicks
+        this.kickArm = null;
+        this.#call(() => lobby.kick(d.id));
+        break;
       case 'leave': this.probe?.cancel(); this.probe = null; this.#teardown(); this.onBack?.(); break;
       case 'netSwitch': netChoice = netChoice === 'p2p' ? 'room' : 'p2p'; this.open(); break;
       case 'probe': this.#runProbe(); break;
@@ -497,17 +635,123 @@ export class LobbyScreen {
       return;
     }
     this.renderPending = false;
-    const body = {
+    const views = {
       choose: () => this.#viewChoose(),
+      createForm: () => this.#viewCreateForm(), // [LOBBY_LIST]
+      joinMenu: () => this.#viewJoinMenu(),
+      browse: () => this.#viewBrowse(),
       join: () => this.#viewJoin(),
       connecting: () => this.#viewStatus(t('lobby.status.connecting'), true),
-      error: () => this.#viewChoose(),
       lobby: () => this.#viewLobby(),
       unavailable: () => this.#viewUnavailable(),
-    }[this.phase]();
+    };
+    const body = (this.phase === 'error' ? views[this.errorView] ?? views.choose : views[this.phase])();
     this.el.innerHTML = `<h2>${t('lobby.title')}</h2>${body}${this.#netDiagHtml()}`;
     if (this.phase === 'lobby') this.#mountPreview(); // [MAPS]
     if (this.phase === 'join') this.el.querySelector('[data-lb-code]')?.focus();
+    if (this.phase === 'createForm') this.el.querySelector('[data-lb-input="name"]')?.focus();
+    if (this.#isBrowsing() && this.browseSel) this.el.querySelector('[data-lb-input="browsePassword"]')?.focus();
+    this.#syncDirectory(); // [LOBBY_LIST]
+  }
+
+  // ---- [LOBBY_LIST] create form, join menu, game list ----
+
+  /** Visibility buttons (create form and host lobby header); 'public' needs the P2P game list */
+  #visibilityButtons(current) {
+    const p2p = supportsDirectory(this.transport);
+    return LOBBY.visibilities.map((v) => {
+      const off = v === 'public' && !p2p;
+      return `<button class="faction${v === current ? ' on' : ''}" data-lb="visibility" data-value="${v}" aria-pressed="${v === current}"
+        title="${escapeHtml(t(off ? 'lobby.list.p2pOnly' : `lobby.visibility.${v}.hint`))}"${off ? ' disabled' : ''}><b>${t(`lobby.visibility.${v}`)}</b></button>`;
+    }).join('');
+  }
+
+  #viewCreateForm() {
+    const p2p = supportsDirectory(this.transport);
+    return `
+      <div class="lobby-form">
+        <label class="row-label" for="lobby-name">${t('lobby.form.name')}</label>
+        <input id="lobby-name" class="lobby-text" data-lb-input="name" type="text" maxlength="${LOBBY.nameMaxLength}"
+          autocomplete="off" spellcheck="false" value="${escapeHtml(this.form.name)}">
+        <div class="row-label">${t('lobby.form.visibility')}</div>
+        <div class="factions lobby-visibility">${this.#visibilityButtons(p2p ? this.form.visibility : 'code')}</div>
+        ${p2p ? '' : `<small class="menu-muted">${escapeHtml(t('lobby.list.p2pOnly'))}</small>`}
+        <label class="row-label" for="lobby-pass">${t('lobby.form.password')}</label>
+        <input id="lobby-pass" class="lobby-text" data-lb-input="password" type="password" maxlength="${LOBBY.passwordMaxLength}"
+          autocomplete="off" spellcheck="false" value="${escapeHtml(this.form.password)}"${p2p ? '' : ' disabled'}>
+        <small class="menu-muted">${escapeHtml(t(p2p ? 'lobby.form.passwordHint' : 'lobby.form.passwordP2pOnly'))}</small>
+      </div>
+      ${this.#errorLine()}
+      <div class="menu-actions">
+        ${this.#backBtn('chooseBack')}
+        <button class="menu-btn primary" data-lb="createGo">${t('lobby.form.create')}</button>
+      </div>`;
+  }
+
+  #viewJoinMenu() {
+    const p2p = supportsDirectory(this.transport);
+    return `
+      ${this.#errorLine()}
+      <div class="lobby-choose">
+        <button class="menu-btn${p2p ? ' primary' : ''}" data-lb="browse"${p2p ? '' : ` disabled title="${escapeHtml(t('lobby.list.p2pOnly'))}"`}>${t('lobby.list')}</button>
+        <button class="menu-btn" data-lb="joinForm">${t('lobby.joinByCode')}</button>
+      </div>
+      ${p2p ? '' : `<small class="menu-muted">${escapeHtml(t('lobby.list.p2pOnly'))}</small>`}
+      <div class="menu-actions">${this.#backBtn('chooseBack')}</div>`;
+  }
+
+  #viewBrowse() {
+    const sel = this.browseSel;
+    const ask = sel ? `
+      <div class="lobby-form lobby-pass-ask">
+        <label class="row-label" for="lobby-browse-pass">${escapeHtml(t('lobby.list.passwordFor', { name: sel.name }))}</label>
+        <input id="lobby-browse-pass" class="lobby-text" data-lb-input="browsePassword" type="password" maxlength="${LOBBY.passwordMaxLength}"
+          autocomplete="off" spellcheck="false" value="${escapeHtml(this.browsePassword)}">
+        <div class="lobby-buttons">
+          <button class="menu-btn" data-lb="browseCancel">${t('common.back')}</button>
+          <button class="menu-btn primary" data-lb="browseJoin">${t('lobby.joinGo')}</button>
+        </div>
+      </div>` : '';
+    return `
+      <div class="lobby-browse" data-role="lb-browse-list" aria-live="polite">${this.#browseListHtml()}</div>
+      ${ask}
+      ${this.#errorLine()}
+      <div class="menu-actions">${this.#backBtn('joinMenu')}</div>`;
+  }
+
+  /** Only the list part is redrawn on directory updates (inputs of the password prompt keep focus and text) */
+  #renderBrowseList() {
+    if (!this.#isBrowsing()) return;
+    const box = this.el?.querySelector('[data-role="lb-browse-list"]');
+    if (box) box.innerHTML = this.#browseListHtml();
+  }
+
+  #mapLabel(id) {
+    if (isRandomMap(id)) return t('setup.map.random');
+    return this.maps.find((m) => m.id === id)?.name ?? id;
+  }
+
+  #browseListHtml() {
+    const status = (key) => `<p class="lobby-status" role="status">${key === 'lobby.list.searching' ? '<span class="lobby-spinner" aria-hidden="true"></span>' : ''}${escapeHtml(t(key))}</p>`;
+    if (!supportsDirectory(this.transport)) return status('lobby.list.p2pOnly');
+    if (this.directoryFailed) return status('lobby.list.offline');
+    const dir = this.directory;
+    if (!dir) return status('lobby.list.searching');
+    const list = dir.entries();
+    const state = dir.state();
+    if (!list.length) return status(state === 'offline' ? 'lobby.list.offline' : state === 'open' ? 'lobby.list.empty' : 'lobby.list.searching');
+    const head = `<div class="lobby-game head"><span>${t('lobby.list.col.name')}</span><span>${t('lobby.list.col.host')}</span><span>${t('setup.map')}</span><span>${t('lobby.list.col.players')}</span><span></span></div>`;
+    const rows = list.map((e) => {
+      const off = !e.compatible || e.full;
+      const why = !e.compatible ? t('lobby.list.otherVersion', { build: e.build }) : e.full ? t('lobby.list.full') : '';
+      const sel = this.browseSel?.key === e.key;
+      return `<button class="lobby-game${off ? ' off' : ''}${sel ? ' on' : ''}" data-lb="pickGame" data-key="${escapeHtml(e.key)}"${off ? ' disabled' : ''}
+          title="${escapeHtml(why || e.name)}">
+        <b>${escapeHtml(e.name)}</b><span>${escapeHtml(e.host || t('common.player'))}</span><span>${escapeHtml(this.#mapLabel(e.map))}</span>
+        <span>${e.n}/${e.max}</span><span class="lobby-lock" ${e.lock ? `title="${escapeHtml(t('lobby.locked'))}"` : 'aria-hidden="true"'}>${e.lock ? '🔒' : ''}</span>
+      </button>`;
+    }).join('');
+    return `<div class="lobby-games" role="list">${head}${rows}</div>`;
   }
 
   #errorLine() {
@@ -567,6 +811,19 @@ export class LobbyScreen {
     return `<button class="menu-btn" data-lb="${action}">${t(action === 'leave' ? 'lobby.leave' : 'common.back')}</button>`;
   }
 
+  // [LOBBY_LIST] game name on top; the host also sees the lock and switches the visibility
+  #lobbyHeader(st, host) {
+    const name = cleanGameName(st.name);
+    if (!name && !host) return '';
+    const lock = host && this.lobby?.locked ? `<span class="lobby-lock" title="${escapeHtml(t('lobby.locked'))}" aria-label="${escapeHtml(t('lobby.locked'))}">🔒</span>` : '';
+    const vis = host ? `
+      <div class="lobby-visibility-box">
+        <span class="row-label">${t('lobby.form.visibility')}</span>
+        <div class="factions lobby-visibility">${this.#visibilityButtons(this.lobby?.visibility ?? 'code')}</div>
+      </div>` : '';
+    return `<div class="lobby-title-row"><h3 class="lobby-name">${escapeHtml(name)}</h3>${lock}${vis}</div>`;
+  }
+
   #viewStatus(text, busy) {
     return `<p class="lobby-status" role="status" aria-live="polite">${busy ? '<span class="lobby-spinner" aria-hidden="true"></span>' : ''}${escapeHtml(text)}</p>
       <div class="menu-actions">${this.#backBtn()}</div>`;
@@ -578,7 +835,7 @@ export class LobbyScreen {
       ${this.#errorLine()}
       <div class="lobby-choose">
         <button class="menu-btn primary" data-lb="create">${t('lobby.create')}</button>
-        <button class="menu-btn" data-lb="joinForm">${t('lobby.join')}</button>
+        <button class="menu-btn" data-lb="joinMenu">${t('lobby.join')}</button>
       </div>
       <div class="menu-actions">${this.#backBtn()}</div>`;
   }
@@ -589,9 +846,14 @@ export class LobbyScreen {
       <input id="lobby-code" class="lobby-code" data-lb-code type="text" maxlength="${LOBBY.codeMaxLength}"
         autocomplete="off" autocapitalize="characters" spellcheck="false" value="${escapeHtml(this.codeValue)}"
         placeholder="${escapeHtml(t('lobby.codePlaceholder'))}">
+      ${supportsDirectory(this.transport) ? `<div class="lobby-form">
+        <label class="row-label" for="lobby-join-pass">${t('lobby.form.joinPassword')}</label>
+        <input id="lobby-join-pass" class="lobby-text" data-lb-input="joinPassword" type="password" maxlength="${LOBBY.passwordMaxLength}"
+          autocomplete="off" spellcheck="false" value="${escapeHtml(this.joinPassword)}">
+      </div>` : ''}
       ${this.#errorLine()}
       <div class="menu-actions">
-        ${this.#backBtn('chooseBack')}
+        ${this.#backBtn('joinMenu')}
         <button class="menu-btn primary" data-lb="join">${t('lobby.joinGo')}</button>
       </div>`;
   }
@@ -624,6 +886,7 @@ export class LobbyScreen {
 
     // [B1] seat grid left, game settings (comboboxes) right, Leave bottom left, Start bottom right
     return `
+      ${this.#lobbyHeader(st, host)}
       ${code}
       <div class="setup-layout">
         <div class="setup-main">
@@ -736,6 +999,12 @@ export class LobbyScreen {
         <button class="menu-btn lobby-ready${seat.ready ? ' on' : ''}" data-lb="ready" aria-pressed="${!!seat.ready}">${t(seat.ready ? 'lobby.ready' : 'lobby.notReady')}</button>`;
     } else if (taken) {
       stateCell = `<span class="${seat.ready ? 'lobby-ok' : 'menu-muted'}">${t(seat.ready ? 'lobby.ready' : 'lobby.notReady')}</span>`;
+      // [LOBBY_LIST] host: Kick (second click confirms)
+      if (host) {
+        const armed = this.kickArm === seat.playerId;
+        actions = `<button class="menu-btn lobby-kick${armed ? ' armed' : ''}" data-lb="kick" data-id="${escapeHtml(seat.playerId)}"
+          title="${escapeHtml(t('lobby.kick.hint'))}">${t(armed ? 'lobby.kick.confirm' : 'lobby.kick')}</button>`;
+      }
     } else if (seat.controller === 'ai') {
       const diff = AIMENU.difficulties.includes(seat.difficulty) ? seat.difficulty : AIMENU.defaultDifficulty;
       if (host) {

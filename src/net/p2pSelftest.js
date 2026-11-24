@@ -1,4 +1,4 @@
-// Steel Mans – self-test of the P2PTransport adapter without a network: a fake Trystero library (in-memory rooms,
+// Steel Men – self-test of the P2PTransport adapter without a network: a fake Trystero library (in-memory rooms,
 // data delivered on microtasks) drives two transports. Checks the transport interface of docs/MULTIPLAYER.md:
 // selfId / isMe, joined + presence for newcomers, presence updates, no own echo, topic delivery, size limit,
 // left on leave(), no handlers after leave(), and the relay timeout ending in a P2PError (no hanging join).

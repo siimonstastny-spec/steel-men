@@ -1,4 +1,4 @@
-// Steel Mans – match-level commands (src/game/Match.js reached through world.match, set by main.js).
+// Steel Men – match-level commands (src/game/Match.js reached through world.match, set by main.js).
 //   { type: 'surrender', team }   the team gives up; Match decides the rest (elimination, end of the match);
 //                                 [N5FIX] all its units and buildings vanish in this tick (src/game/Surrender.js)
 //   { type: NET_LEAVE.commandType ('playerLeft'), team, teams }   [MP-LEAVE] injected by the lockstep (never sent or

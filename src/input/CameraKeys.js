@@ -1,4 +1,4 @@
-// Steel Mans – camera panning with WASD (and arrow keys) along the ground, relative to the view direction
+// Steel Men – camera panning with WASD (and arrow keys) along the ground, relative to the view direction
 import * as THREE from 'three';
 import { CAMERA, KEYBINDINGS, MOUSE } from '../config.js';
 import { getSettings, onSettingsChange } from '../core/Profile.js';

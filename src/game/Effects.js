@@ -1,4 +1,4 @@
-// Steel Mans – combat visuals: instant tracers, travelling projectiles, explosions and status indicators.
+// Steel Men – combat visuals: instant tracers, travelling projectiles, explosions and status indicators.
 // Explosion models (models/explosion/*.glb) are static meshes – all their animation happens here.
 import * as THREE from 'three';
 import { loadModel } from '../core/AssetLoader.js';

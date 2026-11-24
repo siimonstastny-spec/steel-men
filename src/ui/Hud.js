@@ -1,4 +1,4 @@
-// Steel Mans – in-game HUD (HUD v2: frame of data/image/ui/hud2 pieces, content in its slots; docs/notes/hud2-layout.md).
+// Steel Men – in-game HUD (HUD v2: frame of data/image/ui/hud2 pieces, content in its slots; docs/notes/hud2-layout.md).
 //   frame         fixed pieces + stretched strips for any aspect ratio, recoloured per faction (--hud-frame-filter)
 //   top left      ore / energy / population in the resource bar; production panel under it: option grid 4×4
 //                 (BuildMenu: buildings, production inside buildings, robot parts / assembly) + production queue rows

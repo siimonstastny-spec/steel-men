@@ -1,4 +1,4 @@
-// Steel Mans – match statistics of every team: units produced / lost, enemy units and buildings destroyed,
+// Steel Men – match statistics of every team: units produced / lost, enemy units and buildings destroyed,
 // resources gathered / spent, finished research, game duration. Collected without touching the units: poll()
 // compares the world with what it saw before (units first seen after begin() were produced, units that are
 // gone were lost, the killer is unit.lastAttacker); resource flows come from Economy.onFlow.

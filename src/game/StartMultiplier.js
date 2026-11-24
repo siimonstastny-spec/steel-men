@@ -1,4 +1,4 @@
-// Steel Mans – [D4] starting resources option (New game / lobby combobox, settings key `startMultiplier`).
+// Steel Men – [D4] starting resources option (New game / lobby combobox, settings key `startMultiplier`).
 // Value: one of START_MULTIPLIER.options (a number that scales every player's starting resources, or 'infinite' =
 // resources never run out; the effect lives in Economy).
 //

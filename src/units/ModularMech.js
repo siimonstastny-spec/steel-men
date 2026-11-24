@@ -1,4 +1,4 @@
-// Steel Mans – modulární bojový robot ze 4 GLB dílů – SIT
+// Steel Men – modulární bojový robot ze 4 GLB dílů – SIT
 import * as THREE from 'three';
 import { loadModel } from '../core/AssetLoader.js';
 import { loadAnimLibrary, resetPose } from '../anim/AnimLibrary.js';

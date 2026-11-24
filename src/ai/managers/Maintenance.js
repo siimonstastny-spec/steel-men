@@ -1,4 +1,4 @@
-// Steel Mans AI – repairs (v2), by difficulty.repair:
+// Steel Men AI – repairs (v2), by difficulty.repair:
 //   • bay:   a robot below bayBelow HP share – or, with `armless`, missing an arm or with a broken (0 HP) arm while an
 //            arm is in stock – drives into
 //            a free own assembly bay (enterBay). In the bay: a missing arm is mounted from the shared stock (serviceSwap),

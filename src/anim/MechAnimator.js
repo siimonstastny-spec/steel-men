@@ -1,4 +1,4 @@
-// Steel Mans – animace chování robota (stání, chůze, zásah, útok, smrt) – SIT
+// Steel Men – animace chování robota (stání, chůze, zásah, útok, smrt) – SIT
 import * as THREE from 'three';
 import { bindPart, retargetClip } from './AnimLibrary.js';
 import { MECH, ATTACK_CLIP_SET } from '../config.js';

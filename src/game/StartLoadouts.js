@@ -1,4 +1,4 @@
-// Steel Mans – starting robot loadouts of a faction (test scene and match start, ROADMAP 12).
+// Steel Men – starting robot loadouts of a faction (test scene and match start, ROADMAP 12).
 // Pure and deterministic: the same race + the same data always give the same loadouts, so every client of a
 // lockstep match builds the same robots. The code knows no faction names: LOADOUT.templates (config.js) list, per
 // slot, part sets in order of preference; the first set the race may produce (canProduce) and has a model of

@@ -1,7 +1,7 @@
-// Steel Mans – local player profile in localStorage (one key, PROFILE.storageKey).
+// Steel Men – local player profile in localStorage (one key, PROFILE.storageKey).
 // Holds nickname, language, settings (keys, mouse, audio, graphics, ui) and the last new-game choice.
 // Storage may be blocked or hold garbage: everything falls back to defaults, nothing throws.
-import { PROFILE, SETTINGS_DEFAULTS, ORE_MULTIPLIER, GRAPHICS } from '../config.js';
+import { PROFILE, SETTINGS_DEFAULTS, ORE_MULTIPLIER, GRAPHICS, LOBBY } from '../config.js';
 import { cleanAvatarImage } from './PlayerLabels.js';
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -79,7 +79,14 @@ let cache = null;
 const listeners = new Set();
 
 function load() {
-  const stored = readStorage(PROFILE.storageKey);
+  let stored = readStorage(PROFILE.storageKey);
+  if (!stored) {
+    // Game renamed: take over the whole profile saved under the old key (the old key is kept)
+    stored = readStorage(PROFILE.legacyProfileKey);
+    if (stored) {
+      try { localStorage.setItem(PROFILE.storageKey, JSON.stringify(stored)); } catch { /* storage unavailable */ }
+    }
+  }
   const profile = defaults();
   if (stored) {
     profile.settings = sanitize(SETTINGS_DEFAULTS, stored.settings);
@@ -143,6 +150,25 @@ export function setAvatarImage(dataUrl) {
   if (dataUrl && !clean) return false;
   updateSettings({ avatar: clean });
   return true;
+}
+
+/**
+ * [LOBBY_LIST] Last multiplayer game setup { name: string|null, visibility: 'public'|'code' }. name null = the default
+ * name (follows the nickname). The password is never part of the profile.
+ */
+export function getLobbyPrefs() {
+  const l = getSettings().lobby ?? {};
+  const name = typeof l.name === 'string' && l.name.trim() ? l.name.slice(0, LOBBY.nameMaxLength) : null;
+  const visibility = LOBBY.visibilities.includes(l.visibility) ? l.visibility : LOBBY.defaultVisibility;
+  return { name, visibility };
+}
+
+/** [LOBBY_LIST] Saves name (null / '' = default) and / or visibility; unknown values are ignored */
+export function saveLobbyPrefs({ name, visibility } = {}) {
+  const next = getLobbyPrefs();
+  if (name !== undefined) next.name = typeof name === 'string' && name.trim() ? name.trim().slice(0, LOBBY.nameMaxLength) : null;
+  if (LOBBY.visibilities.includes(visibility)) next.visibility = visibility;
+  replaceSetting('lobby', next);
 }
 
 /** Last new-game choice { races, colors, friendlyFire, fogOfWar } or null */

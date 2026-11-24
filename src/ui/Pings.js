@@ -1,4 +1,4 @@
-// Steel Mans – map pings and lost-part alerts [N7] (docs/notes/n7-ping.md).
+// Steel Men – map pings and lost-part alerts [N7] (docs/notes/n7-ping.md).
 //   Ping:  PING.modifier + left click on the scene or the minimap (submitPing) -> command 'ping' -> every client
 //          whose local team is an ally of the sender shows a pulsing ring in the scene and on the minimap for
 //          PING.durationMs and a HUD line "Ally X marked a spot" (click = camera there). Own pings show no line.

@@ -18,7 +18,8 @@
     "reactorGlow": "glow colour of the advanced generator (tier 3)",
     "unit": "units (src/procedural/units): exhaust { kind ion|rocket|plasma|beam, outer, core, length, width, flicker }, hoverGlow, weaponGlow, plasma, cloak { minOpacity }",
     "anim": "tempo (speed multiplier of cranes), jerk (0..1 stepped piston-like travel), spin (fans / rings / radar), pulse (Hz of glow pulses), blink (s beacon period), glowRamp (1/s radiator heat-up), levitate (amplitude multiplier)",
-    "emblem": "{ render: neon | paint, color (sRGB logo colour for UI – on buildings the emblem takes the team colour), backlight (paint only, 0..1), paths: SVG path strings, viewBox 0 0 100 100, y down, closed subpaths, fill-rule evenodd (a subpath inside another is a hole) }"
+    "emblem": "{ render: neon | paint, color (sRGB faction logo colour: UI and – PROC_EMBLEM mode 'faction', the default – the colour of the sign on buildings, never repainted by the team colour), plate (dark | light: neutral plate under the sign, in the decal), backlight (paint only, 0..1), paths: SVG path strings, viewBox 0 0 100 100, y down, closed subpaths, fill-rule evenodd (a subpath inside another is a hole) }",
+    "teamPaint": "team-coloured surfaces (ProcModules teamStripe / teamPanel / teamTrim / teamBanner / roofMark; PROC_TEAM_PAINT in config.js): { mode (stripes | panels | mixed: what dominates), share (target share of the visible surface in the team colour, clamped to PROC_TEAM_PAINT.target 0.15..0.30), stripes (bands per stripe 1..6), stripeKind (band | slash | fine), panelKind (inset | plate | pearl | blade), banner (flag | pennant | orb | fin), trim (lip height multiplier, 0 = none), roofMark (roof / ground mark size multiplier, 0 = none; its shape follows silhouette) }"
   },
   "_defaults": {
     "edges": { "radius": 0, "segments": 0 },
@@ -35,7 +36,8 @@
     "surface": { "metal": 0.35, "rough": 0.6 },
     "reactorGlow": "#ffffff",
     "anim": { "tempo": 1, "jerk": 0, "spin": 1, "pulse": 0.6, "blink": 0.9, "glowRamp": 1.2, "levitate": 1 },
-    "emblem": { "render": "neon", "color": "#ffffff", "backlight": 0, "paths": [] }
+    "emblem": { "render": "neon", "color": "#ffffff", "plate": "dark", "backlight": 0, "paths": [] },
+    "teamPaint": { "mode": "mixed", "share": 0.2, "stripes": 2, "stripeKind": "band", "panelKind": "inset", "banner": "flag", "trim": 1, "roofMark": 1 }
   },
   "X": {
     "label": "Earth – rounded, safe, medium neon",
@@ -59,6 +61,7 @@
     "reactorGlow": "#3aa8ff",
     "unit": { "exhaust": { "kind": "ion", "outer": "#3aa8ff", "core": "#d8f0ff", "length": 1.0, "width": 1.0, "flicker": 0.08 }, "hoverGlow": "#3aa8ff", "weaponGlow": "#8fdcff" },
     "anim": { "tempo": 1, "jerk": 0, "spin": 1, "pulse": 0.6, "blink": 0.9, "glowRamp": 1.2, "levitate": 1 },
+    "teamPaint": { "mode": "mixed", "share": 0.2, "stripes": 2, "stripeKind": "band", "panelKind": "inset", "banner": "flag", "trim": 1, "roofMark": 1 },
     "emblem": {
       "render": "neon",
       "color": "#59b8ff",
@@ -94,6 +97,7 @@
     "reactorGlow": "#ff3020",
     "unit": { "exhaust": { "kind": "rocket", "outer": "#ff3a14", "core": "#ffd070", "length": 1.6, "width": 1.3, "flicker": 0.18 }, "hoverGlow": "#ff5a20", "weaponGlow": "#ff6a2a" },
     "anim": { "tempo": 0.7, "jerk": 0.6, "spin": 1.2, "pulse": 0.4, "blink": 1.2, "glowRamp": 1, "levitate": 1 },
+    "teamPaint": { "mode": "stripes", "share": 0.24, "stripes": 3, "stripeKind": "slash", "panelKind": "plate", "banner": "pennant", "trim": 0.7, "roofMark": 1 },
     "emblem": {
       "render": "paint",
       "color": "#d8261c",
@@ -130,6 +134,7 @@
     "reactorGlow": "#a040ff",
     "unit": { "exhaust": { "kind": "plasma", "outer": "#7a4cff", "core": "#a8c8ff", "length": 0.9, "flicker": 0.3 }, "hoverGlow": "#8a5cff", "weaponGlow": "#c08bff", "plasma": "#a040ff", "cloak": { "minOpacity": 0.15 } },
     "anim": { "tempo": 0.85, "jerk": 0, "spin": 0.6, "pulse": 0.8, "blink": 1.6, "glowRamp": 1, "levitate": 1 },
+    "teamPaint": { "mode": "panels", "share": 0.2, "stripes": 1, "stripeKind": "band", "panelKind": "pearl", "banner": "orb", "trim": 1, "roofMark": 1 },
     "emblem": {
       "render": "neon",
       "color": "#b75cff",
@@ -165,6 +170,7 @@
     "reactorGlow": "#ffb020",
     "unit": { "exhaust": { "kind": "beam", "outer": "#ffc21e", "core": "#fff4c0", "length": 1.3, "width": 0.6, "flicker": 0.04 }, "hoverGlow": "#ffb020", "weaponGlow": "#ffd040" },
     "anim": { "tempo": 1.5, "jerk": 0, "spin": 1, "pulse": 2.2, "blink": 0.5, "glowRamp": 2.5, "levitate": 0.6 },
+    "teamPaint": { "mode": "stripes", "share": 0.16, "stripes": 4, "stripeKind": "fine", "panelKind": "blade", "banner": "fin", "trim": 0.5, "roofMark": 1 },
     "emblem": {
       "render": "neon",
       "color": "#ffb21e",

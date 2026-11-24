@@ -1,4 +1,4 @@
-// Steel Mans AI – budget buckets by game phase (v3, docs/notes/ai-v3.md).
+// Steel Men AI – budget buckets by game phase (v3, docs/notes/ai-v3.md).
 // The research plan (data/ai/research.json → `budget`) gives, per phase (sim time), the share of the AI's spending that
 // should go to research. Spending of the two buckets is recorded over a sliding window:
 //   army     – everything Production queues (parts, robots, crews, combat vehicles; not trucks / builders)

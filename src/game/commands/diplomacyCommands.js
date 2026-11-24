@@ -1,4 +1,4 @@
-// Steel Mans – diplomacy commands (docs/notes/b4-diplomacy.md).
+// Steel Men – diplomacy commands (docs/notes/b4-diplomacy.md).
 //   { type: DIPLOMACY.commandType ('sendTribute'), team, to, resource, amount }
 //     team gives `amount` (whole number > 0) of `resource` to the living ally `to`; stats.json
 //     rules.diplomacy.tributeLoss of it is lost on the way. The receiver's storage cap (energy) is respected: when it

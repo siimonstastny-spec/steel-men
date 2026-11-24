@@ -1,4 +1,4 @@
-// Steel Mans – armed vehicle (stats.json → vehicles entry with weapons): a Vehicle that fights like a mech –
+// Steel Men – armed vehicle (stats.json → vehicles entry with weapons): a Vehicle that fights like a mech –
 // attack, attack-move, guard, patrol and the aggressive / defensive / passive behaviours (shared logic in
 // UnitCombat.js), weapons fired through Combat.releaseAttack, experience of its own (vehicles have no crew).
 //
@@ -9,6 +9,8 @@
 //   weapons[].mount – 'turret' (aims with the turret, fireArc measured from the turret) or 'hull' (default:
 //     fires forward within fireArc, the vehicle turns towards its target).
 //   clips { move } – animation clip played while moving (e.g. the alien tank's legs).
+// Procedural model (stats.procModel, ProcVehicle.js): the turret is its 'turret' bone, shots leave from model sockets –
+//   weapons[].launchSockets[] (burst shot i uses socket i % n) / launchSocket, else vehicle.procLaunch, else 'muzzle'.
 import * as THREE from 'three';
 import { loadModel, loadGltf } from '../core/AssetLoader.js';
 import { loadStats, getStats, unitStats, rankFor, applyExperience } from '../data/Stats.js';
@@ -17,6 +19,7 @@ import { Vehicle } from './Vehicle.js';
 import { isTargetable, areEnemies, angleTo, inWeaponRange, inFireArc, releaseAttack, pickTarget } from '../game/Combat.js';
 import * as UnitCombat from './UnitCombat.js';
 import { advanceQueue, clearQueue } from './OrderQueue.js';
+import { PROC_VEHICLE } from './ProcVehicle.js';
 
 const DEG = Math.PI / 180;
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -33,6 +36,7 @@ export class CombatVehicle extends Vehicle {
   #weaponIndex = 0;
   #aimTarget = null;
   #aimTimer = 0;
+  #artillery = null; // first artillery-class weapon (barrel elevation of a procedural model follows the distance)
 
   constructor(id, race, opts) {
     super(id, race, opts);
@@ -56,8 +60,11 @@ export class CombatVehicle extends Vehicle {
     this.behaviour = getStats().rules.combat.defaultBehaviour;
     this.rank = rankFor(this.xp);
     this.stats = this.#resolveStats();
-    await this.#loadTurret();
-    await this.#setupAnimation();
+    if (this.procModel) this.#attachProcTurret();
+    else {
+      await this.#loadTurret();
+      await this.#setupAnimation();
+    }
     this.#buildWeapons();
     this.refreshTeamColor(); // the turret came after Vehicle.load painted the chassis
     return this;
@@ -102,13 +109,34 @@ export class CombatVehicle extends Vehicle {
     const old = this.weapons;
     this.weapons = this.stats.weapons.map((stats, i) => {
       const mount = stats.mount === 'turret' && this.turret ? 'turret' : 'hull';
-      return { stats, def: stats, mount, cooldown: old[i]?.cooldown ?? 0, part: { muzzlePoint: () => this.#muzzle(mount) } };
+      const w = { stats, def: stats, mount, cooldown: old[i]?.cooldown ?? 0, sockets: this.#procSockets(stats), part: null };
+      w.part = { muzzlePoint: (k = 0) => this.#muzzle(w, k) };
+      return w;
     });
+    this.#artillery = this.weapons.find((w) => w.stats.class === 'artillery') ?? null;
   }
 
-  // Where shots leave: the turret's launch socket, or the front of the hull at aim height
-  #muzzle(mount) {
-    if (mount === 'turret' && this.launch) return this.launch.getWorldPosition(new THREE.Vector3());
+  // Model sockets a procedural weapon fires from (names → Object3D); null for GLB vehicles / unknown names
+  #procSockets(stats) {
+    const m = this.procModel;
+    if (!m) return null;
+    const names = stats.launchSockets ?? [stats.launchSocket ?? this.stats.procLaunch ?? PROC_VEHICLE.defaultSocket];
+    const out = names.map((n) => m.getSocket(n)).filter(Boolean);
+    return out.length ? out : null;
+  }
+
+  // Where shots leave: the weapon's model socket (procedural), the turret's launch socket, or the front of the hull at aim height
+  #muzzle(w, k = 0) {
+    if (w.sockets) {
+      const i = k % w.sockets.length;
+      const m = this.procModel;
+      if (m) { // flash + recoil / bomb bay from the very socket the shot leaves (visual only)
+        m.fire(w.sockets[i].name);
+        m.dropBomb?.(i);
+      }
+      return w.sockets[i].getWorldPosition(new THREE.Vector3());
+    }
+    if (w.mount === 'turret' && this.launch) return this.launch.getWorldPosition(new THREE.Vector3());
     return this.localToWorld(new THREE.Vector3(0, this.aimHeight, this.radius));
   }
 
@@ -164,12 +192,38 @@ export class CombatVehicle extends Vehicle {
       moving = UnitCombat.moveByOrder(this, dt);
       if (!moving) this.speed = 0;
     } else {
-      super.update(dt); // other orders of the base vehicle (e.g. being sent to a repair)
+      super.stepOrders(dt); // other orders of the base vehicle (e.g. being sent to a repair)
       moving = this.speed > 0;
     }
     this.#aimTurret(dt);
     this.#fire(moving);
     this.#animate(moving, dt);
+  }
+
+  // ---------- procedural model ----------
+
+  // The turret is the model's 'turret' bone (rotation.y = yaw, the aiming code stays the same); no bone → hull weapons
+  #attachProcTurret() {
+    const bone = this.procModel.getBone('turret');
+    if (!bone) return;
+    this.turret = bone;
+    this.launch = this.procModel.getSocket(this.stats.procLaunch ?? PROC_VEHICLE.defaultSocket);
+  }
+
+  // Barrel elevation towards the target (artillery: by distance); the model clamps it to its own limits
+  #pitchBarrel(target) {
+    const m = this.procModel;
+    if (!m?.barrelBone) return;
+    let pitch = 0;
+    if (target) {
+      const dx = target.position.x - this.position.x;
+      const dz = target.position.z - this.position.z;
+      const dist = Math.hypot(dx, dz);
+      const arty = this.#artillery;
+      if (arty) pitch = (m.pitchLimits?.[1] ?? 0) * Math.min(1, dist / (arty.stats.range || 1)) * PROC_VEHICLE.artilleryPitchRange;
+      else pitch = Math.atan2(target.position.y + (target.aimHeight ?? 0) - this.position.y - this.aimHeight, dist);
+    }
+    m.setBarrelPitch(pitch);
   }
 
   // ---------- turret ----------
@@ -206,31 +260,56 @@ export class CombatVehicle extends Vehicle {
     const target = this.#turretTarget(dt);
     const want = target ? angleTo(this, target.position) : 0;
     const diff = wrapAngle(want - this.turretYaw);
-    const max = (this.stats.turret.turnSpeed ?? 0) * DEG * dt;
+    const max = (this.stats.turret?.turnSpeed ?? this.stats.procTurretTurnSpeed ?? PROC_VEHICLE.turretTurnSpeed) * DEG * dt;
     this.turretYaw = wrapAngle(this.turretYaw + THREE.MathUtils.clamp(diff, -max, max));
     this.turret.rotation.y = this.turretYaw;
+    if (this.procModel) { this.procModel.turretYaw = this.turretYaw; this.#pitchBarrel(target); }
   }
 
   #turretTarget(dt) {
     const o = this.order;
     if (o?.type === 'attack' && isTargetable(o.target)) return o.target;
     this.#aimTimer -= dt;
-    const valid = isTargetable(this.#aimTarget) && this.#turretWeapons().some((w) => this.#canFireAt(w, this.#aimTarget, false));
+    const list = this.#fillTurretList();
+    const valid = isTargetable(this.#aimTarget) && this.#anyCanFireAt(list, this.#aimTarget, false);
     if (!valid || this.#aimTimer <= 0) {
       this.#aimTimer = VEHICLE.combat.turretRetargetInterval;
-      this.#aimTarget = UnitCombat.firesAtWill(this) ? this.#nearestFor(this.#turretWeapons(), false) : null;
+      this.#aimTarget = UnitCombat.firesAtWill(this) ? this.#nearestFor(list, false) : null;
     }
     return this.#aimTarget;
   }
 
-  #turretWeapons() { return this.weapons.filter((w) => w.mount === 'turret'); }
+  // Turret weapons into the recycled list (no array per tick)
+  #fillTurretList() {
+    const list = this.#turretList;
+    list.length = 0;
+    for (let i = 0; i < this.weapons.length; i++) if (this.weapons[i].mount === 'turret') list.push(this.weapons[i]);
+    return list;
+  }
+
+  #anyCanFireAt(weapons, target, arc) {
+    for (let i = 0; i < weapons.length; i++) if (this.#canFireAt(weapons[i], target, arc)) return true;
+    return false;
+  }
 
   // Nearest enemy any of the weapons could shoot at (arc ignored when the turret can still turn to it)
   #nearestFor(weapons, arc) {
-    const range = Math.max(0, ...weapons.map((w) => w.stats.range));
+    let range = 0;
+    for (let i = 0; i < weapons.length; i++) range = Math.max(range, weapons[i].stats.range);
     if (!range) return null;
-    return pickTarget(this, range, (u) => weapons.some((w) => this.#canFireAt(w, u, arc)));
+    this.#pickWeapons = weapons;
+    this.#pickArc = arc;
+    return pickTarget(this, range, this.#pickAny);
   }
+
+  // Predicates created once (pickTarget takes a callback; their inputs are the #pick* fields)
+  #pickWeapons = null;
+  #pickArc = false;
+  #pickWeapon = null;
+  #pickAny = (u) => this.#anyCanFireAt(this.#pickWeapons, u, this.#pickArc);
+  #pickOne = (u) => this.#canFireAt(this.#pickWeapon, u);
+  #ready = [];
+  #turretList = [];
 
   // ---------- firing ----------
 
@@ -250,7 +329,9 @@ export class CombatVehicle extends Vehicle {
    */
   #fire() {
     if (this.attackLock > 0) return;
-    const ready = this.weapons.filter((w) => w.cooldown <= 0);
+    const ready = this.#ready;
+    ready.length = 0;
+    for (let i = 0; i < this.weapons.length; i++) if (this.weapons[i].cooldown <= 0) ready.push(this.weapons[i]);
     if (!ready.length) return;
     const primary = this.order?.type === 'attack' ? this.order.target : null;
     const moveOrder = this.order?.type === 'move';
@@ -260,7 +341,8 @@ export class CombatVehicle extends Vehicle {
       if (moveOrder && s.stopsToFire) continue;
       let target = primary && this.#canFireAt(w, primary) ? primary : null;
       if (!target && !s.stopsToFire && UnitCombat.firesAtWill(this)) {
-        target = pickTarget(this, s.range, (u) => this.#canFireAt(w, u));
+        this.#pickWeapon = w;
+        target = pickTarget(this, s.range, this.#pickOne);
       }
       if (!target) continue;
       this.#weaponIndex += k + 1;
@@ -275,7 +357,8 @@ export class CombatVehicle extends Vehicle {
     w.cooldown = s.attackTime + s.cooldown;
     if (s.stopsToFire) { this.holdTimer = s.attackTime; this.speed = 0; }
     this.world.schedule(s.attackTime * s.hitAt, () => {
-      if (!this.dead) releaseAttack(this.world, this, w, target);
+      if (this.dead) return;
+      releaseAttack(this.world, this, w, target);
     });
   }
 
@@ -299,6 +382,7 @@ export class CombatVehicle extends Vehicle {
 
   // Move clip while driving / walking, at a rate following the speed; stopped otherwise
   #animate(moving, dt) {
+    this.tickProc(dt); // procedural model (no-op for GLB vehicles)
     if (!this.mixer) return;
     const a = this.moveAction;
     if (moving) {

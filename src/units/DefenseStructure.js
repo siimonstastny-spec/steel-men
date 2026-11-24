@@ -1,4 +1,4 @@
-// Steel Mans – armed building (stats.json → structures entry with weapons): point defense, turrets on wall posts.
+// Steel Men – armed building (stats.json → structures entry with weapons): point defense, turrets on wall posts.
 // Always aggressive: once finished it fires at the nearest enemy in range that its team can see (fog of war via
 // World.nearestEnemy), weapons through Combat.releaseAttack like mechs and vehicles. No experience, no orders.
 //

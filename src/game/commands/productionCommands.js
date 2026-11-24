@@ -1,4 +1,4 @@
-// Steel Mans – production, research and bay service commands (executed by world.production, src/game/Production.js).
+// Steel Men – production, research and bay service commands (executed by world.production, src/game/Production.js).
 // Import this module once (BuildMenu.js / main.js) so the commands register. Every command carries `team`;
 // buildings are referenced by eid. Schemas:
 //   { type: 'queueUnit',        team, producer, kind: 'vehicle'|'crew', unitId? }   unitId = vehicle id (kind 'vehicle')

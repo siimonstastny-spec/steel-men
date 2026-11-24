@@ -1,4 +1,4 @@
-// Steel Mans – which start position each seat gets (docs/notes/maps.md).
+// Steel Men – which start position each seat gets (docs/notes/maps.md).
 // Picked starts (map preview click, lobby) win; the other seats get a start from the match seed while allies stay
 // side by side (Alliances.startOrder layout, turned around the ring). Maps with startAssignment 'fixed'
 // (gen_01AI) keep the old order for unpicked seats, so old games / ?seed=42 checks are unchanged.

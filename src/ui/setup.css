@@ -1,4 +1,4 @@
-/* Steel Mans – [B1] New game + multiplayer lobby layout (modern RTS style): player seats as a grid on the left,
+/* Steel Men – [B1] New game + multiplayer lobby layout (modern RTS style): player seats as a grid on the left,
    game settings as comboboxes on the right, Back bottom left, Start bottom right. Uses the --menu-* variables. */
 /* Breakpoints. @media / @container cannot read var(), so the values below are repeated in the rules (marked "= var(...)");
    change both together. --setup-side-width is used directly. */

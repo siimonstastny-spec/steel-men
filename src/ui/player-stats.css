@@ -1,4 +1,4 @@
-/* Steel Mans – short player statistics above the minimap (src/ui/PlayerStatsBar.js, docs/notes/b4-diplomacy.md) */
+/* Steel Men – short player statistics above the minimap (src/ui/PlayerStatsBar.js, docs/notes/b4-diplomacy.md) */
 #player-stats-bar {
   --psb-gap: 22px;              /* space above the minimap (its bracket's top arm sits ~10 px above it) */
   position: fixed;
