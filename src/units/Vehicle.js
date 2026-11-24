@@ -24,7 +24,19 @@ export function distanceToBox(p, box) {
   return Math.hypot(dx, dz);
 }
 
+/**
+ * [A1] Race whose model a unit of `race` shows – the same choice as Stats.resolveUnit makes for the {race} model path
+ * (the unit's own race when listed, else the race's modelRace stand-in, else the first listed one).
+ */
+function modelRaceOf(stats, race) {
+  const own = getStats().races?.[race]?.modelRace;
+  const list = stats.races;
+  if (!list) return own ?? race;
+  return list.includes(race) ? race : (list.includes(own) ? own : list[0]);
+}
+
 const cargoBox = new THREE.Box3(); // [N2] scratch box for placing a carried part
+const cargoCenter = new THREE.Vector3();        // [H4] scratch: bbox centre of the carried part in vehicle space
 const cargoQuat = new THREE.Quaternion();       // [W8] ground orientation of the part being loaded
 const cargoParentQuat = new THREE.Quaternion(); // [W8] inverse world orientation of the vehicle
 // Building ids that take salvage, cached per rules.salvageResearch object (Vehicle.#dropOffIds)
@@ -49,7 +61,9 @@ export class Vehicle extends THREE.Group {
     this.radius = 4;
     this.aimHeight = 2;
     this.bodyHeight = 4;
-    this.order = null;    // { type: 'move', target } | { type: 'harvest', deposit } | { type: 'build', structure }
+    this.cargoY = null;   // [proc-trucks] local height of the model's cargo bed (procedural 'cargo' socket), else bodyHeight is used
+    this.simBody = null;  // [A1] resolved stats.simBody (race applied): radius / bodyHeight / aimHeight / muzzle of the simulation
+    this.order = null;   // { type: 'move', target } | { type: 'harvest', deposit } | { type: 'build', structure }
     this.speed = 0;
     this.dead = false;
     this.removed = false;
@@ -101,17 +115,42 @@ export class Vehicle extends THREE.Group {
     this.model = model;
     this.procModel = proc;
     this.add(model);
-    this.radius = sizeXZ * VEHICLE.radiusFactor;
-    this.bodyHeight = height;
-    this.aimHeight = height * VEHICLE.aimHeightFactor;
+    this.#applySimBody(sizeXZ, height);
     if (proc) {
-      const aimY = socketHeight(this, proc, PROC_VEHICLE.aimSocket);
-      if (aimY != null && aimY > 0) this.aimHeight = aimY;
+      // [proc-trucks] any procedural model with a 'cargo' socket (deck / HoverTruck bed) carries salvage there, not at
+      // bodyHeight – display only (where the carried wreck is drawn), never read by the simulation
+      const cargoY = socketHeight(this, proc, PROC_VEHICLE.cargoSocket);
+      if (cargoY != null && cargoY > 0) this.cargoY = cargoY;
     }
     this.#createRings();
     this.refreshTeamColor();
     if (proc) this.procDriver = new ProcDriver(this);
     return this;
+  }
+
+  /**
+   * [A1] Simulation body (collision circle, 3D hit cylinder, aim point, muzzle) from stats.simBody, never from the model
+   * shown – procedural model, GLB fallback or a missing style must give every client the same simulation.
+   * simBody { radius, bodyHeight, aimHeight, muzzle { height, forward, pivotZ }, byRace { race: same keys } } –
+   * byRace entries (the unit's race, else the race whose model it shows) override the base values.
+   * Without simBody (new vehicle, data not filled in yet) the shown model is measured – NOT lockstep safe, warned.
+   */
+  #applySimBody(sizeXZ, height) {
+    const base = this.stats.simBody;
+    if (!base) {
+      console.warn(`[Vehicle] ${this.unitId}: no stats.simBody – simulation size measured from the shown model (not lockstep safe)`);
+      this.simBody = null;
+      this.radius = sizeXZ * VEHICLE.radiusFactor;
+      this.bodyHeight = height;
+      this.aimHeight = height * VEHICLE.aimHeightFactor;
+      return;
+    }
+    const race = base.byRace?.[this.race] ?? base.byRace?.[modelRaceOf(this.stats, this.race)] ?? null;
+    const body = race ? { ...base, ...race, muzzle: race.muzzle ?? base.muzzle } : base;
+    this.simBody = body;
+    this.radius = body.radius;
+    this.bodyHeight = body.bodyHeight;
+    this.aimHeight = body.aimHeight ?? body.bodyHeight * VEHICLE.aimHeightFactor;
   }
 
   // ---------- state ----------
@@ -211,7 +250,8 @@ export class Vehicle extends THREE.Group {
 
   /** Can this vehicle build that structure (own, unfinished, construct ability)? */
   canBuild(s) {
-    return !this.dead && this.canConstruct && Boolean(s) && !s.complete && !s.destroyed && s.team === this.team;
+    return !this.dead && this.canConstruct && Boolean(s) && !s.complete && !s.destroyed && s.team === this.team
+      && !s.stats?.selfBuild; // [H1] self-building structures (wall gate) take no builders
   }
 
   /** Drive to an own damaged mech, vehicle or finished building and repair it (vehicles with the repair ability) */
@@ -287,7 +327,8 @@ export class Vehicle extends THREE.Group {
     const bonePose = [];
     if (part.isArm) {
       part.object.traverse((n) => {
-        if (n.isBone) bonePose.push({ n, p: n.position.clone(), q: n.quaternion.clone(), s: n.scale.clone() });
+        // [H4] the fall clip drives plain nodes (AnimLibrary.retargetClip targets node uuids), not THREE.Bone
+        if (n !== part.object) bonePose.push({ n, p: n.position.clone(), q: n.quaternion.clone(), s: n.scale.clone() });
       });
     }
     if (part.isArm) { // [R3] torn-off arm (ArmWreck): same cargo, the arm stock key is normalised by PartStock
@@ -312,7 +353,14 @@ export class Vehicle extends THREE.Group {
     this.updateMatrixWorld(true);
     cargoBox.setFromObject(obj);
     const lowest = cargoBox.isEmpty() ? 0 : cargoBox.min.y - this.position.y;
-    obj.position.y = this.bodyHeight * N2_UI.cargoRestFactor - lowest;
+    obj.position.y = (this.cargoY ?? this.bodyHeight * N2_UI.cargoRestFactor) - lowest;
+    // [H4] the lying part is centred over the bed horizontally (its origin may lie far from its middle once it lies down)
+    if (!cargoBox.isEmpty()) {
+      cargoBox.getCenter(cargoCenter);
+      this.worldToLocal(cargoCenter);
+      obj.position.x -= cargoCenter.x;
+      obj.position.z -= cargoCenter.z;
+    }
     this.cargo.push({ part, info, scale });
     return true;
   }

@@ -279,8 +279,8 @@ function gridPanel(b, glow, kit, cell, P) {
     }
   }
   for (const e of [-1, 1]) {   // outer frame
-    b.box(W, fh, P.frame, S.frame, { y: fy, z: e * (P.half - P.frame / 2) });
-    b.box(P.frame, fh, W - 2 * P.frame, S.frame, { x: e * (P.half - P.frame / 2), y: fy });
+    b.box(W, fh, P.frame, S.teamPaint, { y: fy, z: e * (P.half - P.frame / 2) });   // team-coloured outer frame: the outline reads from far away
+    b.box(P.frame, fh, W - 2 * P.frame, S.teamPaint, { x: e * (P.half - P.frame / 2), y: fy });
   }
   for (let i = 1; i < P.cols; i++) b.box(P.frame, fh, W - 2 * P.frame, S.frame, { x: -P.half + P.frame / 2 + i * px, y: fy });
   for (let j = 1; j < P.rows; j++) b.box(W - 2 * P.frame, fh, P.frame, S.frame, { y: fy, z: -P.half + P.frame / 2 + j * pz });
@@ -288,14 +288,14 @@ function gridPanel(b, glow, kit, cell, P) {
     for (const sz of [-1, 1]) {
       const x = sx * (P.half - P.frame / 2);
       const z = sz * (P.half - P.frame / 2);
-      if (P.corners === 'cap') b.cylinder(P.frame * G.cornerR, P.frame * G.cornerR, fh * G.cornerH, 10, S.team, { x, y: top + (fh * G.cornerH) / 2 - fh / 2, z });
+      if (P.corners === 'cap') b.cylinder(P.frame * G.cornerR, P.frame * G.cornerR, fh * G.cornerH, 10, S.teamPaint, { x, y: top + (fh * G.cornerH) / 2 - fh / 2, z });
       else spike(b, kit, { x, y: top + fh, z, h: D.corner.spikeH, r: D.corner.spikeR });
     }
   }
   if (kit.style.neon >= LAYOUT.neonBandMin) {   // neon line on the front and back frame bars
     for (const e of [-1, 1]) neonStrip(b, kit, W - 2 * P.frame, G.neonH, P.frame * G.neonShare, { y: top + fh + G.neonLift, z: e * (P.half - P.frame / 2) });
   }
-  b.box(W * G.bandShare, G.bandH, 0.05, S.team, { z: -P.half - 0.02 });   // team band on the rear edge
+  b.box(W * G.bandShare, G.bandH, 0.05, S.teamPaint, { z: -P.half - 0.02 });   // team band on the rear edge
   marking(b, kit, W * G.markShare, G.markH, { z: P.half + 0.01 });         // hazard stripes / light line on the front edge
   for (let k = 0; k < (P.ribs ?? 0); k++) {                                // heavy back ribs
     b.box(G.spineW, 0.5, W - 0.6, S.hullDark, { x: (k - (P.ribs - 1) / 2) * (W / P.ribs), y: -P.thick / 2 - 0.25 });
@@ -321,7 +321,7 @@ function petalPanel(b, glow, kit, cell, P) {
     b.sphere(Pt.tipR, 8, 6, S.plasma, { x: tx, y: top + Pt.tipLift, z: tz });
     glow.sphere(Pt.tipHalo, 8, 5, { x: tx, y: top + Pt.tipLift, z: tz });
   }
-  b.torus(P.radius * Pt.rimR, Pt.rimTube, 4, 40, TAU, S.neon, { rx: Math.PI / 2, y: top });
+  b.torus(P.radius * Pt.rimR, Pt.rimTube, 4, 40, TAU, S.teamPaint, { rx: Math.PI / 2, y: top });   // team rim (the neon halo below keeps the glow)
   glow.torus(P.radius * Pt.rimR, Pt.haloTube, 4, 40, TAU, { rx: Math.PI / 2, y: top });
   hubUnder(b, kit, P.thick);
 }
@@ -340,7 +340,7 @@ function lamellaPanel(b, glow, kit, cell, P) {
   const xs = [];
   for (let i = 0; i < P.count; i++) xs.push((i - (P.count - 1) / 2) * P.pitch);
   for (const x of xs) {
-    b.add(rhombus(P.halfWid, P.halfLen, P.thick), S.hullDark, { x });
+    b.add(rhombus(P.halfWid, P.halfLen, P.thick), S.teamShade, { x });   // the border around the cell top is team paint
     b.add(rhombus(P.halfWid * Lm.topShare, P.halfLen * Lm.topShare, Lm.topH), cell, { x, y: top + Lm.topH / 2 });
     b.box(Lm.neonW, Lm.neonH, P.halfLen * Lm.neonShare, S.neon, { x, y: top + Lm.topH + Lm.neonH / 2 });
     for (const e of [-1, 1]) b.box(Lm.tipBox, Lm.tipBox, Lm.tipBox, S.lens, { x, y: 0, z: e * P.halfLen });

@@ -20,7 +20,20 @@
 // Offline (single player, AI) the bus is local: a command submitted now runs at the next tick. In multiplayer
 // a transport (src/net/, later) replaces `schedule` and delivers everyone's commands for a tick in the same order.
 
-import { NET_LEAVE } from '../../config.js';
+import { NET_LEAVE, SAVE } from '../../config.js';
+
+// [J1] save games: running FNV-1a hash of every executed command (all teams, AI included)
+const FNV_OFFSET = 0x811c9dc5;
+const FNV_PRIME = 0x01000193;
+const LOCAL_FIELDS = ['origin', 'ticket']; // client-local command fields: never recorded, never hashed
+
+/** Copy of a command without its client-local fields; `team` stays out too (the record keeps it separately) */
+export function recordable(cmd) {
+  const out = {};
+  for (const k in cmd) if (k !== 'team' && !LOCAL_FIELDS.includes(k)) out[k] = cmd[k];
+  if (cmd.origin === null) out.origin = null; // lockstep-injected command (internalOnly): replayed with origin null
+  return out;
+}
 
 const registry = new Map();
 
@@ -68,7 +81,31 @@ class Bus {
      * @type {(cmd: object) => void}
      */
     this.schedule = (cmd) => this.enqueue(this.currentTick + 1, cmd);
+    // --- [J1] save games (src/game/SaveGame.js) ---
+    // Full record of the match: [tick, team, cmd] of every executed command whose team is not in `liveTeams`
+    // (computer players are re-run live on restore, their commands are only hashed), checkpoints
+    // [tick, stateHash, partsHash, commandHash] every SAVE.hashEveryTicks. Cleared by reset().
+    this.recorded = [];
+    this.checkpoints = [];
+    this.commandHash = FNV_OFFSET;
+    /** Teams whose commands are produced live (AI seats). Survives reset(): SaveGame sets it per match. */
+    this.liveTeams = [];
+    /** false = commands are only hashed, never kept (multiplayer, ?test=1: no save possible). Survives reset(). */
+    this.recording = true;
+    /** Extra checkpoint hash (SaveGame installs the subsystem hash); null = 0. Survives reset(). */
+    this.checkpointHash = null;
+    /** Restore in progress: { entries, index } – recorded commands injected at their tick. Survives reset(). */
+    this.replay = null;
   }
+
+  /** [J1] Restore: inject these recorded [tick, team, cmd] entries at their ticks; submit() only lets live teams through */
+  beginReplay(entries) { this.replay = { entries, index: 0 }; }
+
+  /** [J1] Restore finished / aborted: back to normal submitting */
+  endReplay() { this.replay = null; }
+
+  /** [J1] Recorded entries not injected yet (0 = the replay reached the end of the record) */
+  get replayLeft() { return this.replay ? this.replay.entries.length - this.replay.index : 0; }
 
   /** UI / AI entry point */
   submit(cmd) {
@@ -80,6 +117,8 @@ class Bus {
       console.warn(`CommandBus: unknown command '${cmd.type}'`);
       return;
     }
+    // [J1] while a saved game is replayed only live (AI) teams submit; the rest comes from the record
+    if (this.replay && !this.liveTeams.includes(cmd.team)) return;
     this.schedule({ ...cmd, origin: this.clientId });
   }
 
@@ -100,12 +139,29 @@ class Bus {
    */
   executeTick(world, tick) {
     this.currentTick = tick;
+    // [J1] checkpoint of the state after the previous tick (same point in the loop for play, harness and restore)
+    const done = tick - 1;
+    if (done > 0 && done % SAVE.hashEveryTicks === 0 && this.#lastCheckpoint() < done) {
+      this.checkpoints.push([done, world.stateHash(), this.checkpointHash ? this.checkpointHash(world) : 0, this.commandHash >>> 0]);
+    }
+    // [J1] restore: the recorded commands of this tick join the queue in their recorded order (sorted below by team,
+    // and inside a team by this enqueue order = the original order; live AI teams never appear in the record)
+    const rp = this.replay;
+    if (rp) {
+      const list = rp.entries;
+      while (rp.index < list.length && list[rp.index][0] <= tick) {
+        const entry = list[rp.index++];
+        const rec = entry[2];
+        this.enqueue(tick, { ...rec, team: entry[1], origin: rec.origin === null ? null : 'replay' });
+      }
+    }
     if (!this.pending.length) return;
     const due = this.pending.filter((p) => p.tick <= tick);
     if (!due.length) return;
     this.pending = this.pending.filter((p) => p.tick > tick);
     due.sort((a, b) => a.cmd.team - b.cmd.team || a.seq - b.seq);
     for (const { cmd } of due) {
+      this.#record(tick, cmd); // [J1] every due command, before validation (validate is deterministic too)
       const def = registry.get(cmd.type);
       if (!def) continue; // [MP-SEC] unknown type (remote garbage): silently skipped
       if (internalOnly.has(cmd.type) && cmd.origin !== null) continue; // [MP-SEC] only the lockstep may inject it
@@ -127,12 +183,29 @@ class Bus {
    */
   onExecuted(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
-  /** New match: drops everything */
+  // [J1] hash every due command; keep the non-live ones in the record
+  #record(tick, cmd) {
+    const rec = recordable(cmd);
+    const text = JSON.stringify(rec);
+    let h = Math.imul(this.commandHash ^ tick, FNV_PRIME);
+    h = Math.imul(h ^ cmd.team, FNV_PRIME);
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), FNV_PRIME);
+    this.commandHash = h >>> 0;
+    // own deep copy: an executor may keep / change the arrays of the live command
+    if (this.recording && !this.liveTeams.includes(cmd.team)) this.recorded.push([tick, cmd.team, JSON.parse(text)]);
+  }
+
+  #lastCheckpoint() { return this.checkpoints.length ? this.checkpoints[this.checkpoints.length - 1][0] : -1; }
+
+  /** New match: drops everything (liveTeams, checkpointHash and replay are set per match by SaveGame and stay) */
   reset() {
     this.pending = [];
     this.seq = 0;
     this.currentTick = 0;
     this.log = [];
+    this.recorded = [];
+    this.checkpoints = [];
+    this.commandHash = FNV_OFFSET;
   }
 }
 

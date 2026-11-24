@@ -51,6 +51,10 @@ import { RallyMarkers } from './ui/RallyMarkers.js';
 import { createAi, updateAis, clearAis } from './ai/index.js';
 import { setAlliances, normalizeAlliances, startOrder, alliesOf, areAllies, clampPlayerCount } from './game/Alliances.js';
 import { installAiConsole } from './ai/aiVsAi.js';
+import { installDeterminismConsole } from './debug/DeterminismHarness.js';
+import { saveGame, noteMatchStart, startAutosave, stopAutosave, autosaveNow, isRestoring, canRestoreHere } from './game/SaveGame.js'; // [J1]
+import { saveStore, scheduleRestore, takeScheduledRestore } from './core/SaveStore.js'; // [J1]
+import { SaveLoadView } from './ui/SaveLoadView.js'; // [J2]
 import { setPlayerLabels, playerLabel } from './core/PlayerLabels.js';
 import { setPingNameResolver } from './ui/Pings.js';
 // [N7] ping messages name AI allies by their N6 name, humans "Player N" (lobby nicknames: later)
@@ -110,13 +114,46 @@ const raceOf = (team) => game.races[team] ?? game.races[0];
 
 const RESTART_KEY = 'steelMen.restart'; // sessionStorage: settings of a solo restart (survives the reload only)
 let lastSoloSettings = null;             // settings of the running solo match (for Restart)
+const RESTORE_ERROR_KEY = 'steelMen.restoreError'; // [J1] sessionStorage: message of a failed restore, shown after the reload
+
+/** [J1] player text of a failed restore (hash mismatch / incompatible save / anything else) */
+function restoreErrorText(err) {
+  if (err?.code === 'hash') return t('save.error.hash');
+  if (err?.code === 'incompatible') return t(`save.reason.${err.details?.reason ?? 'unknown'}`);
+  return t('save.error.generic', { reason: err?.message ?? err });
+}
+// [J1/J2] save games: restore needs a fresh page (startGame does not tear down a match) → schedule + reload otherwise
+const saveGameUi = { ...saveGame, restore: async (save, opts) => {
+  if (!canRestoreHere()) { await scheduleRestore(save); window.location.reload(); return new Promise(() => {}); } // continues in showMenu
+  try { return await saveGame.restore(save, opts); } catch (err) {
+    if (canRestoreHere()) throw err; // failed before the match was set up (incompatible …): the page is still clean
+    // a half-replayed match stays on the page → only a reload gives a clean menu (the error text is shown after it)
+    if (err?.code !== 'cancelled') {
+      try { sessionStorage.setItem(RESTORE_ERROR_KEY, restoreErrorText(err)); } catch { /* the reload still helps */ }
+    }
+    window.location.reload(); return new Promise(() => {});
+  }
+} };
+function onSaveRestored() {
+  game.menu?.show(false);
+  lastSoloSettings = null; // a restored match has no menu settings to restart from
+  startAutosave();
+  world.paused = false;
+  matchUi.toggleMenu(); // the restored match waits in the (pausing) game menu
+}
+const saveView = new SaveLoadView({
+  store: saveStore, saveGame: saveGameUi, loading,
+  mapName: () => saveGame.matchMapName() ?? '', // [J1] after a menu start and after a restore
+  onRestored: onSaveRestored,
+});
 
 // Game menu (Esc / ☰) and the end-of-match screen; quit = reload (the start menu remembers the last choice)
 const matchUi = new MatchUi({
+  saveLoad: saveView, // [J2] Save / Load buttons (single player only)
   teamName: (i) => (playerLabel(i) || (isLocal(i) ? (getSettings().nickname || t('common.player'))
     : t(areAllies(i, localTeam()) ? 'common.ally' : 'common.enemy'))) + ` (${raceName(raceOf(i))})`,
   openSettings: (returnTo) => game.menu?.openSettingsFrom(returnTo),
-  quit: () => window.location.reload(),
+  quit: async () => { try { await autosaveNow(); } catch (err) { console.error(err); } window.location.reload(); }, // [J1] autosave on leaving
   // [W5c] solo restart = reload + the last settings with a new seed (startGame does not tear down the previous match)
   restart: () => {
     if (!lastSoloSettings || net) return;
@@ -140,9 +177,8 @@ let econAlerts = null; // [D2] no main building / low energy; created at the fir
 // Debug handle for the browser console, e.g. steelMen.input.selection, steelMen.game.playerRace
 // commandBus: steelMen.commandBus.submit({...}); world.stateHash() / world.rng / world.tick for determinism checks
 // startGame(settings): console tests of N players, e.g. steelMen.startGame({ playerCount: 4, alliances: [0, 0, 1, 1], … })
-window.steelMen = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow };
-window.steelMans = window.steelMen; // TEMP alias after the rename to STEEL MEN (old console scripts / briefs); remove in v28
-installAiConsole(); // steelMen.ai.start / fastForward / report / log / stop (AI vs AI test)
+window.steelMen = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow, saveGame, saveStore };installAiConsole(); // steelMen.ai.start / fastForward / report / log / stop (AI vs AI test)
+installDeterminismConsole(); // [I1] steelMen.det – determinism runs (docs/notes/i1-determinism.md)
 // [N3] procedural factory preview: p = await steelMen.spawnProceduralPreview('Y', '#c8302c', {x, y, z}); p.dispose()
 window.steelMen.spawnProceduralPreview = (race = 'X', color = '#3a5ccc', pos = { x: 0, y: 0, z: 0 }, opts) =>
   spawnProceduralPreview(scene, pos, race, color, opts);
@@ -451,6 +487,7 @@ async function startGame(settings) {
   loading.step('models');
   try { await preloadModels(matchModelPaths(game.races)); } catch (err) { console.warn(err); }
   // ?seed=123 in the URL fixes the seed (determinism checks: same seed + same commands = same world.stateHash())
+  noteMatchStart(settings, seed); // [J1] record: settings + seed, AI seats run live on restore
   startSimulation(seed);
   // Idle HoverTrucks repair / finish nearby work if this player wants it (profile; a command, so every client agrees).
   // Multiplayer submits it in startMultiplayer AFTER net.start(): before that the bus is still local and the command
@@ -469,6 +506,7 @@ async function startGame(settings) {
       });
     });
   }
+  if (!settings.multiplayer) startAutosave(); else stopAutosave(); // [J1]
 }
 
 /**
@@ -566,10 +604,11 @@ async function showMenu() {
     const races = raceList();
     if (races.length === 0) throw new Error('stats.json has no races');
     game.menu = new MainMenu(document.getElementById('menu'), {
-      races, teams: TEAMS, onStart: (s) => { lastSoloSettings = s; return startGame(s); },
+      races, teams: TEAMS, onStart: (s) => { lastSoloSettings = s; world.paused = false; return startGame(s); }, // [I1] no frozen game after a console test
       multiplayer: { createTransport: mp.createTransport, Lobby: mp.Lobby },
       onMultiplayerStart: (info) => startMultiplayer(info).catch((err) => { console.error(err); hud.message(t('menu.errorLoading')); }),
       loading,
+      saveLoad: saveView, // [J2] "Load game"
     });
   } catch (err) {
     console.error(err);
@@ -577,6 +616,27 @@ async function showMenu() {
     hud.message(t('menu.errorLoading'));
     return;
   }
+  // [J1] a save chosen during a match: the page was reloaded → restore it now
+  try {
+    const pending = await takeScheduledRestore();
+    if (pending) {
+      game.menu.show(false);
+      loading.show(); loading.setTitle(t('save.restoring.title')); loading.setRestore({ ratio: 0 });
+      try {
+        await saveGame.restore(pending, { onProgress: (r) => loading.setRestore({ ratio: r }) });
+        loading.hide();
+        onSaveRestored();
+      } catch (err) {
+        console.error(err);
+        // a half-replayed match stays on the page → reload into a clean menu and tell the player there
+        try { sessionStorage.setItem(RESTORE_ERROR_KEY, restoreErrorText(err)); } catch { /* the message is lost, the reload still helps */ }
+        window.location.reload();
+      }
+      return;
+    }
+    const restoreError = sessionStorage.getItem(RESTORE_ERROR_KEY);
+    if (restoreError) { sessionStorage.removeItem(RESTORE_ERROR_KEY); hud.message(restoreError); }
+  } catch (err) { console.error(err); }
   // [W5c] solo restart: the page was reloaded with the last settings (new seed) → start straight away
   try {
     const raw = sessionStorage.getItem(RESTART_KEY);
@@ -634,6 +694,7 @@ async function startMultiplayer(info) {
   // [N11] text chat next to the lockstep (same channel, topic 'chat', outside the simulation)
   chat = new Chat({ channel: info.channel, players: info.players, localTeam: info.localTeam, isAlly: areAllies });
   chatBox = new ChatBox({ chat, t, getColor: (team) => TEAMS[team]?.color });
+  world.paused = false; // [I1] no frozen game after a console test
   await startGame({
     multiplayer: true,
     map: s.map, startPicks: s.startPicks, // [MAPS] from the host's start message (startPicks keyed by packed team)
@@ -825,10 +886,11 @@ function advanceSimulation(maxFrameTime, maxSteps) {
   const dt = Math.min((now - lastSimTime) / 1000, maxFrameTime);
   lastSimTime = now;
   if (!simRunning) return 1;
+  if (world.paused) { simAccumulator = 0; return 1; } // [I1] a console harness ticks by itself (steelMen.det, ai.fastForward)
   if (matchUi.pausesSimulation) { simAccumulator = 0; return 1; } // single player: the open game menu pauses
   simAccumulator += dt * gameSpeed.value; // N4: game speed = ticks per real second, SIM_DT unchanged
   let steps = 0;
-  // readyForTick: a lockstep match waits for a produced unit's model (World.spawnDeferred)
+  // readyForTick: every match waits for a produced unit's model / tracked load (World.spawnDeferred, trackLoad)
   // net.canAdvance: a lockstep match also waits for every player's turn message
   while (simAccumulator >= SIM_DT && steps < maxSteps && world.readyForTick()
     && (!net || net.canAdvance(world.tick + 1))) {
@@ -861,7 +923,7 @@ renderer.setAnimationLoop(() => {
   cameraKeys.update(dt);
   edgeScroll.update(dt);
   controls.update();
-  if (worldVisible) { // [W6] nothing behind the main menu
+  if (worldVisible && !isRestoring()) { // [W6] nothing behind the main menu; [J1] no drawing while a save replays
     applyInterpolation(alpha);
     renderer.render(scene, camera);
     restoreInterpolation();

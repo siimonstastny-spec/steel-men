@@ -11,6 +11,9 @@
 //         { x, z, halfX, halfZ, owner }        – axis-aligned box (buildings)
 // owner = the unit / building the shape belongs to (used to ignore the target of an order).
 // rift: true = terrain rift (ASCII maps, '-'): blocks everybody except queries with crossRift (hover / air units).
+// passTeam: team number = [H1] a passable gate of that team: queries of that team or an allied one (Alliances.areAllies)
+//   skip the shape (the gate opens when they arrive); everybody else, queries without a team and obstacles() (building
+//   placement, spawn spots) still see it. undefined = blocks everybody.
 //
 // [R2] Jet crossings (docs/notes/n6-jumpjet.md), straight runs of blocked cells (8 directions) from a free cell to the
 // next free cell, centre-to-centre distance ≤ range, cost = length + penalty:
@@ -21,6 +24,7 @@
 // obstacle between takeoff and landing blocks the line of sight.
 import * as THREE from 'three';
 import { PATHFINDING, MECH_COLLISION } from '../config.js';
+import { areAllies } from './Alliances.js';
 
 const SQRT2 = Math.SQRT2;
 const EPSILON = 1e-9; // numeric guard against division by zero (not a tuning value)
@@ -32,6 +36,8 @@ const NEIGHBOURS = [
 const BLOCK_SOLID = 1;
 const BLOCK_RIFT = 2;
 const SOLID_FIRST = [true, false];
+const SIG_VALUES = 5; // [H1] refresh(): values per shape in the layout signature (x, z, radius|halfX, halfZ, passTeam)
+const NO_PASS_TEAM = -1; // signature value of a shape without passTeam
 const CROSS_FLY = 1;
 const CROSS_HOP = 2;
 const sameNum = (a, b) => a === b || (a !== a && b !== b);
@@ -51,7 +57,7 @@ export class NavGrid {
   #heap = new MinHeap(); // A* open list
   #origin = new THREE.Vector3(); // #nearestFree scratch
   #centre = new THREE.Vector3();
-  #sigValues = [];       // refresh(): rounded obstacle values of the last layout (4 per shape)
+  #sigValues = [];       // refresh(): rounded obstacle values of the last layout (SIG_VALUES per shape)
   #sigCount = 0;
 
   /**
@@ -118,15 +124,18 @@ export class NavGrid {
 
   #sigChanged = false;
 
-  // Writes the rounded values of `list` into `prev` from shape index n (4 per shape); flags a difference to the old values
+  // Writes the rounded values of `list` into `prev` from shape index n (SIG_VALUES per shape); flags a difference to the old values
+  // ([H1] passTeam included: a gate becoming passable for its team re-plans the paths)
   #signShapes(list, n, prev) {
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
       const v0 = Math.round(s.x), v1 = Math.round(s.z), v2 = Math.round(s.radius ?? s.halfX), v3 = Math.round(s.halfZ ?? 0);
-      const o = n * 4;
+      const v4 = s.passTeam ?? NO_PASS_TEAM;
+      const o = n * SIG_VALUES;
       // (NaN compares equal to NaN, as it did in the string)
-      if (!sameNum(prev[o], v0) || !sameNum(prev[o + 1], v1) || !sameNum(prev[o + 2], v2) || !sameNum(prev[o + 3], v3)) this.#sigChanged = true;
-      prev[o] = v0; prev[o + 1] = v1; prev[o + 2] = v2; prev[o + 3] = v3;
+      if (!sameNum(prev[o], v0) || !sameNum(prev[o + 1], v1) || !sameNum(prev[o + 2], v2) || !sameNum(prev[o + 3], v3)
+        || prev[o + 4] !== v4) this.#sigChanged = true;
+      prev[o] = v0; prev[o + 1] = v1; prev[o + 2] = v2; prev[o + 3] = v3; prev[o + 4] = v4;
       n++;
     }
     return n;
@@ -145,15 +154,16 @@ export class NavGrid {
    * @param {number} [opts.hopRange]   [R2] max hop length over rifts only (units, 0 = cannot hop)
    * @param {number} [opts.hopPenalty] [R2] extra cost of one hop (units)
    * @param {object} [opts.body]  [W7] the moving unit itself: its collision circles replace `radius` (see #inflated)
+   * @param {number} [opts.team]  [H1] team of the moving unit (default body.team): own / allied gates do not block (passTeam)
    * @returns {{ waypoints: THREE.Vector3[], goal: THREE.Vector3, direct: boolean, goalFly: boolean, goalHop: boolean }}
    *   waypoints = intermediate points (without the goal); goal = where the unit can actually get –
    *   the target itself, or the nearest free spot when the target lies inside an obstacle.
    *   A waypoint with `fly` / `hop` = true (goalFly / goalHop) = the leg to that point is a flight / hop.
    */
   findPath(from, to, {
-    radius = 0, ignore = [], crossRift = false, flyRange = 0, flyPenalty = 0, hopRange = 0, hopPenalty = 0, body = null,
+    radius = 0, ignore = [], crossRift = false, flyRange = 0, flyPenalty = 0, hopRange = 0, hopPenalty = 0, body = null, team = body?.team,
   } = {}) {
-    const shapes = this.#inflated(radius, ignore, crossRift, body);
+    const shapes = this.#inflated(radius, ignore, crossRift, body, team);
     const goal = new THREE.Vector3(to.x, 0, to.z);
     const none = (g) => ({ waypoints: [], goal: g, direct: true, goalFly: false, goalHop: false });
     if (!shapes.length || this.segmentClear(from, goal, shapes)) return none(goal);
@@ -216,29 +226,32 @@ export class NavGrid {
    * Inflated shapes for a unit of the given radius (also used to test line of sight while walking).
    * [W7] With `body` (the moving unit) each obstacle is inflated by the circle of the unit that touches it
    * (collisionReach); without it every obstacle is inflated by `radius` as before.
+   * [H1] `team` (default body.team): gates passable for that team are left out (see passTeam in the file header).
    */
-  shapesFor(radius, ignore = [], crossRift = false, body = null) { return this.#inflated(radius, ignore, crossRift, body); }
+  shapesFor(radius, ignore = [], crossRift = false, body = null, team = body?.team) { return this.#inflated(radius, ignore, crossRift, body, team); }
 
   // ---------- internal ----------
 
-  #inflated(radius, ignore, crossRift = false, body = null) {
+  #inflated(radius, ignore, crossRift = false, body = null, team = undefined) {
     // [N10] shapes are written into recycled objects; the returned list is valid until the next call (all callers use it at once)
     const out = this.#shapes;
     let n = 0;
     const snap = this._snapshot?.shapes;
-    if (snap) n = this.#inflateList(snap, n, radius, ignore, crossRift, body);
-    else for (let i = 0; i < this.sources.length; i++) n = this.#inflateList(this.sources[i](), n, radius, ignore, crossRift, body);
+    if (snap) n = this.#inflateList(snap, n, radius, ignore, crossRift, body, team);
+    else for (let i = 0; i < this.sources.length; i++) n = this.#inflateList(this.sources[i](), n, radius, ignore, crossRift, body, team);
     out.length = n;
     return out;
   }
 
-  #inflateList(list, n, radius, ignore, crossRift, body) {
+  #inflateList(list, n, radius, ignore, crossRift, body, team) {
+    const hasTeam = team !== undefined && team !== null;
     const clearance = PATHFINDING.clearance;
     const pool = this.#shapePool;
     const out = this.#shapes;
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
       if (ignore.includes(s.owner) || (crossRift && s.rift)) continue;
+      if (hasTeam && s.passTeam !== undefined && areAllies(team, s.passTeam)) continue; // [H1] own / allied gate
       let own = s.radius;
       let pad = radius;
       if (body) {

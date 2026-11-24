@@ -43,10 +43,10 @@ export async function aiFastForward(seconds, { report = true } = {}) {
   const every = AI.fastForward.reportEverySeconds * SIM.tickRate;
   let nextReport = world.tick + every;
   aiFastForward.busy = true;
-  // D1: a produced unit whose model is still loading must stall the tick (lockstep rule) instead of entering the
-  // world a few ticks later – otherwise the load speed of the machine changes the simulation (single player default)
-  const prevWait = world.waitForSpawns;
-  world.waitForSpawns = true;
+  // [I1] the game loop runs no ticks meanwhile (world.paused) – no need to stop requestAnimationFrame any more.
+  // A produced unit / building whose model is still loading stalls the tick (world.readyForTick, always on).
+  const prevPaused = world.paused;
+  world.paused = true;
   try {
     while (world.tick < end && !game.match?.result) {
       for (let i = 0; i < AI.fastForward.chunkTicks && world.tick < end; i++) {
@@ -60,7 +60,7 @@ export async function aiFastForward(seconds, { report = true } = {}) {
       await new Promise((r) => setTimeout(r, 0)); // model loads, rendering
     }
   } finally {
-    world.waitForSpawns = prevWait;
+    world.paused = prevPaused;
     aiFastForward.busy = false;
   }
   if (game.match?.result) console.info('[AI vs AI] match over', game.match.result);

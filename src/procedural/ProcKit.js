@@ -11,7 +11,7 @@
 // Style-aware modules (fans, beacons, cranes, emblem…) live in ProcModules.js.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { HIGHLIGHT, BUILDING_LOD } from '../config.js';
+import { HIGHLIGHT, BUILDING_LOD, PROC_STATE } from '../config.js';
 
 /** Kit tuning (visual only) */
 export const PROC_KIT = {
@@ -269,44 +269,63 @@ function releasePanelTexture(type) {
 // all team clones = one shader program; each clone keeps its own uTeamColor uniform.
 function paintOnBeforeCompile(shader) {
   shader.uniforms.uDetail = this.userData.uDetail;
-  if (this.defines.PROC_INSTANCED !== undefined) { paintInstancedShader(shader, this.userData.uHighlight); return; }
+  if (this.defines.PROC_INSTANCED !== undefined) { paintInstancedShader(shader, this.userData.uHighlight, this.defines.PROC_STATE_ATTR !== undefined); return; }
   shader.uniforms.uTeamColor = this.userData.uTeamColor;
+  shader.uniforms.uState = this.userData.uState;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nattribute vec4 aSurface;\nvarying vec4 vSurface;')
     .replace('#include <color_vertex>', '#include <color_vertex>\nvSurface = aSurface;');
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform vec3 uTeamColor;\nuniform float uDetail;\nvarying vec4 vSurface;')
+    .replace('#include <common>', '#include <common>\nuniform vec3 uTeamColor;\nuniform vec3 uState;\nuniform float uDetail;\nvarying vec4 vSurface;')
     .replace('#include <color_fragment>', [
       '#include <color_fragment>',
       'diffuseColor.rgb *= mix(vec3(1.0), texture2D(bumpMap, vBumpMapUv).rgb, uDetail);',
       'diffuseColor.rgb *= mix(vec3(1.0), uTeamColor, vSurface.x);',
+      'diffuseColor.rgb *= mix(uState.x, uState.y, vSurface.x);',   // damage: paint scale, team-masked scale
     ].join('\n'))
     .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vSurface.z;')
     .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vSurface.y;')
-    // team-masked glowing parts (neon strips in the team colour) glow in the team colour
+    // team-masked glowing parts (neon strips in the team colour) glow in the team colour; uState.z = power glow scale
     .replace('#include <emissivemap_fragment>',
-      '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor * mix(vec3(1.0), uTeamColor, vSurface.x) * vSurface.w;');
+      '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor * mix(vec3(1.0), uTeamColor, vSurface.x) * vSurface.w * uState.z;');
+}
+
+/**
+ * Building state look (damage darkening + power glow) from quantised steps: out = (paint scale, team-masked paint scale,
+ * emissive scale). Steps 0 / 0 = the unchanged look (1, 1, 1). Writes into `out` (no allocation).
+ */
+export function stateLook(damageStep, powerStep, out) {
+  const f = damageStep / PROC_STATE.damageSteps;
+  const paint = 1 + (PROC_STATE.minPaint - 1) * f;
+  out[0] = paint;
+  out[1] = 1 - (1 - paint) * (1 - PROC_STATE.teamKeep);
+  const p = powerStep / PROC_STATE.powerSteps;
+  out[2] = PROC_STATE.offGlow + (1 - PROC_STATE.offGlow) * p;
+  return out;
 }
 
 // Instanced variant (BuildingBatcher): per-instance attribute aInst = (team colour rgb, hover highlight 0..1) replaces
 // the uTeamColor uniform; the hover highlight adds the HIGHLIGHT emissive. Same texture / surface logic otherwise.
-function paintInstancedShader(shader, highlight) {
+// With `withState` (buildings) the instance also carries aState = (paint scale, team-masked scale, emissive scale),
+// see stateLook; units have no such attribute and keep the plain look.
+function paintInstancedShader(shader, highlight, withState) {
   shader.uniforms.uHighlight = highlight;
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute vec4 aSurface;\nattribute vec4 aInst;\nvarying vec4 vSurface;\nvarying vec4 vInst;')
-    .replace('#include <color_vertex>', '#include <color_vertex>\nvSurface = aSurface;\nvInst = aInst;');
+    .replace('#include <common>', `#include <common>\nattribute vec4 aSurface;\nattribute vec4 aInst;\n${withState ? 'attribute vec3 aState;\nvarying vec3 vState;\n' : ''}varying vec4 vSurface;\nvarying vec4 vInst;`)
+    .replace('#include <color_vertex>', `#include <color_vertex>\nvSurface = aSurface;\nvInst = aInst;${withState ? '\nvState = aState;' : ''}`);
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform float uDetail;\nuniform vec3 uHighlight;\nvarying vec4 vSurface;\nvarying vec4 vInst;')
+    .replace('#include <common>', `#include <common>\nuniform float uDetail;\nuniform vec3 uHighlight;\n${withState ? 'varying vec3 vState;\n' : ''}varying vec4 vSurface;\nvarying vec4 vInst;`)
     .replace('#include <color_fragment>', [
       '#include <color_fragment>',
       'diffuseColor.rgb *= mix(vec3(1.0), texture2D(bumpMap, vBumpMapUv).rgb, uDetail);',
       'diffuseColor.rgb *= mix(vec3(1.0), vInst.rgb, vSurface.x);',
+      withState ? 'diffuseColor.rgb *= mix(vState.x, vState.y, vSurface.x);' : '',
     ].join('\n'))
     .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vSurface.z;')
     .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vSurface.y;')
     .replace('#include <emissivemap_fragment>', [
       '#include <emissivemap_fragment>',
-      'totalEmissiveRadiance += vColor * mix(vec3(1.0), vInst.rgb, vSurface.x) * vSurface.w + uHighlight * vInst.a;',
+      `totalEmissiveRadiance += vColor * mix(vec3(1.0), vInst.rgb, vSurface.x) * vSurface.w${withState ? ' * vState.z' : ''} + uHighlight * vInst.a;`,
     ].join('\n'));
 }
 
@@ -317,20 +336,22 @@ const instancedCache = new Map();   // texture type -> { material, users }
  * Instanced paint material (InstancedMesh with an `aInst` InstancedBufferAttribute, see BuildingBatcher), one per
  * panel texture type, ref-counted – pair with releaseInstancedPaintMaterial.
  */
-export function acquireInstancedPaintMaterial(texture = PROC_KIT.defaultTexture) {
+export function acquireInstancedPaintMaterial(texture = PROC_KIT.defaultTexture, withState = false) {
   const type = textureTypeOf(texture);
-  let entry = instancedCache.get(type);
+  const key = withState ? `${type}:state` : type;   // buildings: instances carry aState (damage / power look)
+  let entry = instancedCache.get(key);
   if (!entry) {
     const o = PROC_KIT.textures[type];
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, bumpMap: acquirePanelTexture(type), bumpScale: o.bumpScale });
     material.defines.PROC_INSTANCED = '';
+    if (withState) material.defines.PROC_STATE_ATTR = '';
     material.userData.uDetail = { value: o.detail };
     material.userData.uHighlight = highlightUniform;
     material.userData.procedural = true;
     material.onBeforeCompile = paintOnBeforeCompile;
-    material.customProgramCacheKey = () => 'steelMenProcPaintInstanced';
+    material.customProgramCacheKey = () => (withState ? 'steelMenProcPaintInstancedState' : 'steelMenProcPaintInstanced');
     entry = { material, users: 0, type };
-    instancedCache.set(type, entry);
+    instancedCache.set(key, entry);
   }
   entry.users++;
   return entry.material;
@@ -353,9 +374,9 @@ const paintCache = new Map();   // "hex:texture" -> { material, users, type }
  * Shared paint material for a team colour and a panel texture type (style.texture), ref-counted – pair with
  * releasePaintMaterial. All clones share one shader program.
  */
-export function acquirePaintMaterial(color, texture = PROC_KIT.defaultTexture) {
+export function acquirePaintMaterial(color, texture = PROC_KIT.defaultTexture, damageStep = 0, powerStep = PROC_STATE.powerSteps) {
   const type = textureTypeOf(texture);
-  const key = `${new THREE.Color(color).getHexString()}:${type}`;
+  const key = `${new THREE.Color(color).getHexString()}:${type}:${damageStep}:${powerStep}`;
   let entry = paintCache.get(key);
   if (!entry) {
     const o = PROC_KIT.textures[type];
@@ -364,6 +385,7 @@ export function acquirePaintMaterial(color, texture = PROC_KIT.defaultTexture) {
       bumpMap: acquirePanelTexture(type),
       bumpScale: o.bumpScale,
     });
+    material.userData.uState = { value: new THREE.Vector3().fromArray(stateLook(damageStep, powerStep, [1, 1, 1])) };
     material.userData.uTeamColor = { value: new THREE.Color(color) };
     material.userData.uDetail = { value: o.detail };
     material.userData.procedural = true;

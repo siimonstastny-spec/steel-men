@@ -12,11 +12,17 @@ import { isLocal } from '../core/LocalPlayer.js';
 import { proceduralEnabled, loadBuildingStyles } from '../procedural/registry.js';
 import { createProceduralUnit, hasProceduralUnit } from '../procedural/units/UnitKit.js';
 import '../procedural/units/index.js'; // registers every procedural unit model (side effects only)
+import { WorkEmitter } from '../procedural/units/WorkEffects.js'; // [B1-W3] build / repair / harvest particles (PROC_WORK_FX)
+import { PROC_WORK_FX } from '../config.js';
 
 export const PROC_VEHICLE = {
   defaultSocket: 'muzzle',
   turretTurnSpeed: 120,  // deg/s – turret turn speed of a procedural vehicle without stats.turret (override: stats.procTurretTurnSpeed)
   aimSocket: 'aim',
+  cargoSocket: 'cargo',  // [proc-trucks] salvage rests here (Vehicle.cargoY) when the model has it
+  // [proc-trucks] vehicle.activity → setWork(kind) of a model that has setWork (HoverTruck, DrillTruck); others → 'none'
+  workKinds: { building: 'build', repairing: 'repair', harvesting: 'harvest' },
+  workHold: 0.6,         // s the last tool state is kept after the activity stops (one-tick 'building' must not flash the tool)
   cloakTime: 1.2,        // s from visible to fully cloaked (and back)
   deployTime: 1.4,       // s to anchor / unanchor
   deployedAt: 0.95,      // progress from which the status lamp shows 'deployed'
@@ -53,6 +59,9 @@ export class ProcDriver {
     this.cloakProgress = 0;
     this.deployProgress = 0;
     this.statusName = '';
+    this.workKind = 'none';  // [proc-trucks] tool state shown (held PROC_VEHICLE.workHold s after the activity ends)
+    this.workHoldLeft = 0;
+    this.workFx = null;      // [B1-W3] WorkEmitter, created on first work
     this.air = Boolean(vehicle.airborne);
     const stats = vehicle.stats;
     this.deploys = stats.deploys === true;
@@ -88,8 +97,28 @@ export class ProcDriver {
       this.deployProgress = want > this.deployProgress ? Math.min(want, this.deployProgress + step) : Math.max(want, this.deployProgress - step);
       m.setDeployed(this.deployProgress);
     }
+    // [proc-trucks] working tool (crane / drill / beam): the model eases between states by itself
+    if (m.setWork) {
+      const kind = v.dead ? null : PROC_VEHICLE.workKinds[v.activity] ?? null;
+      if (kind) { this.workKind = kind; this.workHoldLeft = PROC_VEHICLE.workHold; }
+      else if (this.workHoldLeft > 0) this.workHoldLeft -= dt;
+      else this.workKind = 'none';
+      m.setWork(v.dead ? 'none' : this.workKind, 1);
+    }
     this.#lamp(m, standing, attacking);
     m.tick(dt);
+    // [B1-W3] work particles from the `work` socket while a tool state is shown (level = eased tool deployment)
+    if (m.setWork && PROC_WORK_FX.enabled && !v.dead && PROC_VEHICLE.workKinds[v.activity]) {
+      const level = m.workAmount ?? (m.working ? 1 : 0);
+      this.workFx ??= new WorkEmitter();
+      this.workFx.update(m, this.workKind, level, dt);
+    }
+  }
+
+  /** Releases the work-effect emitter (call when the vehicle is removed) */
+  dispose() {
+    this.workFx?.dispose();
+    this.workFx = null;
   }
 
   // Status lamp: only the local player's own units show their state

@@ -135,6 +135,8 @@ export const STRUCTURE_ROLES = {
   wallPost: (s) => s.placement === 'wall',
   turret: (s) => s.placement === 'post',
   hq: (s) => Boolean(s.hq),
+  // [H5] building that produces ore endlessly (oreDeepExtractor, stats.deepExtraction); placed like other buildings
+  deepMining: (s) => Boolean(s.deepExtraction),
 };
 
 /** Predicates of vehicle roles */

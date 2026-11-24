@@ -37,6 +37,7 @@ function applyMineCursor() {
 const CURSOR_MINE = 'var(--cursor-mine, copy)';
 const CURSOR_ATTACK = 'var(--cursor-attack, crosshair)';
 import { commandBus } from '../game/commands/CommandBus.js';
+import { canUpgradeToGate, newTicket } from '../game/commands/buildCommands.js'; // [H1] gates (also registers upgradeGate)
 import { canGather } from '../game/Production.js';
 import '../game/commands/productionCommands.js'; // setRally registers even before BuildMenu loads
 import { canTake, pickTaker, SINGLE_TAKER_ORDERS } from '../game/commands/unitCommands.js'; // also registers the unit commands
@@ -49,7 +50,7 @@ const CLICK_TOLERANCE_PX = 5; // větší posun = výběr obdélníkem
 export const TARGETED_ORDERS = ['move', 'attackMove', 'guard', 'patrol', 'repairUnit'];
 // Orders issued at once by their key (the command grid calls command(name) for every button)
 const INSTANT_KEY_ORDERS = ['eject', 'dropLeft', 'dropRight', 'stop', 'deleteUnit', 'stanceRanged', 'stanceMelee',
-  'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair', 'formation'];
+  'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair', 'formation', 'wallGate'];
 // Behaviour buttons -> unit.setBehaviour mode (BEHAVIOUR.mechModes / crewModes in config.js)
 const BEHAVIOUR_COMMANDS = { behaviourAggressive: 'aggressive', behaviourDefensive: 'defensive', behaviourPassive: 'passive' };
 const STANCE_COMMANDS = { stanceRanged: 'ranged', stanceMelee: 'melee' };
@@ -163,6 +164,15 @@ export class CommandInput {
   get selectedStructure() { const u = this.selected; return u?.isStructure ? u : null; }
   /** Own buildings in the selection – they can be deleted */
   get selectedOwnStructures() { return this.selection.filter((u) => u.isStructure && isLocal(u) && !u.destroyed); }
+  /** [H1] Own finished full wall segments in the selection – the 'wallGate' button rebuilds them into gates */
+  get selectedGateSegments() { return this.selection.filter((u) => canUpgradeToGate(u, localTeam())); }
+  /** [H1] Any such segment selected (read by the HUD every frame: no array, no closure) */
+  get hasGateSegments() {
+    const team = localTeam();
+    const sel = this.selection;
+    for (let i = 0; i < sel.length; i++) if (canUpgradeToGate(sel[i], team)) return true;
+    return false;
+  }
 
   select(unit) { this.setSelection(unit ? [unit] : []); }
 
@@ -224,6 +234,7 @@ export class CommandInput {
       repairUnit: vehicles.some((v) => v.repairer),
       stop: active.some((m) => m.order) || crews.some((c) => c.order) || vehicles.some((v) => v.order),
       deleteUnit: mechs.length > 0 || crews.length > 0 || vehicles.length > 0 || this.selectedOwnStructures.length > 0,
+      wallGate: this.hasGateSegments,
       eject: mechs.some((m) => m.crew),
       stanceRanged: active.some((m) => m.hasMixedWeapons),
       stanceMelee: active.some((m) => m.hasMixedWeapons),
@@ -270,6 +281,7 @@ export class CommandInput {
       this.confirmDelete(units, structures);
       return;
     }
+    if (name === 'wallGate') { this.#upgradeGates(); return; }
     if (name === 'eject') {
       const loaded = mechs.filter((m) => m.crew);
       if (loaded.length) this.#submit('eject', { units: ids(loaded) }); // the selection follows the crews (onExecuted)
@@ -288,6 +300,24 @@ export class CommandInput {
       // Second press of the same order cancels it; the target comes with the next left click
       this.#setPending(this.pending === name || !this.commands[name] ? null : name);
     }
+  }
+
+  /**
+   * [H1] 'wallGate': every selected full segment is rebuilt into a gate (command upgradeGate; the simulation checks and
+   * pays; the gate builds itself, no builder is sent). A refusal shows in the HUD message line.
+   */
+  #upgradeGates() {
+    this.#setPending(null);
+    const segments = this.selectedGateSegments;
+    if (!segments.length) return;
+    const team = localTeam();
+    const ticket = newTicket(team, (res) => {
+      if (res?.error === 'resources') {
+        const miss = this.world.economy?.missing(team, res.cost ?? {}) ?? {};
+        this.notify?.(t('econ.notEnough', { missing: Object.entries(miss).map(([r, v]) => `${t(`hud.${r}`)} ${v}`).join(', ') }));
+      } else if (res?.error && res.error !== 'gone') this.notify?.(t('gate.refused'));
+    });
+    this.#submit('upgradeGate', { segments: ids(segments), ticket });
   }
 
   /** Formation key: the next mode (after the majority mode of the units) for all of them (same as the HUD button) */
@@ -742,7 +772,7 @@ export class CommandInput {
       return takers;
     };
     // Vehicles: builders take over an own unfinished building, harvesters mine a deposit; the rest just moves
-    if (unit?.isStructure && isLocal(unit) && unit.underConstruction) offer('helpBuild', vehicles, unit, { structure: unit.eid });
+    if (unit?.isStructure && isLocal(unit) && unit.underConstruction && !unit.stats?.selfBuild) offer('helpBuild', vehicles, unit, { structure: unit.eid }); // [H1] a gate builds itself
     const deposit = vehicles.some((v) => v.harvester) ? this.#depositUnderCursor() : null;
     if (deposit) offer('harvest', vehicles, deposit, { deposit: deposit.eid });
     // Salvage carriers (HoverTruck): load a legs / torso wreck (one truck per wreck), or unload at an own building

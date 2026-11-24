@@ -333,7 +333,7 @@ const ENTITY_ORDERS = {
   harvest: { field: 'deposit', orderType: 'harvest', ref: 'deposit', run: (u, t) => u.harvest(t) },
   salvage: { field: 'wreck', orderType: 'salvage', ref: 'wreck', run: (u, t) => u.collectSalvage(t) },
   deliver: { field: 'structure', orderType: 'deliver', ref: 'structure', run: (u, t) => u.deliverSalvage(t) },
-  collect: { field: 'wreck', orderType: 'collect', ref: 'wreck', run: (u, t) => u.collect(t) },
+  collect: { field: 'wreck', orderType: 'collect', ref: 'wreck', run: (u, t) => u.collect?.(t) ?? false }, // [I2] units without collect (trucks, crews) refuse
   enterBay: { field: 'bay', orderType: 'enterBay', ref: 'bay', run: (u, t) => u.enterBay(t) },
   joinBay: { field: 'bay', orderType: 'joinBay', ref: 'bay', run: (u, t) => u.joinBay?.(t) ?? false }, // [N2]
   board: { field: 'mech', orderType: 'board', ref: 'mech', run: (u, t) => u.board(t) },
@@ -353,6 +353,7 @@ for (const [type, spec] of Object.entries(ENTITY_ORDERS)) {
         if (first) units = [first, ...units.filter((u) => u !== first)];
       }
       for (const u of units) {
+        if (type === 'collect' && typeof u.collect !== 'function') continue; // [I2] cannot take it: no order, no queue entry
         const ok = give(u, spec.orderType, { [spec.ref]: target }, () => spec.run(u, target), cmd.queued,
           canTake(type, u, target, true));
         if (ok && SINGLE_TAKER_ORDERS.has(type)) break;

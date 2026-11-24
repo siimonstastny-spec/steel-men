@@ -10,7 +10,10 @@ const cache = new Map(); // url -> Promise<gltf>
 export function loadGltf(path) {
   const url = MODELS_BASE + path;
   if (!cache.has(url)) {
-    cache.set(url, fetchGltf(url).then(markNodes).then((gltf) => fixTextures(fixGeometry(gltf, path), path)));
+    const job = fetchGltf(url).then(markNodes).then((gltf) => fixTextures(fixGeometry(gltf, path), path));
+    // [I1] a failed load is not cached: the next request tries again (one failure must not stay for the whole session)
+    job.catch(() => { if (cache.get(url) === job) cache.delete(url); });
+    cache.set(url, job);
   }
   return cache.get(url);
 }

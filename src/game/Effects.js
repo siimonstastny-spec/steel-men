@@ -31,6 +31,7 @@ class ProjectileBatch {
     this.live = [];      // records in launch order
     this.arrived = [];   // recycled: records that arrived this frame
     this.pool = [];      // recycled records
+    this.headless = false; // [J1] restore: flight and arrivals run, no instance is written or drawn
   }
 
   #mesh(mat, order) {
@@ -90,7 +91,7 @@ class ProjectileBatch {
       live[n++] = rec;
     }
     live.length = n;
-    const drawn = Math.min(n, this.cap);
+    const drawn = this.headless ? 0 : Math.min(n, this.cap); // [J1] headless: nothing drawn, simulation part unchanged
     for (let i = 0; i < drawn; i++) {
       const rec = live[i];
       _pDummy.position.copy(rec.pos);
@@ -146,6 +147,19 @@ export class Effects {
     this.templates = {};    // VFX model key -> loaded scene (cloned per effect)
     this.time = 0;
     this.field = null;      // batched explosion particles (ExplosionStyles.ParticleField), created on first use
+    this.headless = false;  // [J1] setHeadless
+  }
+
+  /**
+   * [J1] Headless mode for restoring a saved game: no tracers, bursts, particles, indicators, beams or sounds are
+   * created and projectiles are not drawn. Everything the simulation depends on still runs: projectile flight and
+   * arrival callbacks (Combat.resolveShot), `burn` timers with their onEnd, `custom` items. Visual randomness here
+   * (Math.random / ParticleField) never touches world.rng, so skipping it cannot change the simulation.
+   * Indicators requested while headless stay missing until the effect is requested again.
+   */
+  setHeadless(on) {
+    this.headless = Boolean(on);
+    this.projectiles.headless = this.headless;
   }
 
   /** Loads the explosion models once; effects requested before that are skipped */
@@ -164,6 +178,7 @@ export class Effects {
    * @param {object} [opts]  { fallbackSize } VFX.mechExplosion scale when the data is not loaded
    */
   unitDeath(unit, { fallbackSize = 1 } = {}) {
+    if (this.headless) return; // [J1] visual only (the delayed explosion is a visual too)
     const plan = explosionData() ? explosionPlan(unit) : null;
     if (!plan || plan.delay <= 0) { this.explodeUnit(unit, { fallbackSize }); return; }
     this.burn(unit, unit, plan.delay, () => this.explodeUnit(unit, { fallbackSize }));
@@ -174,6 +189,7 @@ export class Effects {
    * @param {object} [opts]  { position (default unit.position), size = 1 (multiplier), fallbackSize }
    */
   explodeUnit(unit, { position = unit.position, size = 1, fallbackSize = 1 } = {}) {
+    if (this.headless) return; // [J1]
     const plan = explosionData() ? explosionPlan(unit) : null;
     const aim = unit.aimHeight ?? 1;
     if (!plan) { this.burst(VFX.mechExplosion, position.clone(), { size: fallbackSize, heightUnit: aim }); return; }
@@ -190,7 +206,8 @@ export class Effects {
    * @returns {{ stop(): void }}
    */
   burn(unit, follow = unit, duration = 1, onEnd = null) {
-    const plan = explosionData() ? explosionPlan(unit) : null;
+    // [J1] headless: the timer and onEnd stay (callers may rely on them), no flames or smoke
+    const plan = !this.headless && explosionData() ? explosionPlan(unit) : null;
     const b = plan?.burn ?? null;
     const field = b ? this.#field() : null;
     const aim = unit.aimHeight ?? 1;
@@ -225,7 +242,7 @@ export class Effects {
    */
   damageSmoke(target, hpFraction, { kind = 'unit', isShown = () => true, sizeScale = 1 } = {}) {
     const spec = damagePlan(kind);
-    if (!spec || !explosionData()) return { dispose() {} };
+    if (this.headless || !spec || !explosionData()) return { dispose() {} }; // [J1] headless: none
     const field = this.#field();
     let puffs = 0;
     const item = {
@@ -265,6 +282,7 @@ export class Effects {
 
   /** Instant shot line (lasers, guns without projectile speed) */
   tracer(from, to, color) {
+    if (this.headless) return; // [J1]
     const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);
     const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 1 });
     const line = new THREE.Line(geo, mat);
@@ -296,6 +314,7 @@ export class Effects {
    * @param {object} [opts]  { size = 1 (scale multiplier), heightUnit = 1 (layer.height × this) }
    */
   burst(layers, position, { size = 1, heightUnit = 1 } = {}) {
+    if (this.headless) return; // [J1] no models, no sound
     play('explosion', { position });
     for (const layer of layers) {
       const obj = this.#instance(layer.model, layer.color, layer.textured ?? true);
@@ -334,7 +353,7 @@ export class Effects {
    * @returns {{ dispose(): void }}
    */
   attach(cfg, unit, scale = 1) {
-    const obj = this.#instance(cfg.model, cfg.color, cfg.textured ?? true);
+    const obj = this.headless ? null : this.#instance(cfg.model, cfg.color, cfg.textured ?? true); // [J1] headless: none
     if (!obj) return { dispose() {} };
     const offset = new THREE.Vector3();
     if (cfg.spread) { // flames at a random spot on the body
@@ -370,6 +389,7 @@ export class Effects {
    * @returns {{ dispose(): void }}
    */
   beam(unit, color, isShown = () => true) {
+    if (this.headless) return { dispose() {} }; // [J1]
     const cfg = R2.hqBeam;
     const geo = new THREE.CylinderGeometry(cfg.radius, cfg.radius, cfg.height, cfg.segments, 1, true);
     geo.translate(0, cfg.height / 2, 0); // base at the local origin, rising along +Y
@@ -418,7 +438,7 @@ export class Effects {
     items.length = n;
     this.#drainExpired();
     this.projectiles.update(dt);
-    this.field?.update(dt);
+    if (!this.headless) this.field?.update(dt); // [J1] particles are visual only
   }
 
   // Each item leaves the list before its dispose() runs, so a throwing dispose is never repeated and the rest still run

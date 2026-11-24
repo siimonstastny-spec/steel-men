@@ -5,6 +5,8 @@
 //   placeStructure   { type, team, race, unitId, x, z, yaw, builders: [eid], queued, ticket? }
 //   cancelConstruction { type, team, structure: eid, ticket? }
 //   deleteStructure  { type, team, structures: [eid] }   any own building, finished or not (UI asks first)
+//   upgradeGate      { type, team, segments: [eid], ticket? }   [H1] rebuilds each own finished
+//                    full wall segment into its gate (stats segment.gateUpgrade), see canUpgradeToGate
 //   placeStructure `yaw` is any angle (quantizeYaw: 1/CMD_BUILD.yawResolution rad)
 //   (helping a building = 'helpBuild' in unitCommands.js)
 //
@@ -22,7 +24,7 @@ import { getStats, unitStats, canProduce, loadStats } from '../../data/Stats.js'
 import { Structure, modelFootprint, cachedFootprint } from '../../units/Structure.js';
 import { structureClassFor } from '../../units/structureClasses.js';
 import { queueOf, issueOrder } from '../../units/OrderQueue.js';
-import { CMD_BUILD } from '../../config.js';
+import { CMD_BUILD, WALL, GATE } from '../../config.js';
 import { canPlace, placementBox, terrainFit, flattenTerrain, setConstructionDue, refundConstruction } from '../Construction.js';
 import { commandBus, registerCommand, resolve, resolveOwn } from './CommandBus.js';
 import { boxInArea } from '../PreBuild.js';
@@ -57,7 +59,7 @@ export function reportResult(cmd, res) {
 
 // Executors RETURN their result; this listener hands it to the ticket of the own command. A command refused by
 // validate() never reaches the listeners, so validate() calls reportResult itself (also own commands only).
-const REPORTING_COMMANDS = new Set(['placeStructure', 'cancelConstruction', 'placeWall', 'placeTurret']);
+const REPORTING_COMMANDS = new Set(['placeStructure', 'cancelConstruction', 'placeWall', 'placeTurret', 'upgradeGate']);
 commandBus.onExecuted((cmd, tick, result) => {
   if (result && REPORTING_COMMANDS.has(cmd.type)) reportResult(cmd, result);
 });
@@ -137,9 +139,10 @@ export function orderBuildChain(builders, structures, queued) {
 /**
  * Rules that do not depend on the spot: the building exists and is buildable by this race, requirements, per-team
  * limit (maxPerTeam), research tier. @returns {'' | 'invalid' | 'requires' | 'limit' | 'tier'} (see ruleResult)
+ * `upgrade` = [H1] built by rebuilding another structure (a gate: buildable false keeps it out of the build menu only).
  */
-export function checkRules(world, team, race, id, stats) {
-  if (!stats || stats.buildable === false) return 'invalid';
+export function checkRules(world, team, race, id, stats, upgrade = false) {
+  if (!stats || (stats.buildable === false && !upgrade)) return 'invalid';
   const research = world.research;
   if (research?.races?.[team] && research.races[team] !== race) return 'invalid';
   if (!canProduce(race, 'structures', id, research?.unlocks?.[team])) return 'invalid';
@@ -159,6 +162,8 @@ export async function preloadFootprints(race) {
     if (s.buildable === false) continue;
     ids.add(id);
     if (s.wallSegment) ids.add(s.wallSegment);
+    const gate = s.wallSegment ? all[s.wallSegment]?.gateUpgrade : null; // [H1] the gate a segment can be rebuilt into
+    if (gate) ids.add(gate);
   }
   await Promise.allSettled([...ids].map((id) => modelFootprint(id, race)));
 }
@@ -184,7 +189,8 @@ export function turnStructure(structure, fp, yaw) {
 /** Adds the structure to the world (eid + pathfinding box now) and attaches its model when loaded */
 export function addAndLoad(world, structure, x, z) {
   world.addStructure(structure, x, z);
-  structure.load().catch((err) => console.error('Structure load failed', structure.unitId, err));
+  // [I1] the next tick waits for the model (DefenseStructure muzzles / turning read it): same tick on every machine
+  world.trackLoad(structure.load()).catch((err) => console.error('Structure load failed', structure.unitId, err));
   return structure;
 }
 
@@ -270,6 +276,81 @@ registerCommand('deleteStructure', {
       refundConstruction(world.economy, s, refund);
       s.destroy({ explode: false });
     }
+  },
+});
+
+// ---------- upgradeGate ([H1]) ----------
+
+/** Gate structure id a structure can be rebuilt into (stats.gateUpgrade of a wall segment, never of a gate), or null */
+export function gateUpgradeOf(s) {
+  const id = s?.stats?.gateUpgrade;
+  return typeof id === 'string' && !s.stats.gate ? id : null;
+}
+
+/**
+ * [H1] Can `s` be rebuilt into a gate by `team`? An own, finished, live wall segment whose stats name a gate, in full
+ * length: not cut at the map edge / a tall obstacle (`trim`) and at least WALL.postSpacing × GATE.minLengthFactor long.
+ * The same test runs in the UI (button shown) and in the command.
+ */
+export function canUpgradeToGate(s, team) {
+  return Boolean(s?.isStructure) && s.team === team && s.complete === true && !s.dead && !s.destroyed && !s.removed
+    && gateUpgradeOf(s) !== null && s.trim !== true && num(s.length) && s.length >= WALL.postSpacing * GATE.minLengthFactor;
+}
+
+/** Segments of an upgradeGate command that can be rebuilt, in ascending eid order (independent of the selection order) */
+function gateSegments(world, cmd) {
+  const eids = Array.isArray(cmd.segments) ? cmd.segments.slice(0, GATE.maxBatch) : [];
+  const out = resolveOwn(world, eids, cmd.team).filter((s) => canUpgradeToGate(s, cmd.team));
+  out.sort((a, b) => a.eid - b.eid);
+  return out.filter((s, i) => i === 0 || out[i - 1] !== s); // an eid listed twice is rebuilt (and paid) once
+}
+
+/** Rules, footprint and price of the gate of one segment: { error } or { id, stats, fp } */
+function checkGate(world, team, seg) {
+  const id = gateUpgradeOf(seg);
+  const stats = unitStats('structures', id, seg.race);
+  const rules = checkRules(world, team, seg.race, id, stats, true);
+  if (rules) return ruleResult(rules, stats, world, team);
+  const fp = cachedFootprint(id, seg.race);
+  if (!fp) return { error: 'blocked' }; // footprint not preloaded (preloadFootprints adds segment.gateUpgrade)
+  if (!world.economy.canAfford(team, stats.cost)) return { error: 'resources', cost: stats.cost };
+  return { id, stats, fp };
+}
+
+// The segment is replaced at once by an unfinished gate with the same place, length, turn, height and post gap; the gate
+// is paid in full (like wall pieces) and builds itself in stats.buildTime (stats.selfBuild, Construction.structureBuildRate):
+// no builder is sent, needed or counted.
+// Result: { structures: [gates], error? } – error = the first refusal of a segment that was skipped (e.g. resources).
+registerCommand('upgradeGate', {
+  validate(world, cmd) {
+    const segs = gateSegments(world, cmd);
+    const res = segs.length ? checkGate(world, cmd.team, segs[0]) : { error: 'gone' };
+    if (!res.error) return true;
+    reportResult(cmd, res);
+    return false;
+  },
+  execute(world, cmd) {
+    const team = cmd.team;
+    const gates = [];
+    let refusal = null;
+    for (const seg of gateSegments(world, cmd)) {
+      const res = checkGate(world, team, seg);
+      if (res.error) { refusal ??= res; continue; }
+      if (!world.economy.pay(team, res.stats.cost)) { refusal ??= { error: 'resources', cost: res.stats.cost }; continue; }
+      const GateClass = structureClassFor(res.stats, Structure); // WallGate (Walls.js registers it for stats.gate)
+      const gate = createStructure(GateClass, res.id, seg.race,
+        { team, yaw: seg.rotation.y, length: seg.length, trim: false }, res.fp);
+      gate.postHalf = seg.postHalf ?? 0;
+      const x = seg.position.x;
+      const y = seg.position.y;
+      const z = seg.position.z;
+      seg.upgraded = true; // MatchStats: not a lost building, no kill for its last attacker
+      seg.destroy({ explode: false });
+      addAndLoad(world, gate, x, z);
+      gate.position.y = y;
+      gates.push(gate);
+    }
+    return gates.length ? (refusal ? { structures: gates, ...refusal } : { structures: gates }) : (refusal ?? { error: 'gone' });
   },
 });
 

@@ -41,7 +41,13 @@ export class LoadingScreen {
     this.statusEl.className = 'loading-status';
     const box = document.createElement('div');
     box.className = 'loading-box';
-    box.append(this.titleEl, this.stepEl, bar, this.filesEl, this.statusEl);
+    this.cancelEl = document.createElement('button'); // [J2] only while a saved game is restored
+    this.cancelEl.type = 'button';
+    this.cancelEl.className = 'loading-cancel';
+    this.cancelEl.hidden = true;
+    this.onCancel = null;
+    this.cancelEl.addEventListener('click', () => { this.cancelEl.disabled = true; this.onCancel?.(); });
+    box.append(this.titleEl, this.stepEl, bar, this.filesEl, this.statusEl, this.cancelEl);
     el.appendChild(box);
     parent.appendChild(el);
     this.el = el;
@@ -61,6 +67,8 @@ export class LoadingScreen {
     this.stepCount = 0;
     this.stepIndex = 0;
     this.#setFill(null);
+    this.onCancel = null;      // [J2]
+    this.cancelEl.hidden = true;
     this.#watchFiles();
     this.painted = new Promise((resolve) => {
       const done = () => { clearTimeout(timer); resolve(); };
@@ -85,6 +93,34 @@ export class LoadingScreen {
     if (this.stepCount) this.#setFill((this.stepIndex - 1) / this.stepCount);
   }
 
+  /** [J2] Replaces the title text (show() resets it) */
+  setTitle(text) { this.titleEl.textContent = text ?? ''; }
+
+  /**
+   * [J2] Restoring a saved game: bar + "Restoring the battle NN %" (ratio 0..1); `onCancel` adds the cancel button.
+   * setRestore(null) hides the button again. Files counter is not used by a restore.
+   */
+  setRestore(opts) {
+    if (!opts) {
+      this.onCancel = null;
+      this.cancelEl.hidden = true;
+      return;
+    }
+    if (typeof opts.onCancel === 'function') {
+      this.onCancel = opts.onCancel;
+      this.cancelEl.textContent = t('save.restoring.cancel');
+      this.cancelEl.disabled = false;
+      this.cancelEl.hidden = false;
+      this.#unwatchFiles();
+      this.filesEl.textContent = '';
+    }
+    if (typeof opts.ratio === 'number') {
+      const ratio = Math.max(0, Math.min(1, opts.ratio));
+      this.stepEl.textContent = t('save.restoring', { pct: Math.round(ratio * 100) });
+      this.#setFill(ratio);
+    }
+  }
+
   /** Free text under the bar (e.g. "Waiting for players 1/2"); '' clears it */
   setStatus(text) { this.statusEl.textContent = text ?? ''; }
 
@@ -107,6 +143,7 @@ export class LoadingScreen {
   dispose() {
     clearTimeout(this.hideTimer);
     this.#unwatchFiles();
+    this.onCancel = null;
     this.el.remove();
   }
 

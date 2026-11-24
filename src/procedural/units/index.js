@@ -23,3 +23,5 @@ import './StealthBomberUnit.js';
 import './HeavyBomberUnit.js';
 import './LightLaserJetUnit.js';
 import './LaserHeavyFighterJetUnit.js';
+import './HoverTruckUnit.js';
+import './DrillTruckUnit.js';

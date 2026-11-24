@@ -114,7 +114,7 @@ const SHAPES = {
     // everything stands inside the round pad (r 6.9): pod plinth reach <= 6.6, trim ring r 6.75 outside it
     pods: [[-3.6, -3.6], [3.6, -3.6], [-4.0, 2.6], [4.0, 2.6]],
     beacons: [[6.0, 0], [-6.0, 0], [0, -6.0]],
-    banner: { x: -4.6, z: 4.6, h: 4 },
+    banner: { x: -2.8, z: 4.8, h: 4 },   // r 5.6 (orb reaches ~6.0 < pad 6.9), clear of the left front pod plinth (r 1.5 at -4.0, 2.6) and the roof mark (x ≥ -1.8)
     trimR: 6.75,
   },
   faceted: {

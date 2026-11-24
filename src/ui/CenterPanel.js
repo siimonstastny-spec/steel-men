@@ -7,7 +7,7 @@ import { t } from '../i18n/i18n.js';
 import { canGather } from '../game/Production.js';
 import { accuracyProfile } from '../data/Stats.js';
 import { buildingIconHtml } from './IconRenderer.js';
-import { unitName, incomeText, storageText } from './BuildMenu.js';
+import { unitName, incomeText, storageText, incomeOf } from './BuildMenu.js';
 import { serviceState } from './RobotProduction.js';
 import { ITEM_ICONS, itemLabel, isWaitingEnergy, progressOf } from './ProductionQueue.js';
 import {
@@ -188,7 +188,8 @@ export class CenterPanel {
       if (st.energyUse) rows.push([t('cp.energyUse'), String(+st.energyUse.toFixed(ENERGY_DECIMALS))]);
       // What the building gives (formerly the summary of the option grid panel): population, income, storage
       if (st.supplyProvided) rows.push([t('hud.population'), `+${st.supplyProvided}`]);
-      if (st.income) rows.push([t('structure.incomeLabel'), esc(incomeText(st.income))]);
+      const inc = incomeOf(st);
+      if (inc) rows.push([t('structure.incomeLabel'), esc(incomeText(inc))]);
       if (st.storage) rows.push([t('structure.storageLabel'), esc(storageText(st.storage))]);
       const prod = this.world?.production;
       if (prod?.unitOptions(u).length) {

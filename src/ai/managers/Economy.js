@@ -192,7 +192,43 @@ export class EconomyManager {
       }
     }
     this.#air(wants, now);
+    this.#deepMining(wants, now);
     bb.wantStructures = wants;
+  }
+
+  /**
+   * [H5] Deep extractors (@deepMining, difficulty.deepExtractor): one at a time up to `max`, after the opening and
+   * from startAt, not in the economy hold nor while defending, with `minArmy` crewed robots owned and ore left above
+   * minOre after paying for it. Only once the game's rules allow it (tier + research facility – no requirement is
+   * built for it). The energy gate (Construction.powerCovers → a power plant first) and the spot (ring search behind
+   * the HQ, like power plants) are Construction's. Also measures their ore income (deepOreIncome, status().deepOre).
+   */
+  #deepMining(wants, now) {
+    const ai = this.ai;
+    const own = ai.perception.own;
+    let complete = 0;
+    let rate = 0;
+    for (const s of own.complete) {
+      const deep = s.stats?.deepExtraction;
+      if (!deep) continue;
+      complete++;
+      rate += deep.ratePerSecond ?? 0;
+    }
+    /** ore per second the own finished extractors give now (scaled by the energy work rate like the game) */
+    this.deepOreIncome = rate * ai.world.economy.workRate(ai.team);
+    this.deepCount = complete;
+    const cfg = ai.diff.deepExtractor;
+    if (!cfg || !((cfg.max ?? 0) > 0) || !ai.bb.openingDone || ai.bb.econ?.hold || ai.bb.state === 'defend') return;
+    if (now < (cfg.startAt ?? 0) || own.crewedMechs.length < (cfg.minArmy ?? 0)) return;
+    const id = resolveStructure('@deepMining', ai.race, ai.teamUnlocks);
+    if (!id) return;
+    const stats = unitStats('structures', id, ai.race, ai.team);
+    if (checkRules(ai.world, ai.team, ai.race, id, stats) !== '') return;
+    const have = ai.construction?.ownedCount('@deepMining') ?? complete;
+    if (have >= cfg.max || have > complete) return; // the limit / one is still being built
+    if (this.deepNeedId !== id) { this.deepNeedId = id; this.deepNeed = { ore: (stats.cost?.ore ?? 0) + (cfg.minOre ?? 0) }; }
+    if (!affordsAbove(ai.world.economy, ai.team, this.deepNeed)) return;
+    wants.push({ value: '@deepMining', count: have + 1, priority: PRIORITY[cfg.priority] ?? PRIORITY.normal });
   }
 
   /**

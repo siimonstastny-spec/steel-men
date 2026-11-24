@@ -4,6 +4,8 @@ import { loadModel } from '../core/AssetLoader.js';
 import { loadAnimLibrary, resetPose } from '../anim/AnimLibrary.js';
 import { MechAnimator } from '../anim/MechAnimator.js';
 import { MechPart } from './MechPart.js';
+import { ProcRobotAnimator } from '../procedural/robots/ProcRobotAnimator.js'; // [proc-robot]
+import { ProcMechVisual, procRobotCandidate, prepareProcRobots } from './ProcMechVisual.js'; // [proc-robot]
 import {
   SOCKETS, MECH, MOVEMENT, TEAMS, PLAYER_TEAM, VFX, ORDERS, RINGS, ARRIVE_DISTANCE, BEHAVIOUR, basicLoadout, PING,
   JUMP_JET, MECH_COLLISION,
@@ -83,6 +85,9 @@ export class ModularMech extends THREE.Group {
     this.hopAbility = null;    // best 'hopRun' ability (JumpJet legs): runs and hops over rifts, never walls / cliffs
     this.moveAnimRef = MECH.walkAnimRefSpeed; // speed at which the move loop plays at normal rate (legs anim.moveRefSpeed)
     this.hopping = false;      // over a rift in a running hop (y follows the hop arc, not the terrain)
+    // [proc-robot] display only (ProcMechVisual.js): procedural robot drawn over the hidden GLB parts, or null
+    this.procVisual = null;
+    this.procModel = null;     // current ProcRobot (Highlight.js, World disposes it with procVisual)
   }
 
   /** [R2] Current jet flight (reused, no allocation per flight) */
@@ -106,6 +111,7 @@ export class ModularMech extends THREE.Group {
       ...keys.map((k) => loadModel(this.loadout[k])),
     ]);
     this.animLib = lib;
+    await prepareProcRobots(this.race); // [proc-robot] style kits for the robot builder (null for other races)
     this.stance ??= getStats().rules.combat.defaultStance;
     this.behaviour ??= getStats().rules.combat.defaultBehaviour;
 
@@ -131,8 +137,14 @@ export class ModularMech extends THREE.Group {
     this.#refreshStats();
 
     this.animator = new MechAnimator(this, lib);
+    // [proc-robot] the procedural display wraps the GLB animator (its clips keep driving the hidden simulation body)
+    if (procRobotCandidate(this.race)) {
+      this.procVisual = new ProcMechVisual(this);
+      this.animator = new ProcRobotAnimator(this, null, this.animator);
+    }
     this.animator.setWalkClip(this.parts.legs.stats.anim?.move ?? null); // [R2] legs' own move loop (JumpJet hop run)
     this.animator.rebuild();
+    this.procVisual?.sync(); // [proc-robot]
     this.#updateCrewLook();
     return this;
   }
@@ -285,6 +297,7 @@ export class ModularMech extends THREE.Group {
     for (const slot of ARM_SLOTS) this.detachArm(slot);
     this.#throwOffSalvage();
     for (const part of Object.values(this.parts)) part.setCharred(true);
+    this.procVisual?.setCharred(true); // [proc-robot] hides the slots that flew off, darkens the whole robot
     if (!Object.keys(this.parts).length) { this.removed = true; return; } // everything flew off
     this.animator?.rebuild();
     this.animator?.die();
@@ -509,6 +522,7 @@ export class ModularMech extends THREE.Group {
    */
   refreshTeamColor() {
     for (const part of Object.values(this.parts)) this.#paint(part, part.paintTeam ?? this.team);
+    this.procModel?.setTeamColor(TEAMS[this.team].color); // [proc-robot] whole robot in the owner's colour
     this.teamRing?.material.color.set(TEAMS[this.team].color);
   }
 
@@ -713,6 +727,8 @@ export class ModularMech extends THREE.Group {
     }
     // How a melee blow lands depends on the clip just played (side swing, blow into the ground…)
     const hit = clip ? clipHitType(clip) : 'single';
+    // [proc-robot] robot attack animation (visual only): the turret fires on the move too, arms only when standing
+    if (weapon.part.slot === 'torso' || s.stopsToFire || !moving) this.animator.visualAttack?.(weapon.part.slot, s.attackTime, s.burst);
     this.world.schedule(s.attackTime * s.hitAt, () => {
       if (weapon.part.mech === this) releaseAttack(this.world, this, weapon, target, { hit }); // arm may be gone by now
     });
@@ -1052,6 +1068,7 @@ export class ModularMech extends THREE.Group {
    * fire while standing in the idle pose. Display only – nothing in the simulation depends on it.
    */
   #rebuildAnimation() {
+    this.procVisual?.sync(); // [proc-robot] part combination changed: new robot / hidden slot / back to GLB
     const an = this.animator;
     if (!an) return;
     const run = an.attackAction;
@@ -1129,7 +1146,8 @@ export class ModularMech extends THREE.Group {
     box.max.sub(this.position);
     const bodyRadius = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) * MOVEMENT.bodyRadiusFactor;
     // Arms stick out sideways – without them neighbouring mechs would walk through each other's arms
-    this.radius = Math.max(bodyRadius, Math.min(this.#armRadius(), MOVEMENT.maxMechRadius));
+    // [H2] the body is capped too (wide JetPack torso): a mech never exceeds MOVEMENT.maxMechRadius
+    this.radius = Math.min(Math.max(bodyRadius, this.#armRadius()), MOVEMENT.maxMechRadius);
     // Ring a bit outside the footprint
     const r = Math.max(this.radius * MOVEMENT.ringRadiusFactor, this.radius + MOVEMENT.ringMinMargin);
     this.bodyHeight = box.max.y - box.min.y; // body = cylinder of radius × bodyHeight for 3D splash / pellets

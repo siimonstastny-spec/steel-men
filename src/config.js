@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v27';
+export const GAME_VERSION = 'v28';
 // Game name (brand, shown in the main menu title; not translated)
 export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
@@ -71,6 +71,7 @@ export const CAMERA = {
 // Camera limits (src/core/CameraBounds.js): the look-at point may not leave the map
 export const CAMERA_BOUNDS = {
   overshoot: 10,              // units – how far past the map edge the look-at point may go (the edge stays in view)
+  insetPerDistance: 0.3,      // units kept inside the edge per unit of camera distance (view tilt / zoom: less black border)
 };
 
 // Unit collisions and blocked move orders
@@ -828,6 +829,7 @@ export const KEYBINDINGS = {
   stop: ['KeyH'],             // drop the current order of the selected units (halt)
   formation: [],              // cycle the formation of the selected units (no default key – set in Settings → Controls)
   deleteUnit: ['Delete'],     // destroy the selected own units (mech explodes, crew evacuates)
+  wallGate: [],               // [H1] rebuild the selected full wall segments into gates (no default key – set in Settings → Controls)
   stanceRanged: ['KeyR'],
   stanceMelee: ['KeyF'],
   behaviourAggressive: ['KeyJ'], // behaviour of idle units (BEHAVIOUR): mechs only
@@ -881,11 +883,12 @@ export const CREW = {
   aimHeightFactor: 0.5,      // shots aim at this fraction of a figure's height
   // Boarding a mech whose own spot is blocked (next to a building / wall / other empty mechs): pathfinding ends
   // the walk at the nearest free cell, which may be farther than rules.crew.boardRange from the mech's centre.
-  // Once the path has ended (≤ pathEndReach left), the crew boards when the mech's EDGE (centre − radius) is
-  // within boardRange + edgeBuffer (≈ one nav cell, PATHFINDING.cellSize).
+  // [H2] The crew boards when the edge of the mech's LEG circle (centre − footRadius) is within
+  // boardRange + edgeBuffer – at any moment of the walk, not only at its end (a wide-bodied mech, e.g. JetPack,
+  // keeps the crew farther from the centre than boardRange, so the centre distance never got small enough).
   board: {
-    pathEndReach: 3,         // units – path length left that counts as "the walk is over"
-    edgeBuffer: 7,           // units – extra reach over boardRange, measured from the mech's edge
+    pathEndReach: 3,         // units – (unused since [H2], kept for old saves of the setting)
+    edgeBuffer: 10,          // units – extra reach over boardRange, measured from the leg circle's edge
   },
   // Running away (crew ejected from a destroyed mech, or a defensive crew under fire): away from the enemies
   // the squad can see (sightRange) until none of them is closer than safeDistance
@@ -1245,7 +1248,7 @@ export const GRAPHICS = {
 export const KEY_CATEGORIES = [
   { id: 'camera', actions: ['cameraForward', 'cameraBack', 'cameraLeft', 'cameraRight'] },
   { id: 'commands', actions: ['eject', 'dropLeft', 'dropRight', 'attackMove', 'guard', 'patrol', 'cancel', 'move', 'stop', 'deleteUnit', 'stanceRanged', 'stanceMelee',
-    'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair', 'formation'] },
+    'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair', 'formation', 'wallGate'] },
   { id: 'general', actions: ['rotateBuilding', 'idleCrew', 'idleBuilder', 'idleDrill', 'fullscreen', 'diplomacy', 'stockWindow', 'chat'] },
 ];
 export const KEY_ACTIONS = {
@@ -1355,9 +1358,11 @@ export const HUD = {
         null, null, null, null,
         null, null, null, 'deleteUnit',
         null, null, null, null,
-        null, null, null, null,
+        'wallGate', null, null, null,
       ],
     },
+    // [H1] commands drawn only while enabled (a disabled one leaves its slot empty instead of a greyed button)
+    hiddenWhenDisabled: ['wallGate'],
   },
   // Command icons (text glyphs – replace with images later)
   commandIcons: {
@@ -1366,6 +1371,7 @@ export const HUD = {
     behaviourAggressive: '🔥', behaviourDefensive: '⛨', behaviourPassive: '☮', repair: '🔧', stopRepair: '⏹',
     repairUnit: '🛠',
     formation: '▦',
+    wallGate: '⛩',
   },
   // Production queue (top left, under the resources): sequential per producer (hangar, training)
   production: {
@@ -1658,8 +1664,8 @@ export const STRUCTURE = {
 
 /** Placement preview of a building (HoverTruck build menu) */
 export const PLACEMENT = {
-  validColor: 0x4cc38a,
-  invalidColor: 0xd63c2f,
+  validColor: 0x6dff8a,      // hologram on a free spot – light green for every team (team colours may be red)
+  invalidColor: 0xff2a1f,    // hologram on a blocked spot – red for every team
   opacity: 0.45,
   mapMargin: 15,             // units – buildings stay this far inside the map edge
   depositClearance: 14,      // units kept free around ore deposits (and the super node platform) for the DrillTrucks
@@ -1668,6 +1674,16 @@ export const PLACEMENT = {
   dragRotateThreshold: 12,   // px of horizontal drag before the building starts turning (a plain click just places it)
   dragRotatePixels: 60,      // px of further drag per rotateStep
   dragRotateDirection: -1,   // 1 / -1: which way a drag to the right turns the building (-1 = clockwise from above)
+  // [hologram] preview look (src/game/PlacementHologram.js): validColor / invalidColor (never the team colour), see-through, bright fresnel edge, scan lines
+  hologramOpacity: 0.28,     // 0..1 – transparency of the faces seen straight on
+  hologramRim: 0.75,         // added opacity / brightness at the silhouette edges (fresnel)
+  hologramRimPower: 2.2,     // fresnel sharpness (higher = thinner bright edge)
+  hologramLineDensity: 0.16, // scan lines per world unit of height
+  hologramLineSpeed: 0.12,   // line cycles per second (they drift upwards)
+  hologramLineStrength: 0.35, // 0..1 – how much brighter a scan line is
+  hologramGlow: 1.15,        // colour brightness multiplier (the hologram glows a little)
+  hologramLineSharpness: 0.6, // 0..1 – scan line threshold (higher = thinner lines)
+  hologramRimAlpha: 2.0,     // how much more the fresnel edge raises opacity than brightness
 };
 
 /**
@@ -1694,6 +1710,15 @@ export const WALL_DRAG = {
   startPx: 6,                // px – the mouse must travel this far with the button held for a press to count as a drag (else it is a click)
   maxSegments: 12,           // segments of a dragged line at most (also capped by WALL.maxSegments); the cursor is clamped to this reach
 };
+
+// --- [H1] gates ---
+// A finished full wall segment is rebuilt into a gate by the command grid button 'wallGate' (command upgradeGate,
+// src/game/commands/buildCommands.js). The gate structure id is stats.json structures[segment].gateUpgrade.
+export const GATE = {
+  minLengthFactor: 0.6,      // a segment shorter than WALL.postSpacing × this is no "full" one (cut segments – trim – never are)
+  maxBatch: 64,              // segments per upgradeGate command at most
+};
+// --- [H1] end ---
 
 /** Ore deposits (src/game/OreDeposit.js); amount / rate are map data (data/maps/*.json) */
 export const ORE_DEPOSIT = {
@@ -2140,11 +2165,40 @@ export const MECH_COLLISION = {
 };
 // --- [W7] end ---
 
+// --- [H2] mech collision: boarding (docs/notes/h2-mech-collision.md) ---
+// The two circles (shoulders `radius`, legs `footRadius`) come from [W7]. A crew boards when it is within reach of
+// the LEGS' circle edge (CREW.board), or when it is pressed against the mech as close as collision allows.
+export const MECH_COLLISION_H2 = {
+  boardContactSlack: 1.5,  // units – crew counts as "touching" the mech this close to the collision contact distance
+};
+// --- [H2] end ---
+
 // --- [18] procedural buildings (src/procedural, docs/notes/proc-style-kit.md) ---
 // A structure with a procedural model (src/procedural/registry.js) uses it instead of its GLB; the footprint still
 // comes from the GLB. `window.steelMen.procedural = false` (before a building loads) switches back for comparison.
 export const PROC_BUILDINGS = {
   enabled: true,
+};
+
+// Visual state of procedural buildings (ProcModel.setPowered / setDamage, docs/notes/b1-building-core.md). Visual only.
+export const PROC_STATE = {
+  damageStart: 0.7,          // hp ratio below which the paint starts to darken
+  minPaint: 0.3,             // paint colour scale at 0 hp
+  teamKeep: 0.6,             // share of the darkening that team-coloured surfaces escape (the colour stays readable)
+  damageSteps: 16,           // quantisation of the damage look (instance attribute / material changes only per step)
+  powerSteps: 8,             // quantisation of the power fade (emissive of the static body)
+  offGlow: 0.08,             // emissive scale of the static body (windows, neon) when unpowered (glow layers go to 0)
+  fadeSeconds: 0.6,          // power fade duration (full → off and back)
+};
+
+// --- [proc-robot] procedural combat robots (src/units/ProcMechVisual.js, docs/notes/proc-robot-wire.md) ---
+// Display only: the GLB parts stay the (hidden) simulation body, so on / off never changes the simulation.
+// A robot is drawn procedurally when its owner's race is listed and every mounted part has a registered
+// stats.json procModel; otherwise the GLB parts are drawn. window.steelMen.procedural = false turns it off too.
+export const PROC_ROBOTS = {
+  enabled: true,
+  races: ['W'],
+  charredFactor: 0.25,       // colour multiplier of a destroyed robot's paint (like MechPart DARK_FACTOR)
 };
 
 // --- [18P] procedural building performance (src/procedural/BuildingBatcher.js, docs/notes/proc-perf.md) ---
@@ -2268,3 +2322,114 @@ export const GENERATOR_BLAST = {
 // name: null = default t('lobby.defaultName', {name}) that follows the current nickname; visibility: one of LOBBY.visibilities
 SETTINGS_DEFAULTS.lobby = { name: null, visibility: LOBBY.defaultVisibility };
 // --- [LOBBY_LIST] end ---
+// --- [I1] determinism ---
+// Console harness steelMen.det (src/debug/DeterminismHarness.js, docs/notes/i1-determinism.md). Debug only, never
+// read by the simulation.
+export const DETERMINISM = {
+  seed: 42,                    // match seed of the reference runs (same as ?seed=42)
+  humanPoints: 24,             // human/human: checkpoints…
+  humanInterval: 300,          // …every this many ticks (24 × 300 = 7200 ticks = 4 min)
+  attackTick: 90,              // human/human: attackMove of every side's fighters to the other base executes in this tick
+  aiSeconds: 1800,             // AI vs AI: default length (game seconds)
+  aiPoints: 24,                // AI vs AI: checkpoints spread over the length
+  chunkTicks: 300,             // own ticking: ticks between yields to the browser (model loads, rendering)
+  spPollMs: 250,               // game-loop mode: how often the harness checks whether the run is over
+  delayJitterSteps: 4,         // artificial load delay: delay × (1 + call index mod steps) / steps – uneven, not random
+  dbName: 'steelMen.det',      // IndexedDB database of saved runs (per-tick data does not fit into localStorage)
+  snapshotEvery: 150,          // ticks between entity snapshots (5 s): compare() diffs single units at the first one after a split
+  perTickParts: true,          // subsystem hashes after EVERY tick (exact first differing subsystem; ≈ +10 % run time)
+  stopAfterSnapshots: 2,       // live compare: snapshots taken after the first differing tick before the run stops
+};
+// Watchdog of World.trackLoad / spawnDeferred: a load that has not settled after this long is given up (console.error)
+// so a hanging request cannot freeze the match forever. Real time only releases the stall; the simulation never reads it.
+SIM.loadTimeoutMs = 20000;
+// --- [I1] end ---
+
+// --- [I2] ---
+export const CREW_ANIM = {
+  phaseStep: 0.618034,  // golden ratio: member index -> evenly spread, deterministic animation phase (Crew)
+};
+// --- [I2] end ---
+
+// --- [J2] save ui ---
+export const SAVE_UI = {
+  nameMaxLength: 60,           // longest name of a saved game
+  savedToastMs: 2500,          // how long the "saved" confirmation stays
+  notifyStorageKey: 'steelMen.saveIncompatSeen', // localStorage: ids of incompatible saves the user already decided about
+};
+// --- [J2] end ---
+// --- [J1] save games ---
+// Saved game = replay: match settings + seed + every non-AI command from tick 0 (src/game/SaveGame.js,
+// src/core/SaveStore.js, docs/notes/j1-save-core.md). Loading checks SIM_VERSION and the data fingerprint, never GAME_VERSION.
+// Raise SIM_VERSION with every change that alters the simulation (combat, balance code, AI decisions, command
+// executors, determinism fixes); text / UI / visual-only releases keep it, so saves stay loadable.
+export const SIM_VERSION = 1;
+export const SAVE = {
+  format: 'steelmen-save',      // marker of a save object / .smsave file
+  formatVersion: 1,             // layout of the save object (not the simulation)
+  hashEveryTicks: 300,          // checkpoint (stateHash + subsystem hash + command hash) every this many ticks (10 s)
+  autosaveSeconds: 300,         // default autosave interval in game time
+  autosaveCheckMs: 1000,        // how often (real time) the autosave timer looks at world.tick
+  minAutosaveTicks: 1800,       // autosaveNow does nothing before this tick (1 min): a short new match keeps the old autosave
+  replayChunkMs: 40,            // restore: simulate this long (real time) between yields to the browser (progress, loads)
+  replayWaitMs: 4,              // restore: pause while a tick waits for a model / tracked load (readyForTick)
+  progressStartShare: 0.03,     // restore progress reported once the match is set up (the rest = replayed ticks)
+  fileExtension: '.smsave',
+  fileMime: 'application/x-steelmen-save',
+  fileNameMax: 60,              // exported file name: save name cut to this length
+  revokeUrlMs: 10000,           // exportFile: the download URL is released this long after the click (late downloads)
+  dbName: 'steelMen.saves',     // IndexedDB database (one object store)
+  dbStore: 'saves',
+  dbVersion: 1,
+  autoSlot: 'auto',             // id of the single autosave (put(save, {slot: 'auto'}) overwrites it)
+  restoreSlot: '__restore',     // hidden record: a save to restore after a page reload (scheduleRestore)
+  restoreFlagKey: 'steelMen.restorePending', // sessionStorage flag of scheduleRestore
+  // Data files whose content changes the simulation: their canonical JSON goes into the fingerprint, together with
+  // the map file of the match. explosions.json (visual only) is left out.
+  fingerprintFiles: [
+    './data/stats.json', './parts.json', './data/buildingStyles.json',
+    './data/ai/difficulty.json', './data/ai/buildOrders.json', './data/ai/armies.json', './data/ai/defense.json',
+    './data/ai/research.json',
+  ],
+};
+// --- [J1] end ---
+
+// --- [B1-W3] work effects of procedural trucks (build sparks, repair glints, harvest dust; visual only) ---
+export const PROC_WORK_FX = {
+  enabled: true,
+  seed: 0x5eed1234,           // own PRNG of the effects (never world.rng)
+  additiveCap: 768,           // pool size: sparks, repair glints, flashes (one Points for all trucks)
+  normalCap: 768,             // pool size: dust, debris
+  maxFrameDt: 0.1,            // s – longest render step the particles integrate (tab switch, breakpoints)
+  minLevel: 0.05,             // work level (0..1) below which nothing is emitted
+  minPointPx: 1,              // px – smallest drawn point
+  minViewDepth: 0.1,          // units – view depth floor in the point-size formula
+  pointRadiusNorm: 4,         // shader: squared distance from the sprite centre is scaled by this (circle edge at r = 0.5)
+  fadeInShare: 0.1,           // share of the life a particle takes to fade in
+  minFrameGap: 0.0001,        // s – two onBeforeRender calls closer than this belong to the same frame
+  pointScaleFallback: 600,   // px scale used when the camera is not a perspective one
+  repairColor: '#46f0c8',     // repair glints (green-blue); build sparks use the unit style weaponGlow
+  repairCoreMix: 0.45,        // repair glint colour mixed toward white
+  sparkCoreMix: 0.55,         // spark colour mixed toward white (hot core)
+  dustColor: '#9a8a72',       // base dust colour
+  dustAccentMix: 0.12,        // share of the style palette accent in the dust colour (stays style driven)
+  debrisDarken: 0.45,         // debris = dust colour × this
+  // Per kind (work kind of ProcDriver): list of emitters. rate = particles/s at level 1,
+  // life/size/speed = [min, max], up = initial upward share, spread = horizontal speed, gravity (units/s², + = down),
+  // drag = 1/s velocity damping, alpha = peak opacity, grow = size multiplier at death, group = 'add' | 'norm'.
+  kinds: {
+    build: [
+      { id: 'spark', color: 'weapon', group: 'add', rate: 46, life: [0.18, 0.5], size: [0.05, 0.11], speed: [1.6, 4.2], up: 0.7, spread: 1, gravity: 7.5, drag: 0.8, alpha: 1, grow: 0.4, jitter: 0.06 },
+      { id: 'flash', color: 'weapon', group: 'add', rate: 7, life: [0.05, 0.14], size: [0.35, 0.6], speed: [0, 0.2], up: 0, spread: 0.2, gravity: 0, drag: 0, alpha: 0.7, grow: 1.6, jitter: 0.04 },
+    ],
+    repair: [
+      { id: 'glint', color: 'repair', group: 'add', rate: 30, life: [0.5, 1.1], size: [0.07, 0.14], speed: [0.2, 0.9], up: 1.1, spread: 0.55, gravity: -0.9, drag: 1.2, alpha: 0.9, grow: 0.3, jitter: 0.18 },
+      { id: 'flash', color: 'repair', group: 'add', rate: 5, life: [0.1, 0.25], size: [0.3, 0.5], speed: [0, 0.1], up: 0, spread: 0.1, gravity: 0, drag: 0, alpha: 0.55, grow: 1.5, jitter: 0.05 },
+    ],
+    harvest: [
+      { id: 'dust', color: 'dust', group: 'norm', rate: 34, life: [0.7, 1.5], size: [0.28, 0.5], speed: [0.6, 2.0], up: 0.45, spread: 1, gravity: -0.15, drag: 1.6, alpha: 0.5, grow: 2.6, jitter: 0.25 },
+      { id: 'debris', color: 'debris', group: 'norm', rate: 12, life: [0.35, 0.8], size: [0.05, 0.1], speed: [1.5, 3.6], up: 1.2, spread: 1, gravity: 9, drag: 0.3, alpha: 1, grow: 0.8, jitter: 0.1 },
+    ],
+  },
+};
+// --- [B1-W3] end ---

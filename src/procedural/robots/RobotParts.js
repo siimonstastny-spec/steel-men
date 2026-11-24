@@ -3,4 +3,6 @@ import './RobotLegs.js';
 import './RobotTorsos.js';
 import './RobotArms.js';
 
-export { ProcRobot, createProcRobot, robotPartIds, resolveRobotCombo, ROBOT_KIT } from './RobotKit.js';
+export {
+  ProcRobot, createProcRobot, ProcRobotPart, createProcRobotPart, robotPartIds, resolveRobotCombo, robotKit, ROBOT_KIT,
+} from './RobotKit.js';

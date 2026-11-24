@@ -28,7 +28,9 @@ export class DefenseStructure extends Structure {
     this.weapons = [];      // runtime weapons { stats, def, cooldown, part: { muzzlePoint(i) } }
     this.attackLock = 0;    // s until the current attack ends – one attack at a time
     this.aimYaw = 0;        // rad, turret relative to the building
-    this.sockets = [];      // launch socket nodes
+    this.sockets = [];      // launch socket nodes (visual pose)
+    this.restMuzzles = null; // [I1] sockets in local space, rest pose (#captureMuzzles) – what the shots use
+    this.aimPivot = null;    // [I1] local point the aim turns around
     this.post = null;       // wall post it stands on (Walls.js)
     this.lastAttacker = null;
     this.idleOffset = 0;    // rad, VISUAL only: idle look-around added to aimYaw (never read by the simulation)
@@ -40,8 +42,38 @@ export class DefenseStructure extends Structure {
     // A turning model turns around its own origin (the turret's pivot), not around its box centre
     if (this.turns) this.model.position.set(0, 0, 0);
     this.sockets = (this.stats.launchSockets ?? []).map((n) => this.model.getObjectByName(n)).filter(Boolean);
+    this.#captureMuzzles();
     this.#buildWeapons();
     return this;
+  }
+
+  // [I1] Muzzles for the simulation: every socket in this building's local space in the rest pose (aim 0, full
+  // height), plus the pivot the aim turns around. The live sockets move with visual animation (recoil, levitation,
+  // levitation) that runs only for visible / near buildings – shots must not depend on it. Procedural models only: a GLB
+  // model's sockets follow its idle clip, which runs inside the tick for every building (deterministic), and its bind
+  // pose may differ from the played one (an _Anim turret retracted into its hatch) – GLB keeps the live sockets.
+  #captureMuzzles() {
+    this.restMuzzles = null;
+    if (!this.sockets.length || !this.holder || !this.procModel) return;
+    const prevScale = this.holder.scale.y;
+    const prevYaw = this.holder.rotation.y;
+    const proc = this.procModel?.setAim ? this.procModel : null;
+    const prevAim = proc?.aimYaw ?? 0;
+    try {
+      this.holder.scale.y = 1;
+      this.holder.rotation.y = 0;
+      proc?.setAim(0);
+      this.updateMatrixWorld(true);
+      const toLocal = new THREE.Matrix4().copy(this.matrixWorld).invert();
+      this.restMuzzles = this.sockets.map((s) => s.getWorldPosition(new THREE.Vector3()).applyMatrix4(toLocal));
+      const pivotNode = proc?.turret ?? null;
+      this.aimPivot = pivotNode ? pivotNode.getWorldPosition(new THREE.Vector3()).applyMatrix4(toLocal) : new THREE.Vector3();
+    } finally { // K2-3: the visual pose comes back even when a node throws
+      this.holder.scale.y = prevScale;
+      this.holder.rotation.y = prevYaw;
+      proc?.setAim(prevAim);
+      this.updateMatrixWorld(true);
+    }
   }
 
   get turns() { return (this.stats?.turnSpeed ?? 0) > 0; }
@@ -67,6 +99,17 @@ export class DefenseStructure extends Structure {
   }
 
   #muzzle(k) {
+    const rest = this.restMuzzles?.length ? this.restMuzzles[k % this.restMuzzles.length] : null;
+    if (rest) { // [I1] rest-pose socket turned by the simulated aim around the aim pivot (the idle sweep is visual)
+      const p = this.aimPivot;
+      const yaw = this.turns ? this.aimYaw : 0;
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      const dx = rest.x - p.x;
+      const dz = rest.z - p.z;
+      this.updateWorldMatrix(true, false);
+      return this.localToWorld(new THREE.Vector3(p.x + dx * c + dz * s, rest.y, p.z - dx * s + dz * c));
+    }
     const socket = this.sockets.length ? this.sockets[k % this.sockets.length] : null;
     if (socket) return socket.getWorldPosition(new THREE.Vector3());
     return new THREE.Vector3(this.position.x, this.position.y + this.aimHeight, this.position.z);
@@ -75,6 +118,7 @@ export class DefenseStructure extends Structure {
   update(dt) {
     super.update(dt);
     if (this.dead || !this.complete || !this.world) return;
+    if (!this.holder) return; // [I1] safety: no model yet (World.trackLoad holds the tick until it is there)
     this.attackLock = Math.max(0, this.attackLock - dt);
     for (const w of this.weapons) w.cooldown = Math.max(0, w.cooldown - dt);
     // [D1] towers draw their full energy all the time; with low energy (powered false, Economy.update) they are off

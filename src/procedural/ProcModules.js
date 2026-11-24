@@ -17,11 +17,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
-  PartBuilder, GlowBuilder, surface, acquirePaintMaterial, releasePaintMaterial, triangleCount, TrackMover, plateau, makeRng,
+  PartBuilder, GlowBuilder, surface, acquirePaintMaterial, releasePaintMaterial, triangleCount, TrackMover, plateau, makeRng, stateLook,
   acquireInstancedPaintMaterial, releaseInstancedPaintMaterial,
 } from './ProcKit.js';
 import { getBuildingStyle, resolveStyleKey } from './BuildingStyle.js';
-import { BUILDING_LOD, PROC_BUILDINGS, PROC_EMBLEM, PROC_TEAM_PAINT } from '../config.js';
+import { BUILDING_LOD, PROC_BUILDINGS, PROC_EMBLEM, PROC_TEAM_PAINT, PROC_STATE } from '../config.js';
 import { batcherFor } from './BuildingBatcher.js';
 
 /** Module tuning (visual only, model units unless noted) */
@@ -233,6 +233,7 @@ export class GlowLayer {
     noShadow(this.mesh);
     this.mesh.raycast = noRaycast;
     this.enabled = true;   // false = hidden whatever the intensity (far LOD, BuildingBatcher)
+    this.power = 1;        // 0..1 multiplier of the owner's power fade (ProcModel.setPowered), on top of the intensity
     this.intensity = -1;
     this.setIntensity(visible ? 1 : 0);
   }
@@ -240,13 +241,25 @@ export class GlowLayer {
   setIntensity(v) {
     if (v === this.intensity) return;
     this.intensity = v;
+    this.#apply();
+  }
+
+  /** Power fade multiplier 0..1 (the model's powerLevel) */
+  setPower(p) {
+    if (p === this.power) return;
+    this.power = p;
+    this.#apply();
+  }
+
+  #apply() {
+    const v = this.intensity * this.power;
     this.material.opacity = this.base * v;
     this.mesh.visible = this.enabled && v > M.glow.cutoff;
   }
 
   setEnabled(on) {
     this.enabled = on;
-    this.mesh.visible = on && this.intensity > M.glow.cutoff;
+    this.mesh.visible = on && this.intensity * this.power > M.glow.cutoff;
   }
 
   dispose() {
@@ -336,6 +349,72 @@ export class ProcModel extends THREE.Group {
     this.staticRef = null;
     this.farMeshes = [];        // animated meshes also drawn (frozen in their current pose) when the building is far
     this.batch = null;          // set by enableBatching(), owned by BuildingBatcher
+    // visual state (setPowered / setDamage): powerLevel fades 1 → 0 when unpowered; animScale (= powerLevel) is what
+    // subclasses multiply their continuous animation speeds by; damageStep / powerStep are the quantised paint look
+    this.powered = true;
+    this.powerLevel = 1;
+    this.animScale = 1;
+    this.damage = 1;
+    this.damageStep = 0;
+    this.powerStep = PROC_STATE.powerSteps;
+    this.lookScales = new Float32Array(3);   // current stateLook (paint, team-masked paint, emissive)
+    stateLook(this.damageStep, this.powerStep, this.lookScales);
+  }
+
+  /**
+   * Power state. false → `powered` is false at once, `powerLevel` / `animScale` fade to 0 over PROC_STATE.fadeSeconds
+   * (in tick()): glow layers and the emissive of the static body (windows, neon) go out, subclasses slow their
+   * continuous animations by `animScale`. Idempotent, allocation-free.
+   */
+  setPowered(on) {
+    this.powered = !!on;
+  }
+
+  /**
+   * Damage look: `ratio` = hp / maxHp (0..1). Paint darkens from PROC_STATE.damageStart down to PROC_STATE.minPaint;
+   * the team colour keeps PROC_STATE.teamKeep of its brightness. Quantised to PROC_STATE.damageSteps; same step = no-op.
+   */
+  setDamage(ratio) {
+    this.damage = ratio;
+    const S = PROC_STATE;
+    const t = ratio >= S.damageStart ? 0 : 1 - Math.max(0, ratio) / S.damageStart;
+    const step = Math.round(t * S.damageSteps);
+    if (step === this.damageStep) return;
+    this.damageStep = step;
+    this.#applyLook();
+  }
+
+  // Power fade towards `powered` (every tick, also while hidden so the state never lags)
+  #fadePower(delta) {
+    const target = this.powered ? 1 : 0;
+    if (this.powerLevel === target) return;
+    const s = delta / PROC_STATE.fadeSeconds;
+    const level = target > this.powerLevel ? Math.min(target, this.powerLevel + s) : Math.max(target, this.powerLevel - s);
+    this.powerLevel = level;
+    this.animScale = level;
+    for (const layer of this.glowLayers) layer.setPower(level);
+    const step = Math.round(level * PROC_STATE.powerSteps);
+    if (step === this.powerStep) return;
+    this.powerStep = step;
+    this.#applyLook();
+  }
+
+  // New damage / power step: rebind the shared paint material of the unbatched meshes, rewrite the instance attribute
+  #applyLook() {
+    stateLook(this.damageStep, this.powerStep, this.lookScales);
+    this.#rebindPaint(this.teamColor);
+    if (this.batch) {
+      this.batch.state.set(this.lookScales);
+      this.batch.batcher?.refreshInst(this);
+    }
+  }
+
+  #rebindPaint(color) {
+    const next = acquirePaintMaterial(color, this.kit.style.texture, this.damageStep, this.powerStep);
+    const prev = this.paint;
+    this.paint = next;
+    for (const mesh of this.paintMeshes) mesh.material = next;
+    releasePaintMaterial(prev);
   }
 
   /** Mesh with the shared paint material (casts / receives shadows). far: also drawn frozen at LOD1+ (e.g. a solar panel) */
@@ -363,6 +442,7 @@ export class ProcModel extends THREE.Group {
   /** Glow layer (own material, disposed with the model) */
   glowLayer(geometry, color, { parent = this, opacity, visible = true } = {}) {
     const layer = new GlowLayer(geometry, color, { opacity, visible });
+    layer.setPower(this.powerLevel);
     parent.add(layer.mesh);
     this.glowLayers.push(layer);
     return layer;
@@ -399,11 +479,7 @@ export class ProcModel extends THREE.Group {
    */
   setTeamColor(color) {
     this.teamColor = color;
-    const next = acquirePaintMaterial(color, this.kit.style.texture);
-    const prev = this.paint;
-    this.paint = next;
-    for (const mesh of this.paintMeshes) mesh.material = next;
-    releasePaintMaterial(prev);
+    this.#rebindPaint(color);
     if (this.batch) {   // batched body / emblem: the colour is an instance attribute
       this.batch.team.set(color);
       this.batch.batcher?.refreshInst(this);
@@ -433,6 +509,7 @@ export class ProcModel extends THREE.Group {
       lod: -1, visible: true, dist2: 0, rank: 0, staticOnly: false,
       pos: new THREE.Vector3(), world: new THREE.Matrix4(),
       team: new THREE.Color(this.teamColor), highlight: 0,
+      state: Float32Array.from(this.lookScales),   // aState of the instances (damage / power look)
     };
   }
 
@@ -454,12 +531,13 @@ export class ProcModel extends THREE.Group {
   tick(delta, active, sunClock) {
     const b = this.batch;
     const visible = this.#chainVisible();
+    this.#fadePower(delta);
     if (b) {
       if (!b.registered) this.#registerBatch(visible);
       else if (visible !== b.visible) b.batcher.setVisible(this, visible);
     }
     if (!visible || (b?.registered && b.lod > 0)) return;
-    this.update(delta, active, sunClock);
+    this.update(delta * this.animScale, active, sunClock);   // unpowered: every animation winds down with the power fade
   }
 
   #registerBatch(visible) {
@@ -467,7 +545,7 @@ export class ProcModel extends THREE.Group {
     let root = this;
     while (root.parent) root = root.parent;
     if (!root.isScene) return;
-    const acquire = () => acquireInstancedPaintMaterial(this.kit.style.texture);
+    const acquire = () => acquireInstancedPaintMaterial(this.kit.style.texture, true);
     const paintItem = (geos, minLod, maxLod, mesh) => ({
       geos, minLod, maxLod, mesh, key: `paint:${this.kit.style.texture}`, acquire, release: releaseInstancedPaintMaterial,
       colorScale: 1, castShadow: true, receiveShadow: true, group: null, slot: -1, keys: [],

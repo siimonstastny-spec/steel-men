@@ -424,8 +424,12 @@ export class Economy {
     this.#refreshCap();
     for (const b of this.world.structures) {
       const income = b.stats?.income;
-      if (!b.complete || b.destroyed || !income) continue;
-      for (const r in income) this.add(b.team, r, income[r] * dt, 'income');
+      if (!b.complete || b.destroyed) continue;
+      if (income) for (const r in income) this.add(b.team, r, income[r] * dt, 'income');
+      // [H3] deep extractor: a consumer (energyUse, low energy = slowed) that adds ore to its team, the deposit is not
+      // touched (infinite) – counted as mined ore in the statistics
+      const deep = b.stats?.deepExtraction;
+      if (deep) this.add(b.team, 'ore', deep.ratePerSecond * this.drawPower(b, dt) * dt, 'mined');
     }
     this.#refreshLow();
     for (const b of this.world.structures) {

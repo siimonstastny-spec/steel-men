@@ -499,10 +499,58 @@ function createPrivatePaint(shared, teamColor) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, bumpMap: shared.bumpMap, bumpScale: shared.bumpScale });
   m.userData.uTeamColor = { value: new THREE.Color(teamColor) };
   m.userData.uDetail = shared.userData.uDetail;
+  m.userData.uState = shared.userData.uState;
   m.userData.procedural = true;
   m.onBeforeCompile = shared.onBeforeCompile;
   m.customProgramCacheKey = shared.customProgramCacheKey;
   return m;
+}
+
+// Instanced paint of units = ProcKit's instanced paint shader + per-instance darkness (attribute aDark, 0..1: diffuse and
+// emissive × (1 − aDark)). One material per panel texture type shared by all unit groups (no material per unit).
+// The ProcKit material stays the source of the bump texture / uniforms / base shader (it is ref-counted alongside).
+function unitInstancedOnBeforeCompile(shader) {
+  this.userData.source.onBeforeCompile.call(this, shader);   // ProcKit instanced shader (reads this.defines / userData)
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float aDark;\nvarying float vDark;')
+    .replace('#include <color_vertex>', '#include <color_vertex>\nvDark = aDark;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vDark;')
+    .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= 1.0 - vDark;')
+    .replace('#include <lights_fragment_begin>', 'totalEmissiveRadiance *= 1.0 - vDark;\n#include <lights_fragment_begin>');
+}
+
+const instancedMaterials = new Map();   // texture type -> { material, source, users }
+
+function acquireUnitInstancedMaterial(texture) {
+  const key = texture ?? '';
+  let e = instancedMaterials.get(key);
+  if (!e) {
+    const source = acquireInstancedPaintMaterial(texture);
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true, bumpMap: source.bumpMap, bumpScale: source.bumpScale });
+    material.defines.PROC_INSTANCED = '';
+    material.userData.uDetail = source.userData.uDetail;
+    material.userData.uHighlight = source.userData.uHighlight;
+    material.userData.procedural = true;
+    material.userData.source = source;
+    material.onBeforeCompile = unitInstancedOnBeforeCompile;
+    material.customProgramCacheKey = () => 'steelMenUnitPaintInstanced';
+    e = { material, source, users: 0 };
+    instancedMaterials.set(key, e);
+  }
+  e.users++;
+  return e.material;
+}
+
+function releaseUnitInstancedMaterial(material) {
+  for (const [key, e] of instancedMaterials) {
+    if (e.material !== material) continue;
+    if (--e.users > 0) return;
+    material.dispose();
+    releaseInstancedPaintMaterial(e.source);
+    instancedMaterials.delete(key);
+    return;
+  }
 }
 
 const _highlight = new THREE.Color(HIGHLIGHT.color).multiplyScalar(HIGHLIGHT.intensity);
@@ -515,6 +563,8 @@ const clampAbs = (v, max) => (v > max ? max : v < -max ? -max : v);
 const wrap = (a) => (a > TAU || a < -TAU ? a % TAU : a);
 
 let instanceCounter = 0;   // animation phase variety only (visual)
+const _simM = new THREE.Matrix4(); // [I1] simSocketPosition scratch
+const _simL = new THREE.Matrix4();
 
 // ---------------------------------------------------------------- ProcUnit
 
@@ -558,6 +608,7 @@ export class ProcUnit extends THREE.Group {
     this.skeleton = null;
     this.batch = null;
     this.highlighted = false;
+    this.darkness = 0;   // 0..1 (setDarkness): paint colour and emissive × (1 − darkness), glow fades out
     this.phase = (instanceCounter++ * UNIT_KIT.phaseStep) % TAU;
     this.time = 0;
     // driven state
@@ -586,6 +637,9 @@ export class ProcUnit extends THREE.Group {
     });
     sh.bones.forEach((d, i) => (d.parent < 0 ? this : this.bones[d.parent]).add(this.bones[i]));
     this.boneByName = new Map(this.bones.map((b) => [b.name, b]));
+    // [I1] rest pose (parent-local) of every bone for simSocketPosition
+    this.boneIndexOf = new Map(this.bones.map((b, i) => [b, i]));
+    this.restLocal = this.bones.map((b) => new THREE.Matrix4().compose(b.position, b.quaternion, _one));
     this.skeleton = new THREE.Skeleton(this.bones, this.bones.map(() => new THREE.Matrix4()));
 
     this.paintMesh = this.#skinned(sh.paint, this.paint);
@@ -669,6 +723,9 @@ export class ProcUnit extends THREE.Group {
     this.pitchLimits = m.pitch;
     this.refSpeed = m.refSpeed;
     this.channels = channels.map((c) => ({ bone: bone(c.bone), prop: c.prop, from: c.from, to: c.to }));
+    // [I1] bones the owner drives every simulation tick (turret yaw, barrel pitch, deploy channels): their live pose
+    // counts for simSocketPosition, every other bone is taken in its rest pose
+    this.simBones = new Set([this.turretBone, this.barrelBone, ...this.channels.map((c) => c.bone)].filter(Boolean));
     this.fireMap = new Map(Object.entries(m.fire));
     this.defaultFire = this.fireMap.get('muzzle') ?? this.fireMap.values().next().value ?? null;
   }
@@ -677,6 +734,30 @@ export class ProcUnit extends THREE.Group {
 
   /** Named socket (THREE.Object3D) or null – e.g. 'muzzle', 'launch_1', 'exhaust_1', 'turret', 'aim', 'cargo', 'smoke' */
   getSocket(name) { return this.sockets?.get(name) ?? null; }
+
+  /**
+   * [I1] World position of a socket for the SIMULATION (where a shot leaves): the turret / barrel / deploy bones in
+   * their current pose (set by the owner inside the tick), every other bone in its rest pose. The live socket also moves
+   * with the visual animation (hull bank and bob, recoil, spin, flash scale), which tick() runs only for visible units
+   * at LOD0 – decided by the camera, the local fog of war and the render rate, so it must never reach the simulation.
+   * A node that is not a socket of this model falls back to its live world position. No allocation.
+   * @param {THREE.Object3D} socket  from getSocket()
+   * @param {THREE.Vector3} out
+   */
+  simSocketPosition(socket, out) {
+    _simM.compose(socket.position, socket.quaternion, socket.scale);
+    let node = socket.parent;
+    for (; node && node !== this; node = node.parent) {
+      const i = this.boneIndexOf?.get(node);
+      if (i === undefined) break;
+      if (this.simBones.has(node)) _simM.premultiply(_simL.compose(node.position, node.quaternion, node.scale));
+      else _simM.premultiply(this.restLocal[i]);
+    }
+    if (node !== this) return socket.getWorldPosition(out);
+    this.updateWorldMatrix(true, false);
+    _simM.premultiply(this.matrixWorld);
+    return out.setFromMatrixPosition(_simM);
+  }
 
   /** Socket names of this model (convention: docs/notes/proc-unit-kit.md) */
   get socketNames() { return [...(this.sockets?.keys() ?? [])]; }
@@ -744,7 +825,7 @@ export class ProcUnit extends THREE.Group {
     if (c === this.cloak) return;
     this.cloak = c;
     this.#refreshPaint();
-    this.glowMaterial.opacity = UNIT_KIT.glow.opacity * (1 - c);
+    this.#refreshGlow();
     this.paintMesh.castShadow = c < UNIT_KIT.cloak.shadowCutoff;
     this.applyBatchLod(this.batch?.registered ? this.batch.lod : 0);
   }
@@ -784,10 +865,30 @@ export class ProcUnit extends THREE.Group {
     if (this.batch) { this.batch.highlight = on ? 1 : 0; this.batch.batcher?.refreshInst(this); }
   }
 
+  /**
+   * Darkness 0..1 (destroyed robot): the paint is multiplied by (1 − d) and the neon / emissive parts and the glow fade
+   * out. Own meshes: private paint colour; far LODs: per-instance attribute aDark (no extra material or draw call), so
+   * the look survives LOD changes. Safe to call every step (does nothing when unchanged).
+   */
+  setDarkness(d) {
+    const v = clamp01(d);
+    if (v === this.darkness) return;
+    this.darkness = v;
+    this.#refreshPaint();
+    this.#refreshGlow();
+    if (this.batch) this.batch.batcher?.refreshInst(this);
+    this.applyBatchLod(this.batch?.registered ? this.batch.lod : 0);
+  }
+
+  #refreshGlow() {
+    if (this.glowMaterial) this.glowMaterial.opacity = UNIT_KIT.glow.opacity * (1 - this.cloak) * (1 - this.darkness);
+  }
+
   #refreshPaint() {
     if (!this.paintMesh) return;
-    if (this.cloak <= 0 && !this.highlighted) { this.paintMesh.material = this.paint; return; }
+    if (this.cloak <= 0 && !this.highlighted && this.darkness <= 0) { this.paintMesh.material = this.paint; return; }
     const m = (this.privatePaint ??= createPrivatePaint(this.paint, this.teamColor));
+    m.color.setScalar(1 - this.darkness);
     const transparent = this.cloak > 0;
     if (m.transparent !== transparent) { m.transparent = transparent; m.needsUpdate = true; }
     m.opacity = 1 - (1 - this.unitStyle.cloakMin) * this.cloak;
@@ -959,7 +1060,7 @@ export class ProcUnit extends THREE.Group {
     if (!this.paintMesh) return;
     const near = lod <= 0;
     this.paintMesh.visible = near;
-    if (this.glowMesh) this.glowMesh.visible = near && this.cloak < 1;
+    if (this.glowMesh) this.glowMesh.visible = near && this.cloak < 1 && this.darkness < 1;
     if (this.emblemMesh) this.emblemMesh.visible = near && this.cloak < UNIT_KIT.cloak.emblemCutoff;
   }
 
@@ -1002,6 +1103,7 @@ export class ProcUnit extends THREE.Group {
 
 const MATRIX_FLOATS = 16;
 const INST_FLOATS = 4;
+const DARK_FLOATS = 1;   // aDark: darkness of the instance
 const GROWTH = 2;
 const _cam = new THREE.Vector3();
 const byDist2 = (a, b) => a.dist2 - b.dist2;   // shared comparator (no closure per decision)
@@ -1013,7 +1115,7 @@ class UnitGroup {
     this.key = key;
     this.source = source;
     this.texture = texture;
-    this.material = acquireInstancedPaintMaterial(texture);
+    this.material = acquireUnitInstancedMaterial(texture);
     this.items = [];
     this.capacity = 0;
     this.mesh = null;
@@ -1028,6 +1130,7 @@ class UnitGroup {
     for (const [name, attr] of Object.entries(this.source.attributes)) geometry.setAttribute(name, attr);
     if (this.source.index) geometry.setIndex(this.source.index);
     geometry.setAttribute('aInst', new THREE.InstancedBufferAttribute(new Float32Array(capacity * INST_FLOATS), INST_FLOATS).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('aDark', new THREE.InstancedBufferAttribute(new Float32Array(capacity * DARK_FLOATS), DARK_FLOATS).setUsage(THREE.DynamicDrawUsage));
     const mesh = new THREE.InstancedMesh(geometry, this.material, capacity);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.name = `UnitBatch:${this.key}`;
@@ -1040,6 +1143,7 @@ class UnitGroup {
     if (old) {
       mesh.instanceMatrix.array.set(old.instanceMatrix.array.subarray(0, this.items.length * MATRIX_FLOATS));
       geometry.attributes.aInst.array.set(old.geometry.attributes.aInst.array.subarray(0, this.items.length * INST_FLOATS));
+      geometry.attributes.aDark.array.set(old.geometry.attributes.aDark.array.subarray(0, this.items.length * DARK_FLOATS));
       this.batcher.scene.remove(old);
       old.dispose();
       this.#freeGeometry(old.geometry);
@@ -1069,6 +1173,9 @@ class UnitGroup {
       const inst = this.mesh.geometry.attributes.aInst;
       inst.array.copyWithin(i * INST_FLOATS, last * INST_FLOATS, (last + 1) * INST_FLOATS);
       inst.needsUpdate = true;
+      const dark = this.mesh.geometry.attributes.aDark;
+      dark.array[i] = dark.array[last];
+      dark.needsUpdate = true;
       const moved = this.items[last];
       this.items[i] = moved;
       moved.slot = i;
@@ -1099,6 +1206,9 @@ class UnitGroup {
     attr.array[o + 2] = b.team.b;
     attr.array[o + 3] = b.highlight;
     attr.needsUpdate = true;
+    const dark = this.mesh.geometry.attributes.aDark;
+    dark.array[item.slot] = unit.darkness;
+    dark.needsUpdate = true;
   }
 
   flush() {
@@ -1117,7 +1227,7 @@ class UnitGroup {
     this.batcher.scene.remove(this.mesh);
     this.mesh.dispose();
     this.#freeGeometry(this.mesh.geometry);
-    releaseInstancedPaintMaterial(this.material);
+    releaseUnitInstancedMaterial(this.material);
     this.mesh = null;
     this.items.length = 0;
   }

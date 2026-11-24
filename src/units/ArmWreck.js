@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { bindPart, retargetClip } from '../anim/AnimLibrary.js';
 import { WRECK } from '../config.js';
+import { createArmWreckView } from './ProcMechVisual.js'; // [proc-robot]
 
 const UP = new THREE.Vector3(0, 1, 0);
 const _box = new THREE.Box3();
@@ -58,6 +59,8 @@ export class ArmWreck {
     } else {
       this.animDone = true;
     }
+    // [proc-robot] procedural arm model following the (hidden) GLB arm – display only, null = GLB arm drawn
+    this.procView = createArmWreckView(part, fromMech, world.scene);
   }
 
   /** Lze vrak zadat jako cíl sběru (i když ještě padá) */
@@ -90,6 +93,7 @@ export class ArmWreck {
       this.grounded = true;
       if (this.animDone) this.landed = true;
     }
+    this.procView?.update(); // [proc-robot] visual only
   }
 
   /** Vrak sebrán – uvolní animace */
@@ -97,5 +101,7 @@ export class ArmWreck {
     this.collected = true;
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.object);
+    this.procView?.dispose(); // [proc-robot] the GLB arm is drawn again (truck cargo, remounted on a mech)
+    this.procView = null;
   }
 }

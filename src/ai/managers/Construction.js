@@ -22,7 +22,7 @@ function isWallPiece(s) {
   const p = s?.stats?.placement;
   return p === 'wall' || p === 'post' || segmentIds.has(s?.unitId);
 }
-const BACK_ROLES = ['power', 'supply', 'storage'];
+const BACK_ROLES = ['power', 'supply', 'storage', 'deepMining']; // [H5] deep extractors behind the HQ too
 
 export class ConstructionManager {
   constructor(ai) {
@@ -412,7 +412,8 @@ export class ConstructionManager {
     const cfg = AI.placement;
     this.searchStats.searches++;
     const fp = cachedFootprint(id, this.ai.race);
-    if (!fp) { modelFootprint(id, this.ai.race).catch(() => {}); return null; } // loads for the next try
+    // loads for the next try; [I1] the next tick waits for it, so the retry happens at the same tick everywhere
+    if (!fp) { this.world.trackLoad(modelFootprint(id, this.ai.race)).catch(() => {}); return null; }
     const yaw = this.baseYaw;
     const front = this.ai.perception.frontDir();
     const anchor = this.own.anchor ?? near;
@@ -570,8 +571,8 @@ export class ConstructionManager {
     const segId = postStats.wallSegment;
     if (!segId || checkRules(this.world, ai.team, ai.race, postId, postStats)) { job.state = 'failed'; return; }
     if (!cachedFootprint(postId, ai.race) || !cachedFootprint(segId, ai.race)) {
-      modelFootprint(postId, ai.race).catch(() => {});
-      modelFootprint(segId, ai.race).catch(() => {});
+      this.world.trackLoad(modelFootprint(postId, ai.race)).catch(() => {}); // [I1] next tick waits for it
+      this.world.trackLoad(modelFootprint(segId, ai.race)).catch(() => {});
       return;
     }
     const builder = this.idleBuilders(job.start)[0];

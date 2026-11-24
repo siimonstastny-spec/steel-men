@@ -36,7 +36,7 @@ export class UnitStatus {
     this.stunTimer = 0;
     this.vx = 0;          // knockback velocity (units/s)
     this.vz = 0;
-    this.burns = new Map(); // `${attacker.uuid}/${weaponId}` -> { attacker, dps, timeLeft, tick }
+    this.burns = new Map(); // `${attacker.eid}/${weaponId}` -> { attacker, dps, timeLeft, tick }
     this.stunFx = null;
     this.burnFx = null;
   }
@@ -91,7 +91,7 @@ export class UnitStatus {
 
   /** Same weapon of the same attacker refreshes its burn; different sources stack */
   burn(attacker, weaponId, effect, factor) {
-    const key = `${attacker.uuid}/${weaponId}`;
+    const key = `${attacker.eid ?? attacker.uuid}/${weaponId}`; // [I1] entity id (same on every client), not the random three.js uuid
     const dps = Object.fromEntries(Object.entries(effect.damagePerSecond ?? {}).map(([t, v]) => [t, v * factor]));
     const old = this.burns.get(key);
     this.burns.set(key, { attacker, dps, timeLeft: effect.duration, tick: old?.tick ?? 0 });

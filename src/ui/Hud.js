@@ -471,6 +471,9 @@ export class Hud {
       if (v.canAttack) this.#addKind('combatVehicle');
     }
     if (input.selectedOwnStructures.length) this.#addKind('structure');
+    // [H1] conditional commands (e.g. wallGate) leave their slot empty while disabled
+    const hidden = HUD.commandGrid.hiddenWhenDisabled;
+    for (let i = 0; i < grid.length; i++) if (grid[i] && !enabled[grid[i]] && hidden.includes(grid[i])) grid[i] = null;
     // Rebuild the items only when the "signature" changed (slot names, enabled flags, stance, behaviour, repairing, pending, language)
     const sig = this.cmdSig;
     const pending = input.pending;

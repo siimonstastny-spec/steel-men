@@ -9,16 +9,19 @@
 //     its own, paid when ordered (the whole line must be affordable) and built in order by the builders
 //     (races with continuesWithoutBuilder only start them).
 //   • Segments block pathfinding for everybody (one box when axis-aligned, else a chain of circles – navShapes).
+//   • [H1] A finished full segment can be rebuilt into a gate (WallGate, command upgradeGate in buildCommands.js): own and
+//     allied units pass it, enemies see a wall.
 //   • A turret (`placement: 'post'`, `mountOn` = post id) is placed on a finished own post without a turret
 //     (TurretPlacement); it is a DefenseStructure and dies with its post.
 import * as THREE from 'three';
 import { getStats, unitStats } from '../data/Stats.js';
-import { loadModel } from '../core/AssetLoader.js';
+import { PlacementHologram, createPreviewSource } from './PlacementHologram.js'; // [hologram]
 import { PLACEMENT, WALL, WALL_DRAG, STRUCTURE, CMD_WALL, UI_SMALL, LOS } from '../config.js';
 import { Structure, modelFootprint, cachedFootprint, footprintAt, snapYaw, structureScale } from '../units/Structure.js';
 import { DefenseStructure } from '../units/DefenseStructure.js';
 import { registerStructureClass } from '../units/structureClasses.js';
 import { localTeam } from '../core/LocalPlayer.js';
+import { areAllies } from './Alliances.js';
 import { canPlace, PlacementGhost } from './Construction.js';
 import { boxInArea } from './PreBuild.js';
 import { commandBus, registerCommand, resolve } from './commands/CommandBus.js';
@@ -105,12 +108,30 @@ export class WallSegment extends Structure {
 const segmentModelLength = (fp) => Math.max((fp.halfX - STRUCTURE.footprintPadding) * 2, Number.EPSILON);
 
 /**
- * Wall gate (stats.gate): a segment whose procedural model opens while an own ground unit is near (stats.gateOpenRange
- * from the gate's ends). The open state is derived from the simulation state every tick and only drives the model
- * (visual); nothing reads it back. Navigation is NOT changed yet (the gate blocks like a segment, see proc-walls-wire.md).
+ * Wall gate (stats.gate): a segment whose procedural model opens while an own or allied ground unit is near
+ * (stats.gateOpenRange from the gate's ends). The open state is derived from the simulation state every tick and only
+ * drives the model (visual); nothing reads it back.
+ * [H1] Navigation: an unfinished / dead gate blocks everybody like a segment. A finished one is passable for its team and
+ * its allies (pathfinding shapes carry `passTeam`, see Pathfinding.js): they plan their paths through it and it opens
+ * when they come near; enemies always see a wall. Built by rebuilding a full segment (command upgradeGate).
  */
 export class WallGate extends WallSegment {
   isOpen = false;
+  #shapes = null; // [H1] cached pathfinding shapes (a gate never moves); passTeam is refreshed on every read
+
+  /** True while own / allied units may pass (finished, alive) */
+  get passable() { return this.complete && !this.dead && !this.removed; }
+
+  /** [H1] stats.selfBuild: the gate builds itself (Construction.structureBuildRate) – a builder neither counts nor helps */
+  addBuilder(vehicle) { if (!this.stats?.selfBuild) super.addBuilder(vehicle); }
+
+  get navShapes() {
+    if (!this.footprint || !this.world) return [this.obstacle];
+    const shapes = (this.#shapes ??= segmentShapes(this.position, this.rotation.y, this.length, this.halfThick, this.postHalf, this));
+    const passTeam = this.passable ? this.team : undefined;
+    for (let i = 0; i < shapes.length; i++) shapes[i].passTeam = passTeam;
+    return shapes;
+  }
 
   update(dt) {
     this.#refreshOpen();
@@ -123,15 +144,24 @@ export class WallGate extends WallSegment {
     if (world && this.complete && !this.dead && this.stats) {
       const reach = this.length / 2 + (this.stats.gateOpenRange ?? 0);
       const reach2 = reach * reach;
-      for (const u of world.units) {
-        if (u.team !== this.team || u.isStructure || u.airborne || u.dead) continue;
-        const dx = u.position.x - this.position.x;
-        const dz = u.position.z - this.position.z;
-        if (dx * dx + dz * dz <= reach2) { open = true; break; }
-      }
+      // (the unit arrays directly: world.units would build a filtered copy for every gate every tick)
+      open = this.#anyNear(world.mechs, reach2) || this.#anyNear(world.crews, reach2) || this.#anyNear(world.vehicles, reach2);
     }
     this.isOpen = open;
     this.procModel?.setOpen?.(open);
+  }
+
+  /** An own / allied live ground unit of `list` within sqrt(reach2) of the gate's centre */
+  #anyNear(list, reach2) {
+    if (!list) return false;
+    for (let i = 0; i < list.length; i++) {
+      const u = list[i];
+      if (u.dead || u.destroyed || u.removed || u.inside || u.airborne || !areAllies(u.team, this.team)) continue;
+      const dx = u.position.x - this.position.x;
+      const dz = u.position.z - this.position.z;
+      if (dx * dx + dz * dz <= reach2) return true;
+    }
+    return false;
   }
 }
 
@@ -145,6 +175,14 @@ function segmentCrop(fp, factor, length) {
   const modelLength = segmentModelLength(fp);
   const lo = -modelLength / 2;
   return { lo, hi: lo + length / factor, shift: (WALL.postSpacing - length) / 2 };
+}
+
+/** [hologram] Frees the cut geometries setCrop() made on a preview (the full geometries are shared with the asset cache) */
+function disposeCropped(holder) {
+  holder.traverse((o) => {
+    const full = o.userData.fullGeometry;
+    if (o.isMesh && full && o.geometry !== full) o.geometry.dispose();
+  });
 }
 
 /**
@@ -383,15 +421,8 @@ function wallFootprints(postId, race) {
   return footprints.get(key);
 }
 
-const ghostMaterial = (opacity = PLACEMENT.opacity) => new THREE.MeshBasicMaterial({
-  color: PLACEMENT.validColor, transparent: true, opacity, depthWrite: false,
-});
-
-/** Model copy for previews: one material, no shadows, not clickable */
-function ghostOf(model, material) {
-  model.traverse((o) => { if (o.isMesh) { o.material = material; o.castShadow = false; o.raycast = () => {}; } });
-  return model;
-}
+// [hologram] previews are holograms of the real model (PlacementHologram.js: material, shadows off, no raycast)
+const HOVER_FADE = () => WALL.previewHoverOpacity / PLACEMENT.opacity; // the post before the line starts is fainter
 
 /**
  * Wall placement (CommandInput.placement interface): move(point), confirm(point, keep), cancel(), rotate / setYaw
@@ -417,12 +448,13 @@ export class WallPlacement {
   async init() {
     const stats = unitStats('structures', this.id, this.race);
     const seg = unitStats('structures', this.segId, this.race);
-    const [[postFp, segFp], postModel, segModel] = await Promise.all([
-      wallFootprints(this.id, this.race), loadModel(stats.model), loadModel(seg.model)]);
+    const [postFp, segFp] = await wallFootprints(this.id, this.race);
+    const [postSource, segSource] = await Promise.all([
+      createPreviewSource({ id: this.id, race: this.race, team: this.team, stats, fp: postFp }),
+      createPreviewSource({ id: this.segId, race: this.race, team: this.team, stats: seg, fp: segFp })]);
     if (this.ended) return this;
-    Object.assign(this, { postFp, segFp, postStats: stats, segStats: seg });
-    this.postTemplate = postModel;
-    this.segTemplate = segModel;
+    Object.assign(this, { postFp, segFp, postStats: stats, segStats: seg, postSource, segSource });
+    this.hologram = new PlacementHologram(this.team);
     this.world.scene.add(this.group);
     this.#createTip();
     if (this.point) this.move(this.point);
@@ -532,18 +564,17 @@ export class WallPlacement {
   setYaw() {}
 
   // Preview pieces, created on demand and reused
-  #ghost(list, template, fp, scale, i) {
+  #ghost(list, source, i) {
     if (!list[i]) {
-      const material = ghostMaterial();
-      const model = ghostOf(template.clone(true), material);
-      model.scale.setScalar(scale);
-      model.position.set(-fp.offsetX, 0, -fp.offsetZ);
+      const model = source.create(); // scaled and placed like Structure.#attachModel
+      this.hologram.apply(model, source.proc ? model : null);
       // outer: position + yaw of the piece; inner: stretch / cut of a segment (same layout as Structure.holder)
       const inner = new THREE.Group();
       inner.add(model);
       const holder = new THREE.Group();
       holder.add(inner);
-      holder.userData.material = material;
+      holder.userData.model = model;
+      holder.userData.source = source;
       holder.userData.inner = inner;
       this.group.add(holder);
       list[i] = holder;
@@ -555,9 +586,13 @@ export class WallPlacement {
   #shapeSegment(g, s) {
     const inner = g.userData.inner;
     const modelLength = segmentModelLength(this.segFp);
+    if (this.segSource.proc) { // procedural segment: only squeezed to its length, never cut (as WallSegment.load)
+      inner.scale.x = s.length / modelLength;
+      return;
+    }
     if (!s.trim) {
       inner.scale.x = s.length / modelLength;
-      if (g.userData.cropLength !== null && g.userData.cropLength !== undefined) setCrop(inner, null);
+      if (g.userData.cropLength !== null && g.userData.cropLength !== undefined) { disposeCropped(inner); setCrop(inner, null); }
       g.userData.cropLength = null;
       return;
     }
@@ -565,16 +600,16 @@ export class WallPlacement {
     inner.scale.x = factor;
     const last = g.userData.cropLength;
     if (last !== null && last !== undefined && Math.abs(last - s.length) < CMD_WALL.previewCropStep) return;
+    disposeCropped(inner); // [hologram] the previous cut geometries are ours alone
     setCrop(inner, segmentCrop(this.segFp, factor, s.length));
     g.userData.cropLength = s.length;
   }
 
-  #placeGhost(g, x, z, yaw, valid, opacity = PLACEMENT.opacity) {
+  #placeGhost(g, x, z, yaw, valid) {
     g.visible = true;
     g.position.set(x, this.world.heightAt(x, z), z);
     g.rotation.y = yaw;
-    g.userData.material.color.set(valid ? PLACEMENT.validColor : PLACEMENT.invalidColor);
-    g.userData.material.opacity = opacity;
+    this.hologram.setValid(g.userData.model, valid);
   }
 
   /** Start under the cursor: an own post nearby, else the cursor point */
@@ -598,6 +633,12 @@ export class WallPlacement {
   move(point) {
     if (this.dragging) point = this.#clampDrag(point);
     this.point = point;
+    if (!point && this.postFp && !this.ended) { // [I2] pointer off the map: the shown line turns red and cannot be ordered
+      this.valid = false;
+      for (const g of this.postGhosts) if (g.visible && g.userData.model) this.hologram.setValid(g.userData.model, false);
+      for (const g of this.segGhosts) if (g.visible && g.userData.model) this.hologram.setValid(g.userData.model, false);
+      return;
+    }
     if (!this.postFp || !point || this.ended) return;
     if (this.start?.pending && !this.start.post) {
       // The post ordered by the previous Shift line exists once the command ran: continue from it
@@ -609,16 +650,15 @@ export class WallPlacement {
     const check = this.#check(plan);
     this.plan = plan;
     this.valid = check.ok && (plan.segments.length > 0 || !plan.posts[0].existing);
-    const postScale = structureScale(this.postStats);
-    const segScale = structureScale(this.segStats);
     for (const g of [...this.postGhosts, ...this.segGhosts]) g.visible = false;
+    this.hologram.setFade(this.start ? 1 : HOVER_FADE()); // [hologram] (no segments exist while only the hover post is shown)
     plan.posts.forEach((p, i) => {
       if (p.existing && this.start) return; // already standing
-      const g = this.#ghost(this.postGhosts, this.postTemplate, this.postFp, postScale, i);
-      this.#placeGhost(g, p.x, p.z, snapYaw(plan.yaw ?? 0), check.postOk[i] && plan.ok, this.start ? PLACEMENT.opacity : WALL.previewHoverOpacity);
+      const g = this.#ghost(this.postGhosts, this.postSource, i);
+      this.#placeGhost(g, p.x, p.z, snapYaw(plan.yaw ?? 0), check.postOk[i] && plan.ok);
     });
     plan.segments.forEach((s, i) => {
-      const g = this.#ghost(this.segGhosts, this.segTemplate, this.segFp, segScale, i);
+      const g = this.#ghost(this.segGhosts, this.segSource, i);
       this.#placeGhost(g, s.x, s.z, s.yaw, check.segOk[i] && plan.ok);
       this.#shapeSegment(g, s);
     });
@@ -674,7 +714,12 @@ export class WallPlacement {
     this.ended = true;
     this.#removeTip();
     this.world.scene.remove(this.group);
-    for (const g of [...this.postGhosts, ...this.segGhosts]) g.userData.material.dispose();
+    for (const g of [...this.postGhosts, ...this.segGhosts]) { // [hologram] proc models: dispose(); cut GLB geometries freed
+      disposeCropped(g.userData.inner);
+      g.userData.source.release(g.userData.model);
+    }
+    this.postGhosts.length = this.segGhosts.length = 0;
+    this.hologram?.dispose();
     this.onEnd?.();
   }
 }
@@ -696,11 +741,15 @@ export class TurretPlacement {
   }
 
   async init() {
-    const [model] = await Promise.all([loadModel(this.stats.model), modelFootprint(this.id, this.race)]); // footprint: for the command
+    const fp = await modelFootprint(this.id, this.race); // footprint: for the command
+    const source = await createPreviewSource({ id: this.id, race: this.race, team: this.team, stats: this.stats, fp });
     if (this.ended) return this;
-    this.material = ghostMaterial();
-    model.scale.setScalar(structureScale(this.stats));
-    this.object = ghostOf(model, this.material);
+    this.hologram = new PlacementHologram(this.team);
+    this.source = source;
+    this.model = source.create();
+    this.hologram.apply(this.model, source.proc ? this.model : null);
+    this.object = new THREE.Group();
+    this.object.add(this.model);
     this.object.visible = false;
     this.world.scene.add(this.object);
     if (this.point) this.move(this.point);
@@ -715,6 +764,7 @@ export class TurretPlacement {
 
   move(point) {
     this.point = point;
+    if (!point && this.object) { this.valid = false; this.post = null; this.hologram.setValid(this.model, false); return; } // [I2]
     if (!this.object || !point) return;
     const post = nearestPost(this.world, this.team, point, WALL.turretSnapRadius, (p) => this.#free(p));
     this.post = post;
@@ -723,7 +773,7 @@ export class TurretPlacement {
     this.object.visible = true;
     this.object.position.set(at.x, (post ? post.position.y + post.turretHeight : this.world.heightAt(at.x, at.z)), at.z);
     this.object.rotation.y = post ? post.rotation.y : 0;
-    this.material.color.set(this.valid ? PLACEMENT.validColor : PLACEMENT.invalidColor);
+    this.hologram.setValid(this.model, this.valid);
   }
 
   confirm(point, keep = false) {
@@ -746,7 +796,11 @@ export class TurretPlacement {
   cancel() {
     if (this.ended) return;
     this.ended = true;
-    if (this.object) { this.world.scene.remove(this.object); this.material.dispose(); }
+    if (this.object) {
+      this.world.scene.remove(this.object);
+      this.source.release(this.model); // [hologram]
+      this.hologram.dispose();
+    }
     this.onEnd?.();
   }
 }

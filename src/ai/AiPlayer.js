@@ -96,6 +96,8 @@ export class AiPlayer {
       console.error('[AI] data failed to load – AI disabled', err);
       this.enabled = false;
     });
+    // [I1] the AI starts thinking at the same tick on every machine, not when its data happens to arrive
+    world.trackLoad?.(this.ready);
   }
 
   #init(data) {
@@ -248,6 +250,8 @@ export class AiPlayer {
       harass: this.stats.harassRuns ?? 0,
       counters: this.production?.lastCounter ? 'on' : '-',
       spotTests: this.construction?.searchStats.tests ?? 0,
+      // [H5] own finished deep extractors / their ore per second now
+      deepOre: this.economy?.deepCount ? `${this.economy.deepCount}/${this.economy.deepOreIncome.toFixed(1)}` : '-',
       // v3
       bayCrews: own.bayCrews.length,                     // own crews waiting in bay queues now
       bayJoins: this.military?.stats.bayJoins ?? 0,      // joinBay commands sent

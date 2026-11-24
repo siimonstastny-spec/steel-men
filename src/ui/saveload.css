@@ -1,0 +1,52 @@
+/* Saved games window, save-name dialog and toast (src/ui/SaveLoadView.js) [J2]. Looks like the menu cards. */
+.saveload-overlay {
+  position: fixed; inset: 0; z-index: 35; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.6); color: var(--menu-text, #d9e0e7); font-family: var(--menu-font, system-ui, sans-serif);
+}
+.saveload-overlay[hidden], .saveload-toast[hidden] { display: none; }
+.saveload-card { width: min(760px, 94vw); max-height: 86vh; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }
+.saveload-card h2 { margin: 0; }
+.saveload-card p { margin: 0; }
+.saveload-list { flex: 1 1 auto; min-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+
+.save-row {
+  display: flex; align-items: center; gap: 12px; padding: 8px 10px; background: var(--menu-faction-bg, #1b2128);
+  border: 1px solid var(--menu-border-soft, #2b323a);
+}
+.save-row.auto { border-color: var(--menu-border, #3d4650); }
+.save-row.bad { opacity: 0.6; }
+.save-row.bad .save-name { color: var(--menu-muted, #8f9aa5); }
+.save-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.save-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-tag {
+  display: inline-block; margin-left: 8px; padding: 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--menu-accent, #3ea6ff); border: 1px solid var(--menu-accent, #3ea6ff);
+}
+.save-info { color: var(--menu-muted, #8f9aa5); }
+.save-reason { color: var(--menu-warn, #ffb454); }
+.save-actions { flex: 0 0 auto; display: flex; gap: 6px; }
+.saveload-card .menu-btn { min-width: 0; padding: 6px 28px 6px 12px; font-size: 12px; text-align: center; }
+.saveload-card .save-actions .menu-btn, .saveload-notice-actions .menu-btn { padding-right: 12px; }
+.saveload-card .save-actions .menu-btn::after, .saveload-notice-actions .menu-btn::after { content: none; }
+.saveload-card .menu-btn.danger { border-color: var(--menu-danger, #b24a4a); }
+.saveload-card .menu-btn.danger:hover { background: linear-gradient(180deg, #8a3434, var(--menu-danger-bg, #6e2626)); }
+.saveload-card .menu-actions .menu-btn { min-width: 140px; padding-right: 22px; }
+.saveload-card .menu-actions .menu-btn::after { content: none; }
+
+.saveload-notice { padding: 10px 12px; border: 1px solid var(--menu-warn, #ffb454); background: rgba(255, 180, 84, 0.08); }
+.saveload-notice p { color: var(--menu-warn, #ffb454); margin-bottom: 8px; }
+.saveload-notice-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.saveload-modal { z-index: 42; }
+.saveload-name-input {
+  width: 100%; box-sizing: border-box; margin: 0 0 16px; padding: 6px 8px; color: var(--menu-text, #d9e0e7);
+  background: #12161b; border: 1px solid var(--menu-border, #3d4650); border-radius: 0; font: 14px var(--menu-font, system-ui, sans-serif);
+}
+.saveload-name-input:focus { outline: none; border-color: var(--menu-accent, #3ea6ff); box-shadow: var(--menu-neon-glow, none); }
+.saveload-modal .confirm-buttons button[data-role="confirm"] { background: linear-gradient(180deg, rgba(14, 32, 52, 0.92), rgba(8, 18, 30, 0.92)); border-color: var(--menu-accent, #3ea6ff); }
+
+.saveload-toast {
+  position: fixed; left: 50%; bottom: 12%; transform: translateX(-50%); z-index: 45; padding: 8px 18px; pointer-events: none;
+  color: var(--menu-accent-text, #e9f5ff); background: rgba(14, 32, 52, 0.95); border: 1px solid var(--menu-accent, #3ea6ff);
+  font: 700 14px var(--menu-font, system-ui, sans-serif); letter-spacing: 0.08em; text-transform: uppercase;
+}

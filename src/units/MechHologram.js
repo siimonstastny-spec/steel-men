@@ -168,6 +168,12 @@ export class PartHologram {
   #setPartHidden(part) {
     const set = (p, visible) => {
       const mech = p.mech;
+      // [proc-robot] procedurally drawn mech: its GLB meshes stay hidden (ProcMechVisual); an arm slot of the robot hides
+      // instead (legs / torso would collapse the parts on them, so the old body stays under the hologram)
+      if (mech?.procModel) {
+        if (p.isArm) mech.procModel.setPartVisible(p.slot, visible);
+        return;
+      }
       const others = new Set(Object.values(mech?.parts ?? {}).filter((o) => o !== p).map((o) => o.object));
       const walk = (o) => {
         if (others.has(o) || o === this.object) return;

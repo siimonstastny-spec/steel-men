@@ -11,10 +11,10 @@
 //   startHpFraction     HP share of a just-started building (grows with progress)
 import * as THREE from 'three';
 import { getStats, unitStats } from '../data/Stats.js';
-import { loadModel } from '../core/AssetLoader.js';
+import { PlacementHologram, createPreviewSource } from './PlacementHologram.js'; // [hologram]
 import { PLACEMENT, CMD_BUILD, TERRAIN_FLATTEN } from '../config.js';
 import { localTeam } from '../core/LocalPlayer.js';
-import { modelFootprint, structureScale } from '../units/Structure.js';
+import { modelFootprint } from '../units/Structure.js';
 import { commandBus } from './commands/CommandBus.js';
 import { newTicket, eidsOf, quantizeYaw } from './commands/buildCommands.js'; // also registers the build commands
 
@@ -27,6 +27,9 @@ export function placementBox(fp, x, z, yaw) {
   const s = Math.abs(Math.sin(yaw));
   return { x, z, halfX: fp.halfX * c + fp.halfZ * s, halfZ: fp.halfX * s + fp.halfZ * c };
 }
+
+/** [H1] Rate of a stats.selfBuild building: the speed of one builder, i.e. finished in stats.buildTime seconds */
+const SELF_BUILD_RATE = 1;
 
 /** Does a building of this race go on without builders once started (races[*].construction.continuesWithoutBuilder)? */
 export const continuesAlone = (race) => Boolean(getStats().races?.[race]?.construction?.continuesWithoutBuilder);
@@ -64,6 +67,7 @@ export function markConstructionStarted(structure) {
 
 /** [N1] Current construction speed of a building (Structure.buildRate): its builders and whether it was started */
 export function structureBuildRate(structure) {
+  if (structure.stats?.selfBuild) return SELF_BUILD_RATE; // [H1] builds itself (wall gate), any race, no builder
   if (structure.constructionDue) return 0; // [W5b] waits for the deferred part of its cost
   return buildRate(structure.race, structure.builders.size, structure.constructionStarted === true);
 }
@@ -232,13 +236,15 @@ export class PlacementGhost {
 
   async init() {
     const stats = unitStats('structures', this.id, this.race);
-    const [fp, model] = await Promise.all([modelFootprint(this.id, this.race), loadModel(stats.model)]);
+    const fp = await modelFootprint(this.id, this.race);
+    const source = await createPreviewSource({ id: this.id, race: this.race, team: this.team, stats, fp }); // [hologram]
     if (this.ended) return this;
     this.fp = fp;
-    this.material = new THREE.MeshBasicMaterial({ color: PLACEMENT.validColor, transparent: true, opacity: PLACEMENT.opacity, depthWrite: false });
-    model.scale.setScalar(structureScale(stats));
-    model.position.set(-fp.offsetX, 0, -fp.offsetZ);
-    model.traverse((o) => { if (o.isMesh) { o.material = this.material; o.castShadow = false; o.raycast = () => {}; } });
+    this.hologram = new PlacementHologram(this.team);
+    this.source = source;
+    const model = source.create();
+    this.hologram.apply(model, source.proc ? model : null);
+    this.model = model;
     const object = new THREE.Group();
     object.add(model);
     object.rotation.y = this.yaw;
@@ -263,12 +269,17 @@ export class PlacementGhost {
 
   move(point) {
     this.point = point;
-    if (!this.object || !point) return;
+    if (!point) { // [I2] pointer off the map (the ground raycast misses): the ghost stays where it was, but red and unplaceable
+      this.valid = false;
+      if (this.object && this.model) this.hologram.setValid(this.model, false);
+      return;
+    }
+    if (!this.object) return;
     this.object.visible = true;
     const fit = this.fp ? terrainFit(this.world, this.box) : null; // [R6] the building stands on levelled ground
     this.object.position.set(point.x, fit ? fit.level : this.world.heightAt(point.x, point.z), point.z);
     this.valid = canPlace(this.world, this.box, this.builders) && (fit?.ok ?? true);
-    this.material.color.set(this.valid ? PLACEMENT.validColor : PLACEMENT.invalidColor);
+    this.hologram.setValid(this.model, this.valid);
   }
 
   /**
@@ -307,7 +318,9 @@ export class PlacementGhost {
     this.ended = true;
     if (this.object) {
       this.world.scene.remove(this.object);
-      this.material.dispose();
+      this.source.release(this.model);  // [hologram] procedural model: dispose(); GLB: just detached (shared geometry)
+      this.hologram.dispose();
+      this.model = null;
     }
     this.onEnd?.();
   }

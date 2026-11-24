@@ -29,6 +29,7 @@ export class MechPart {
     this.highlighted = false;
     this.charred = false; // součást zničeného robota
     this.meshes = [];
+    this.procView = null; // [proc-robot] procedural model of this arm lying as a wreck (ProcMechVisual.js), display only
 
     object.name = `part_${key}`;
     object.userData.mechPart = this;
@@ -148,7 +149,7 @@ export class MechPart {
   }
 
   setCharred(on) { this.charred = on; this.#applyLook(); }
-  setHighlighted(on) { this.highlighted = on; this.#applyLook(); }
+  setHighlighted(on) { this.highlighted = on; this.#applyLook(); this.procView?.setHighlighted(on); } // [proc-robot]
 
   #applyLook() {
     const dark = !this.alive || this.charred;

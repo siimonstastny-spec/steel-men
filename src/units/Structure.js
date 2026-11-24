@@ -71,8 +71,7 @@ export async function modelFootprint(id, race) {
   const fp = {
     halfX: size.x / 2 + STRUCTURE.footprintPadding,
     halfZ: size.z / 2 + STRUCTURE.footprintPadding,
-    offsetX: centre.x, offsetZ: centre.z, height: size.y, minY: box.min.y * s,
-  };
+    offsetX: centre.x, offsetZ: centre.z, height: size.y, minY: box.min.y * s,  };
   footprintCache.set(footprintKey(id, race), fp);
   return fp;
 }
@@ -435,12 +434,18 @@ export class Structure extends THREE.Group {
   }
 
   update(dt) {
-    if (this.dead || !this.holder) return; // not loaded yet (build commands add the building before its model)
-    if (this.stats?.sunTracking && this.idleAction) this.#trackSun();
-    else this.mixer?.update(dt);
+    if (this.dead) return;
+    // [I1] Construction below never waits for the model (build commands add the building before it loads and
+    // World.trackLoad holds the next tick until it is there); only the visuals need it
+    if (this.holder) {
+      if (this.stats?.sunTracking && this.idleAction) this.#trackSun();
+      else this.mixer?.update(dt);
+    }
     // Visual only (does not change state): crane / door / beacons while the building produces. tick() = batching
     // bookkeeping (fog of war, LOD) + update(); a far or hidden building is not animated.
     // (sunClock: the shared real-time sun clock – visual only, same as #trackSun – for a procedural solar panel)
+    this.procModel?.setPowered(this.powered);
+    this.procModel?.setDamage(this.complete && this.maxHp > 0 ? this.hp / this.maxHp : 1);
     this.procModel?.tick(dt, this.complete && this.powered && (this.world?.production?.itemsOf(this.eid).length ?? 0) > 0,
       this.stats?.sunTracking && getRenderClock() > 0 ? getRenderClock() * STRUCTURE.sunTrackingSpeed : undefined);
     // Swap the two builder sets instead of allocating a new one every tick

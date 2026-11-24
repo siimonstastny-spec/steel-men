@@ -50,9 +50,15 @@ export class World {
     this.tick = 0;             // ticks simulated so far; during update() = the number of the running tick
     this.rng = new Rng(SIM.defaultSeed);
     this.pendingSpawns = [];   // spawnDeferred / deferLoad entries { eid, due, ready, result, failed, apply… }, request order
-    // Lockstep: a due spawn whose model is not loaded yet stalls the simulation (readyForTick) instead of
-    // appearing later on this client only. Single player keeps going and spawns it as soon as it is loaded.
-    this.waitForSpawns = false;
+    // [I1] Lockstep rule everywhere (single player, multiplayer, tests): a due spawn whose model is not loaded yet,
+    // or a load registered with trackLoad (building model, AI data, AI footprint), stalls the simulation
+    // (readyForTick) – nothing ever enters the world "when its model happens to be loaded".
+    this.loadsInFlight = 0;    // trackLoad promises not settled yet
+    this.warnedLateSpawn = false; // #applySpawns reported a tick run without readyForTick (once)
+    this.networked = false;    // [I1] a lockstep match is running (set through the waitForSpawns setter by Lockstep.js)
+    // [I1] true = the game loop (main.js advanceSimulation) runs no ticks; a harness ticks by itself (world.update,
+    // ai.fastForward, steelMen.det). Not part of the simulation state; startSimulation leaves it as it is.
+    this.paused = false;
     this.production = null;    // production system ticked with the simulation (Production.js, agent PROD)
     this._ray = new THREE.Raycaster();
     this._origin = new THREE.Vector3();
@@ -118,9 +124,53 @@ export class World {
   }
 
   /**
+   * [I1] Always true: every match waits for due spawns (readyForTick). src/net/Lockstep.js writes true on start and
+   * false on stop – the write only marks a running lockstep match (`networked`, read by the load watchdog).
+   */
+  get waitForSpawns() { return true; }
+  set waitForSpawns(v) { this.networked = Boolean(v); }
+
+  /**
+   * [I1] May the load watchdog give up a load? Only in single player. In a lockstep match a local real-time timeout
+   * would drop a spawn on this client only (desync): there the watchdog only reports and the client keeps waiting.
+   */
+  #watchdogMayGiveUp() { return !this.multiplayer && !this.networked; }
+
+  /**
+   * [I1] An async load the simulation depends on (a building's model, AI data, a footprint the AI asked for):
+   * no tick runs until it settles (readyForTick), so its result is there at the same tick on every machine,
+   * however fast it loads. Call it from simulation code / AI, never for purely visual loads.
+   * @param {Promise<any>} promise
+   * @returns {Promise<any>} the same promise
+   */
+  trackLoad(promise) {
+    this.loadsInFlight++;
+    let timer = 0;
+    const done = () => {
+      if (!timer) return; // settled already (or given up by the watchdog)
+      clearTimeout(timer);
+      timer = 0;
+      this.loadsInFlight--;
+    };
+    // Watchdog (SIM.loadTimeoutMs): in single player a request that never answers must not freeze the match (real time
+    // only ends the stall); in a lockstep match it only reports – giving up on one client would desync
+    timer = setTimeout(() => {
+      if (!this.#watchdogMayGiveUp()) {
+        console.error(`[World] tracked load still pending after ${SIM.loadTimeoutMs} ms – lockstep match keeps waiting`);
+        return;
+      }
+      console.error(`[World] tracked load still pending after ${SIM.loadTimeoutMs} ms – no longer waiting`);
+      done();
+    }, SIM.loadTimeoutMs);
+    Promise.resolve(promise).then(done, done);
+    return promise;
+  }
+
+  /**
    * Deterministic spawn of a unit whose model loads asynchronously (production). The entity id is reserved
-   * now, in request order, and the unit enters the world at the start of tick (now + SIM.spawnDelayTicks)
-   * – or, in single player, at the first tick after its model finished loading. Call it from simulation code
+   * now, in request order, and the unit enters the world at the start of tick (now + SIM.spawnDelayTicks),
+   * on every client and in single player alike: if its model is not loaded by then, that tick waits for it
+   * (readyForTick) – the game loop, ai.fastForward and steelMen.det all check it. Call it from simulation code
    * (a command executor, a production update), never straight from UI events, or the ids differ between clients.
    * @param {() => Promise<object>} create  creates and loads the unit, e.g. () => new Crew(race, opts).load()
    * @param {(obj: object) => object} place  adds it to the world inside the tick, e.g. (c) => world.addCrew(c, x, z)
@@ -169,25 +219,59 @@ export class World {
     const done = new Promise((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; });
     if (eid != null) done.eid = eid;
     this.pendingSpawns.push(entry);
+    // Watchdog (SIM.loadTimeoutMs): a load that never answers fails the spawn instead of freezing the match
+    // Watchdog: single player fails the spawn; a lockstep match only reports and keeps waiting (see trackLoad)
+    const timer = setTimeout(() => {
+      if (entry.ready) return;
+      if (!this.#watchdogMayGiveUp()) {
+        console.error(`[World] deferred load still pending after ${SIM.loadTimeoutMs} ms – lockstep match keeps waiting`);
+        return;
+      }
+      entry.error = new Error(`deferred load still pending after ${SIM.loadTimeoutMs} ms`);
+      entry.failed = true;
+      entry.ready = true;
+    }, SIM.loadTimeoutMs);
     Promise.resolve().then(load).then(
-      (result) => { entry.result = result; entry.ready = true; },
-      (err) => { entry.error = err; entry.failed = true; entry.ready = true; },
+      (result) => {
+        clearTimeout(timer);
+        if (entry.ready) { // given up by the watchdog (single player): the late unit never enters the world
+          console.error('[World] deferred load finished after the watchdog gave up – result dropped');
+          // released like a removed unit in update() (units have no dispose(); GLB clones share the cached assets)
+          try {
+            if (typeof result?.dispose === 'function') result.dispose();
+            else { result?.procVisual?.dispose?.(); result?.procModel?.dispose?.(); }
+          } catch (err) { console.error(err); }
+          return;
+        }
+        entry.result = result; entry.ready = true;
+      },
+      (err) => { clearTimeout(timer); if (entry.ready) return; entry.error = err; entry.failed = true; entry.ready = true; },
     );
     return done;
   }
 
-  /** false while a lockstep match must wait for a spawn model due in the next tick (see waitForSpawns) */
+  /**
+   * false while the next tick must wait: a spawn due in it whose model is still loading, or a trackLoad in flight.
+   * Every caller of world.update checks it first (game loop, ai.fastForward, steelMen.det); no allocation.
+   */
   readyForTick() {
-    if (!this.waitForSpawns) return true;
+    if (this.loadsInFlight > 0) return false;
     const next = this.tick + 1;
-    return !this.pendingSpawns.some((e) => e.due <= next && !e.ready);
+    for (const e of this.pendingSpawns) if (e.due <= next && !e.ready) return false;
+    return true;
   }
 
-  // Due deferred spawns / loads are applied in request order; one still loading holds back the ones after it
+  // Due deferred spawns / loads are applied in request order. One still loading here means the caller ignored
+  // readyForTick: it is applied late (desync on this machine) and reported once.
   #applySpawns() {
     while (this.pendingSpawns.length) {
       const e = this.pendingSpawns[0];
-      if (e.due > this.tick || !e.ready) break;
+      if (e.due > this.tick) break;
+      if (!e.ready) {
+        if (!this.warnedLateSpawn) console.warn(`[World] tick ${this.tick} ran before a due spawn loaded (readyForTick not checked) – not deterministic`);
+        this.warnedLateSpawn = true;
+        break;
+      }
       this.pendingSpawns.shift();
       if (e.failed) {
         console.error('[World] deferred load failed', e.error); // lockstep: a load failing on one client desyncs
@@ -392,14 +476,14 @@ export class World {
     }
     this.nav.refresh(); // obstacle layout changed (crew boarded / left a mech) -> units re-plan
     for (const mech of this.mechs) mech.update(dt);
-    for (const mech of this.mechs.filter((m) => m.removed)) this.scene.remove(mech);
+    for (const mech of this.mechs.filter((m) => m.removed)) { this.scene.remove(mech); mech.procVisual?.dispose(); } // [proc-robot]
     this.mechs = this.mechs.filter((m) => !m.removed);
     for (const crew of this.crews) crew.update(dt);
     for (const crew of this.crews.filter((c) => c.removed)) this.scene.remove(crew);
     this.crews = this.crews.filter((c) => !c.removed);
     for (const v of this.vehicles) v.update(dt);
     for (const s of this.structures) s.update(dt); // after the vehicles: builders registered this frame
-    for (const u of [...this.vehicles, ...this.structures].filter((x) => x.removed)) { this.scene.remove(u); u.procModel?.dispose(); }
+    for (const u of [...this.vehicles, ...this.structures].filter((x) => x.removed)) { this.scene.remove(u); u.procModel?.dispose(); u.procDriver?.dispose(); }
     this.vehicles = this.vehicles.filter((v) => !v.removed);
     this.structures = this.structures.filter((s) => !s.removed);
     this.economy?.update(dt); // income, deposit slots

@@ -4,9 +4,9 @@
 import * as THREE from 'three';
 import { loadModel, loadGltf } from '../core/AssetLoader.js';
 import { loadStats, getStats, crewStats, rankFor, applyArmor } from '../data/Stats.js';
-import { TEAMS, PLAYER_TEAM, MOVEMENT, RINGS, CREW, ARRIVE_DISTANCE, BEHAVIOUR, CREW_EVAC } from '../config.js';
+import { TEAMS, PLAYER_TEAM, MOVEMENT, RINGS, CREW, ARRIVE_DISTANCE, BEHAVIOUR, CREW_EVAC, MECH_COLLISION_H2, CREW_ANIM } from '../config.js';
 import { isLocal } from '../core/LocalPlayer.js';
-import { blockedOnTheWay, followPath } from '../game/Movement.js';
+import { blockedOnTheWay, followPath, contactDistance } from '../game/Movement.js';
 import { isTargetable, areEnemies, edgeDistance } from '../game/Combat.js';
 import { applyTeamColor } from '../core/TeamColor.js';
 import { play } from '../audio/Sound.js';
@@ -14,6 +14,9 @@ import { advanceQueue, clearQueue } from './OrderQueue.js';
 import { isCrewBay, approachCrewBay } from '../game/BayCrew.js';
 
 const DEG = Math.PI / 180;
+const NO_IGNORE = Object.freeze([]); // [I2] #move: no obstacle ignored
+const MOVE_IGNORE = [null]; // [I2] #move scratch: the one obstacle ignored this tick (mech / bay)
+const BOARD_IGNORE = [null, null]; // scratch of #clearTo: [crew, mech], read by shapesFor at once
 
 /** Local offsets of n members in rows (front row towards +Z), centred on the squad origin */
 function formation(n, spacing) {
@@ -88,7 +91,7 @@ export class Crew extends THREE.Group {
         if (clip) actions[key] = mixer.clipAction(clip);
         else if (i === 0) console.warn(`[Crew] Clip "${clipName}" not found in ${this.stats.animationSource}`);
       }
-      this.members.push({ object, mixer, actions, current: null, phase: Math.random() });
+      this.members.push({ object, mixer, actions, current: null, phase: ((i + 1) * CREW_ANIM.phaseStep) % 1 }); // [I2] deterministic animation phase per member
     });
     this.#play('idle');
     this.refreshTeamColor();
@@ -388,10 +391,18 @@ export class Crew extends THREE.Group {
     return true;
   }
 
+  /** [H2] Straight line from the crew to the mech is free of obstacles (the mech itself is ignored) */
+  #clearTo(mech) {
+    BOARD_IGNORE[0] = this;
+    BOARD_IGNORE[1] = mech;
+    const nav = this.world.nav;
+    return nav.segmentClear(this.position, mech.position, nav.shapesFor(this.radius, BOARD_IGNORE, false, this));
+  }
+
   #move(dt) {
     if (!this.order) return false;
     let target;
-    let ignore = [];
+    let ignore = NO_IGNORE; // [I2] shared empty list (followPath only reads it)
     if (this.order.type === 'flee') {
       const o = this.order;
       if (!this.#updateFlee(o, dt)) {
@@ -405,8 +416,15 @@ export class Crew extends THREE.Group {
       const mech = this.order.mech;
       if (!mech.canBoard) { this.order = null; return false; }
       target = mech.position;
-      ignore = [mech]; // a crewless mech is an obstacle – except for the crew boarding it
-      if (Math.hypot(target.x - this.position.x, target.z - this.position.z) <= getStats().rules.crew.boardRange) {
+      MOVE_IGNORE[0] = mech; ignore = MOVE_IGNORE; // a crewless mech is an obstacle – except for the crew boarding it
+      // [H2] reach is measured to the edge of the legs' circle, or the crew is pressed against the mech as far as
+      // collision lets it (shoulders may hold a crew taller than them farther out)
+      const centre = Math.hypot(target.x - this.position.x, target.z - this.position.z);
+      const edge = centre - (mech.footRadius ?? mech.radius ?? 0);
+      const direct = centre <= getStats().rules.crew.boardRange;
+      // the edge / contact conditions need a clear line to the mech (no boarding through a wall or gate)
+      if (direct || ((edge <= getStats().rules.crew.boardRange + CREW.board.edgeBuffer
+        || centre <= contactDistance(this, mech) + MECH_COLLISION_H2.boardContactSlack) && this.#clearTo(mech))) {
         play('crewBoard', { position: mech.position });
         mech.boardCrew(this);
         return false;
@@ -415,7 +433,7 @@ export class Crew extends THREE.Group {
       const bay = this.order.bay;
       target = approachCrewBay(this, this.order); // [N2] null = went in / bay full or gone (order ended)
       if (!target) return false;
-      ignore = [bay]; // the path may end at the building itself
+      MOVE_IGNORE[0] = bay; ignore = MOVE_IGNORE; // the path may end at the building itself
     } else {
       target = this.order.target;
     }
@@ -425,18 +443,6 @@ export class Crew extends THREE.Group {
     const dist = path.remaining;
     const arrive = this.order.home ? BEHAVIOUR.homeArriveDistance : ARRIVE_DISTANCE;
     if (dist <= arrive && this.order.type === 'move') { this.order = null; return false; }
-    // The walk to a mech ended at the nearest free spot (mech hemmed in by a building / wall): board when the
-    // mech's edge is in reach (CREW.board)
-    if (this.order.type === 'board' && path.final && dist <= CREW.board.pathEndReach) {
-      const mech = this.order.mech;
-      // [W7] the legs' circle: the crew walks up to the legs (it passes under the shoulders / arms / wings)
-      const edge = Math.hypot(target.x - this.position.x, target.z - this.position.z) - (mech.footRadius ?? mech.radius ?? 0);
-      if (edge <= getStats().rules.crew.boardRange + CREW.board.edgeBuffer) {
-        play('crewBoard', { position: mech.position });
-        mech.boardCrew(this);
-        return false;
-      }
-    }
     const dx = path.point.x - this.position.x;
     const dz = path.point.z - this.position.z;
     const legDist = Math.hypot(dx, dz);

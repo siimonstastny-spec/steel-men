@@ -5,7 +5,7 @@
 //     (instanced) like every finished building. Details are few, wide and tolerant of the stretch; the ends sit inside the posts
 //   • by style.silhouette (SEGMENT_SHAPES / SEGMENT_BUILDERS): rounded = sloped barrier with a round cap and hazard stripes,
 //     angular = heavy sloped wall with buttresses, rust plates, crenellations and spikes, round = smooth elliptical tube with a
-//     plasma conduit and neon veins, faceted = NO physical wall: thin ground and top rails and four laser lines between the
+//     plasma conduit and team-coloured rails, faceted = NO physical wall: thin ground and top rails and four laser lines between the
 //     posts (glowing paint, visible in every LOD) + a translucent energy sheet and line halos (glow layers, near LOD only)
 //   • no emblem (it would be stretched with the segment): the faction mark stands on the posts
 // Draw calls: 1 (3 for the barrier style, 2 for the tube style – glow layers). Triangles ≈ 130–260 per segment.
@@ -43,7 +43,11 @@ export const SEGMENT_SHAPES = {
   },
   round: {
     A: 2.2, B: 4.5, seg: 16,                                  // elliptical tube: half thickness A, half height B (sits on the ground)
-    veinTube: 0.1, veinPhis: [40, 140], teamPhis: [90, 68, 112], teamTube: 1.0, teamOut: 0.9, outScale: 1.01,   // degrees from the top; lines sit this much outside (the team rail sits at teamOut)
+    // degrees from the top; the rails sit at teamOut (inside the surface scale, they bulge out by their tube radius). The upper half is
+    // NOT left light (style hull colours are light for this style): a team-shade rail at upperTeamPhis and a truly dark rail
+    // (S.dark – hullDark is the style's secondary and comes out light) at darkPhis; the neon accent stays on the ridge conduit
+    teamPhis: [90, 68, 112], teamTube: 1.0, teamOut: 0.9, outScale: 1.01,
+    upperTeamPhis: [48], upperTeamTube: 1.0, darkPhis: [26], darkTube: 0.8,
     conduit: { r: 0.35, seg: 8, glowR: 0.8 },
   },
   faceted: {
@@ -97,13 +101,14 @@ function buildRoundSegment(b, glows, kit, P) {
   const S = kit.S;
   const vertical = P.B / P.A;                                   // sx scales the tube's height (its local x is world y after the turn)
   b.cylinder(P.A, P.A, WALL_SPAN, P.seg, S.hull, { rz: HALF_PI, sx: vertical, y: P.B }, true);
-  // lines along the tube surface (angle phi from the top): neon veins, a team stripe on the equator
+  // lines along the tube surface (angle phi from the top): team band on the equator, team shade and dark rails above it
   const along = (phi, tube, s, out = P.outScale, t = {}) => {
     const a = phi * DEG;
     b.cylinder(tube, tube, WALL_SPAN, 5, s, { rz: HALF_PI, y: P.B + P.B * Math.cos(a) * out, z: P.A * Math.sin(a) * out, ...t }, true);
   };
-  if (kit.rich) for (const phi of P.veinPhis) for (const e of both) along(e * phi, P.veinTube, S.neon);
   for (const phi of P.teamPhis) for (const e of both) along(e * phi, P.teamTube, S.teamPaint, P.teamOut, TEAM_DETAIL);   // broad team band (three overlapping rails) around the equator
+  for (const phi of P.upperTeamPhis) for (const e of both) along(e * phi, P.upperTeamTube, S.teamShade, P.teamOut, TEAM_DETAIL);   // darker team shade on the upper flank
+  for (const phi of P.darkPhis) for (const e of both) along(e * phi, P.darkTube, S.dark, P.teamOut);                              // dark neutral rail beside the ridge conduit
   const c = P.conduit;                                           // plasma conduit on the ridge
   b.cylinder(c.r, c.r, WALL_SPAN, c.seg, S.plasma, { rz: HALF_PI, y: P.B * 2 }, true);
   glows.get('pulse').cylinder(c.glowR, c.glowR, WALL_SPAN, c.seg, { rz: HALF_PI, y: P.B * 2 });

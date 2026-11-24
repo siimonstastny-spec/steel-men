@@ -90,6 +90,7 @@ export class MatchStats {
     this.seen.delete(u);
     this.finished.add(u);
     if (!rec.counted || !this.teams[rec.team]) return;
+    if (u.upgraded) return; // [H1] a wall segment rebuilt into a gate (upgradeGate): neither lost nor killed
     this.teams[rec.team].lost[rec.kind]++;
     // The attacker is still on the unit object even when it vanished between two polls
     const last = u.lastAttacker;

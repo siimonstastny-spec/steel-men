@@ -15,6 +15,7 @@ import { gameSpeed, speedLabel } from '../game/GameSpeed.js';
 import { getStats } from '../data/Stats.js';
 import { t } from '../i18n/i18n.js';
 import { confirmDialog, isConfirmDialogOpen } from './ConfirmDialog.js';
+import { isSaveLoadOpen } from './SaveLoadView.js'; // [J2]
 import { localTeam, isLocal } from '../core/LocalPlayer.js';
 import { commandBus } from '../game/commands/CommandBus.js';
 import { allianceOf, areAllies, teamsOfAlliance } from '../game/Alliances.js'; // [N5a] alliances API
@@ -43,8 +44,10 @@ export class MatchUi {
    * @param {(() => void)|null} [deps.restart]      [W5c] single player: same settings, new seed (null = no Restart button; never shown in multiplayer)
    * @param {() => object|null} [deps.net]          the Lockstep of a multiplayer match, else null ([R5])
    * @param {() => string} [deps.nickname]          the local player's name, shown to everybody with a pause
+   * @param {object|null} [deps.saveLoad]           [J2] SaveLoadView: Save game / Load game buttons (single player only)
    */
-  constructor({ teamName, openSettings, quit, restart = null, canRestart = () => true, net = () => null, nickname = () => '' }) {
+  constructor({ teamName, openSettings, quit, restart = null, canRestart = () => true, net = () => null, nickname = () => '', saveLoad = null }) {
+    this.saveLoad = saveLoad; // [J2] SaveLoadView (src/ui/SaveLoadView.js); null = no Save / Load buttons
     this.restart = restart;
     this.canRestart = canRestart; // [W5c] false when the match did not start from the menu (no saved settings to restart with)
     this.teamName = teamName;
@@ -204,6 +207,7 @@ export class MatchUi {
   #onKey(e) {
     if (!this.match || isConfirmDialogOpen()) return;
     if (document.getElementById('menu')?.hidden === false) return; // start menu / settings open
+    if (isSaveLoadOpen()) return; // [J2] save / load window or dialog on top of the menu
     if (e.code === 'Escape' && !this.menuEl.hidden) { this.closeMenu(); e.preventDefault(); e.stopPropagation(); }
     else if (e.code === 'Escape' && !this.endEl.hidden) { this.#observe(); e.preventDefault(); e.stopPropagation(); }
   }
@@ -235,6 +239,8 @@ export class MatchUi {
       <h2>${t('match.menu.title')}</h2>
       ${pauseRow}
       ${speedRow}
+      ${this.saveLoad && !net ? `${over ? '' : `<button data-act="save">${t('match.menu.save')}</button>`}
+      <button data-act="load">${t('match.menu.load')}</button>` : ''}
       <button data-act="settings">${t('match.menu.settings')}</button>
       ${over ? `<button data-act="results">${t('match.menu.results')}</button>`
         : out ? `<button data-act="leave" class="danger">${t('match.menu.leave')}</button>`
@@ -266,6 +272,8 @@ export class MatchUi {
       this.update();
     }
     else if (act === 'unpause') { this.#net?.resume(); this.update(); }
+    else if (act === 'save') { if (this.saveLoad && !this.#net) await this.saveLoad.openSaveDialog(); } // [J2] the menu keeps the game paused
+    else if (act === 'load') { if (this.saveLoad && !this.#net) await this.saveLoad.openList({ inGame: true }); }
     else if (act === 'settings') {
       this.inSettings = true; // single player stays paused behind the settings screen
       this.closeMenu();

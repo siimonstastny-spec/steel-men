@@ -48,7 +48,8 @@ export class CombatVehicle extends Vehicle {
     this.lastAttacker = null;
     this.xp = 0;
     this.rank = null;        // Stats.rankFor(xp)
-    this.turret = null;      // pivot group of the turret model (turns around the vehicle's up axis)
+    this.turret = null;      // pivot group of the turret model / turret bone (display only, follows turretYaw)
+    this.hasTurret = false;  // [A1] simulation: a weapon has mount 'turret' (data) – never depends on the model shown
     this.turretYaw = 0;      // rad, relative to the hull
     this.launch = null;      // launch socket of the turret (muzzle)
     this.mixer = null;
@@ -73,7 +74,7 @@ export class CombatVehicle extends Vehicle {
   get canAttack() { return this.weapons.length > 0; }
   get combatProfile() { return COMBAT_PROFILE; }
   /** Hull weapons need the vehicle to face the target; turret weapons do not */
-  get turnsHullToTarget() { return this.weapons.some((w) => w.mount !== 'turret' || !this.turret); }
+  get turnsHullToTarget() { return this.weapons.some((w) => w.mount !== 'turret'); }
   get evasion() { return this.rank?.bonuses?.evasion ?? 0; }
 
   // ---------- experience / research ----------
@@ -107,8 +108,9 @@ export class CombatVehicle extends Vehicle {
   // Runtime weapons from the current stats; running cooldowns are kept
   #buildWeapons() {
     const old = this.weapons;
+    this.hasTurret = this.stats.weapons.some((s) => s.mount === 'turret');
     this.weapons = this.stats.weapons.map((stats, i) => {
-      const mount = stats.mount === 'turret' && this.turret ? 'turret' : 'hull';
+      const mount = stats.mount === 'turret' ? 'turret' : 'hull';
       const w = { stats, def: stats, mount, cooldown: old[i]?.cooldown ?? 0, sockets: this.#procSockets(stats), part: null };
       w.part = { muzzlePoint: (k = 0) => this.#muzzle(w, k) };
       return w;
@@ -125,19 +127,31 @@ export class CombatVehicle extends Vehicle {
     return out.length ? out : null;
   }
 
-  // Where shots leave: the weapon's model socket (procedural), the turret's launch socket, or the front of the hull at aim height
+  /**
+   * [A1] Where shots leave (simulation: line of sight, miss interception, pellets, projectile flight time) – from the data
+   * only, never from model sockets, so procedural / GLB models fire from the same point: simBody.muzzle
+   * { height, forward, pivotZ } = hull-local turret pivot (0, height, pivotZ) + `forward` along the barrel, which turns
+   * with turretYaw for turret weapons; defaults aimHeight / radius / 0 (the front of the hull at aim height).
+   * Computed from position + rotation.y (no matrixWorld, which is refreshed only at render time). The procedural model
+   * still flashes / recoils / drops a bomb at its own socket (display only).
+   */
   #muzzle(w, k = 0) {
-    if (w.sockets) {
+    const m = this.procModel;
+    if (w.sockets && m) {
       const i = k % w.sockets.length;
-      const m = this.procModel;
-      if (m) { // flash + recoil / bomb bay from the very socket the shot leaves (visual only)
-        m.fire(w.sockets[i].name);
-        m.dropBomb?.(i);
-      }
-      return w.sockets[i].getWorldPosition(new THREE.Vector3());
+      m.fire(w.sockets[i].name);
+      m.dropBomb?.(i);
     }
-    if (w.mount === 'turret' && this.launch) return this.launch.getWorldPosition(new THREE.Vector3());
-    return this.localToWorld(new THREE.Vector3(0, this.aimHeight, this.radius));
+    const mz = this.simBody?.muzzle;
+    const height = mz?.height ?? this.aimHeight;
+    const forward = mz?.forward ?? this.radius;
+    const pivotZ = mz?.pivotZ ?? 0;
+    const yaw = w.mount === 'turret' ? this.turretYaw : 0;
+    const lx = Math.sin(yaw) * forward;
+    const lz = pivotZ + Math.cos(yaw) * forward;
+    const c = Math.cos(this.rotation.y);
+    const s = Math.sin(this.rotation.y);
+    return new THREE.Vector3(this.position.x + lx * c + lz * s, this.position.y + height, this.position.z - lx * s + lz * c);
   }
 
   // ---------- orders ----------
@@ -248,21 +262,23 @@ export class CombatVehicle extends Vehicle {
     pivot.attach(obj);
     this.turret = pivot;
     this.launch = obj.getObjectByName(cfg.launchSocket) ?? null;
-    // Body height now includes the turret (3D splash / pellet hits, aim point)
-    const full = new THREE.Box3().setFromObject(this.model);
-    this.bodyHeight = full.max.y - this.position.y;
-    this.aimHeight = this.bodyHeight * VEHICLE.aimHeightFactor;
+    // [A1] Fallback without stats.simBody only (not lockstep safe): body height then includes the turret model
+    if (!this.simBody) {
+      const full = new THREE.Box3().setFromObject(this.model);
+      this.bodyHeight = full.max.y - this.position.y;
+      this.aimHeight = this.bodyHeight * VEHICLE.aimHeightFactor;
+    }
   }
 
   // The turret follows the attack target, else a target of opportunity in range, else turns back forward
   #aimTurret(dt) {
-    if (!this.turret) return;
+    if (!this.hasTurret) return;
     const target = this.#turretTarget(dt);
     const want = target ? angleTo(this, target.position) : 0;
     const diff = wrapAngle(want - this.turretYaw);
     const max = (this.stats.turret?.turnSpeed ?? this.stats.procTurretTurnSpeed ?? PROC_VEHICLE.turretTurnSpeed) * DEG * dt;
     this.turretYaw = wrapAngle(this.turretYaw + THREE.MathUtils.clamp(diff, -max, max));
-    this.turret.rotation.y = this.turretYaw;
+    if (this.turret) this.turret.rotation.y = this.turretYaw; // display (GLB pivot / procedural bone; none = static model)
     if (this.procModel) { this.procModel.turretYaw = this.turretYaw; this.#pitchBarrel(target); }
   }
 

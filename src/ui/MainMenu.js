@@ -58,8 +58,9 @@ export class MainMenu {
    * @param {(startInfo: {settings: object, seats: object[], seed: number, localTeam: number, startAtMs: number},
    *          net: {transport: object, lobby: object}) => void} [opts.onMultiplayerStart]  lobby started a game
    */
-  constructor(el, { races, teams, onStart, multiplayer = null, onMultiplayerStart = null, loading = null }) {
+  constructor(el, { races, teams, onStart, multiplayer = null, onMultiplayerStart = null, loading = null, saveLoad = null }) {
     this.el = el;
+    this.saveLoad = saveLoad; // [J2] SaveLoadView (src/ui/SaveLoadView.js): "Load game" opens its list; null = item disabled
     this.loading = loading; // [W6] LoadingScreen (src/ui/LoadingScreen.js): shown from Start until onStart / onMultiplayerStart settle
     this.races = races;
     this.teams = teams;
@@ -397,6 +398,7 @@ export class MainMenu {
 
         <nav class="menu-home" data-screen="home">
           <button class="menu-btn primary" data-action="new">${t('menu.newGame')}</button>
+          <button class="menu-btn" data-action="load"${this.saveLoad ? '' : ' disabled'}>${t('menu.loadGame')}</button>
           <button class="menu-btn" data-action="multiplayer">${t('menu.multiplayer')}</button>
           <small class="menu-warn" data-role="mp-note" hidden></small>
           <button class="menu-btn" data-action="settings">${t('menu.settings')}</button>
@@ -511,6 +513,7 @@ export class MainMenu {
     const { action, team, color } = btn.dataset;
     if (btn.disabled) return;
     if (action === 'new') { this.#rerollNames(); this.show('setup'); }
+    else if (action === 'load') this.saveLoad?.openList({ inGame: false }); // [J2]
     else if (action === 'multiplayer') this.show('lobby');
     else if (action === 'settings') this.show('settings');
     else if (action === 'home') this.show('home');

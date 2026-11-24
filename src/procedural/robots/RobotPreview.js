@@ -1,9 +1,12 @@
 // Steel Men – console preview of procedural robots (experiment). Spawns one robot (or a row of combinations / styles),
 // optionally the GLB Basic robot beside it for size, and animates them with a requestAnimationFrame loop of its own
 // (UI side, never the simulation – performance.now is fine here): walk in place, punches, turret bursts, hits.
+// Signature of this module: spawnRobotPreview(scene, race, color, pos, opts). The console helper wired in main.js,
+// steelMen.spawnRobotPreview(race, color, pos, opts), passes the scene itself – the examples below use that helper:
 //   p = await steelMen.spawnRobotPreview('W', '#3a5ccc', { x: 0, y: 0, z: 0 }, { legs: 'recon', torso: 'flak' });
 //   p = await steelMen.spawnRobotPreview('W', '#c8302c', pos, { combos: 'all', original: true });
 //   p.walk = false; p.attack('rightArm'); p.attack('torso'); p.powered = false; p.robots[0].hit('left'); p.stats(); p.dispose();
+//   p.addPart('rightArm', 'gattling') – single arm model (arm wreck, createProcRobotPart) after the row
 // Without the main.js wiring: const { spawnRobotPreview } = await import('./src/procedural/robots/RobotPreview.js');
 //   spawnRobotPreview(steelMen.scene, 'W', '#3a5ccc', pos, opts)  (the wired helper passes the scene itself)
 import * as THREE from 'three';
@@ -11,7 +14,7 @@ import { loadBuildingStyles } from '../BuildingStyle.js';
 import { loadModel } from '../../core/AssetLoader.js';
 import { applyTeamColor } from '../../core/TeamColor.js';
 import { basicLoadout, SOCKETS } from '../../config.js';
-import { ProcRobot, robotPartIds } from './RobotParts.js';
+import { ProcRobot, ProcRobotPart, robotPartIds } from './RobotParts.js';
 
 const TAU = Math.PI * 2;
 
@@ -25,10 +28,11 @@ export const ROBOT_PREVIEW = {
   // combos: 'all' = these combinations in a row (every part appears at least once)
   allCombos: [
     { legs: 'basic', torso: 'basic' },
-    { legs: 'basic', torso: 'flak' },
-    { legs: 'heavyLift', torso: 'basic' },
-    { legs: 'recon', torso: 'flak' },
+    { legs: 'basic', torso: 'flak', rightArm: 'gattling' },
+    { legs: 'heavyLift', torso: 'basic', leftArm: 'gattling' },
+    { legs: 'recon', torso: 'flak', leftArm: 'gattling', rightArm: 'gattling' },   // heaviest combination (triangle budget)
   ],
+  partGap: 10,             // addPart: spacing of single arm models after the row
   demo: {
     walkPeriod: 10,        // s – walk / stand cycle
     walkShare: 0.6,        // share of the period spent walking
@@ -98,10 +102,19 @@ export async function spawnRobotPreview(scene, race = 'W', color = ROBOT_PREVIEW
   const base = { legs, torso, leftArm: leftArm ?? arms, rightArm: rightArm ?? arms };
   const list = combos === 'all' ? ROBOT_PREVIEW.allCombos : Array.isArray(combos) ? combos : [{}];
   const handle = {
-    robots: [], originals: [], demo, walk, powered: true, time: 0, disposed: false,
+    robots: [], originals: [], singles: [], demo, walk, powered: true, time: 0, disposed: false,
     attack: (slot = 'rightArm') => handle.robots.map((r) => r.playAttack(slot, D.attackTime)),
     stats: () => handle.robots.map((r) => r.describe()),
     parts: () => robotPartIds(),
+    // single arm model (arm wreck test): standing after the row, static
+    addPart: (slot = 'rightArm', partId = 'gattling', race0 = races[0]) => {
+      const part = new ProcRobotPart({ race: race0, teamColor: color, slot, partId });
+      const x = pos.x + handle.robots.length * ROBOT_PREVIEW.gap + handle.singles.length * ROBOT_PREVIEW.partGap;
+      part.position.set(x, (pos.y ?? 0) - part.dims.minY, pos.z);   // lowest point on the ground
+      scene.add(part);
+      handle.singles.push(part);
+      return part;
+    },
     dispose: null,
   };
   try {
@@ -167,8 +180,10 @@ export async function spawnRobotPreview(scene, race = 'W', color = ROBOT_PREVIEW
     handle.disposed = true;
     cancelAnimationFrame(raf);
     for (const r of handle.robots) r.dispose();
+    for (const s of handle.singles) s.dispose();
     for (const o of handle.originals) disposeOriginal(o);
     handle.robots.length = 0;
+    handle.singles.length = 0;
     handle.originals.length = 0;
   };
   return handle;

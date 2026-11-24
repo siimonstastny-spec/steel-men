@@ -21,6 +21,7 @@ import { setPanelTextureSize } from './ProcKit.js';
 
 const MATRIX_FLOATS = 16;
 const INST_FLOATS = 4;
+const STATE_FLOATS = 3;   // aState = (paint scale, team-masked scale, emissive scale), see ProcKit.stateLook
 const GROWTH = 2;
 
 const _camPos = new THREE.Vector3();
@@ -54,6 +55,7 @@ class BatchGroup {
     for (const [name, attr] of Object.entries(this.source.attributes)) geometry.setAttribute(name, attr);
     if (this.source.index) geometry.setIndex(this.source.index);
     geometry.setAttribute('aInst', new THREE.InstancedBufferAttribute(new Float32Array(capacity * INST_FLOATS), INST_FLOATS).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('aState', new THREE.InstancedBufferAttribute(new Float32Array(capacity * STATE_FLOATS), STATE_FLOATS).setUsage(THREE.DynamicDrawUsage));
     const mesh = new THREE.InstancedMesh(geometry, this.material, capacity);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.name = `BuildingBatch:${this.key}`;
@@ -66,6 +68,7 @@ class BatchGroup {
     if (old) {
       mesh.instanceMatrix.array.set(old.instanceMatrix.array.subarray(0, this.items.length * MATRIX_FLOATS));
       geometry.attributes.aInst.array.set(old.geometry.attributes.aInst.array.subarray(0, this.items.length * INST_FLOATS));
+      geometry.attributes.aState.array.set(old.geometry.attributes.aState.array.subarray(0, this.items.length * STATE_FLOATS));
       this.batcher.scene.remove(old);
       old.dispose();
       this.#freeGeometry(old.geometry);
@@ -96,11 +99,14 @@ class BatchGroup {
       const inst = this.mesh.geometry.attributes.aInst.array;
       matrices.copyWithin(i * MATRIX_FLOATS, last * MATRIX_FLOATS, (last + 1) * MATRIX_FLOATS);
       inst.copyWithin(i * INST_FLOATS, last * INST_FLOATS, (last + 1) * INST_FLOATS);
+      const state = this.mesh.geometry.attributes.aState.array;
+      state.copyWithin(i * STATE_FLOATS, last * STATE_FLOATS, (last + 1) * STATE_FLOATS);
       const moved = this.items[last];
       this.items[i] = moved;
       moved.slot = i;
       this.mesh.instanceMatrix.needsUpdate = true;
       this.mesh.geometry.attributes.aInst.needsUpdate = true;
+      this.mesh.geometry.attributes.aState.needsUpdate = true;
     }
     this.items.pop();
     item.group = null;
@@ -119,6 +125,12 @@ class BatchGroup {
     attr.array[o + 2] = b.team.b * item.colorScale;
     attr.array[o + 3] = b.highlight;
     attr.needsUpdate = true;
+    const state = this.mesh.geometry.attributes.aState;
+    const so = item.slot * STATE_FLOATS;
+    state.array[so] = b.state[0];
+    state.array[so + 1] = b.state[1];
+    state.array[so + 2] = b.state[2];
+    state.needsUpdate = true;
   }
 
   setShadows(on) { this.mesh.castShadow = this.baseCast && on; }

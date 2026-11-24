@@ -11,9 +11,13 @@
 // sensors – ProcRobot.update, no clips, no allocations, no Math.random / performance.now (visual only).
 // Part shapes come from registered part builders (RobotLegs.js, RobotTorsos.js, RobotArms.js); primitives follow
 // style.silhouette (rounded | angular | round | faceted) and colours the style kit, never faction names.
+// Sculpted forms (lofts, panels, hubs – RobotSculpt.js on ProcShapes.js) carry the look; part builders get the ROBOT kit
+// (robotKit: style kit with robot paint – lighter dark palettes, toned-down gloss, neutral emblem plate).
+// createProcRobotPart builds one arm alone (arm wreck) from the same part builders.
 import * as THREE from 'three';
 import { smootherstep, place } from '../ProcKit.js';
 import { UnitBuilder, ProcUnit, createUnitCache, UNIT_KIT } from '../units/UnitKit.js';
+import { chamferBox } from '../ProcShapes.js';
 import { SOCKETS } from '../../config.js';
 
 const TAU = Math.PI * 2;
@@ -30,13 +34,38 @@ export const ROBOT_KIT = {
   // style.edges are building-sized: robot blocks use radius × edgeScale, at most maxEdgeSegments (triangle budget)
   edges: { scale: 1.6, maxShare: 0.3, minRadius: 0.06, minSide: 0.8, maxSegments: 1 },
   seg: 8,                  // radial segments of round primitives
-  sphereSeg: [8, 6],        // ellipsoid blocks (round silhouette)
-  plateSphereSeg: [8, 4],   // ellipsoid plates
+  sphereSeg: [6, 4],        // ellipsoid blocks (round silhouette; 36 triangles)
+  plateSphereSeg: [6, 4],   // ellipsoid plates
   jointSphereSeg: [6, 4],   // ball joints
   jointSides: 6,           // faceted / rounded hinge prism
   facet: { chamfer: 0.22, top: 0.88 },   // faceted blocks: vertical edge chamfer (× smaller side), top face scale
   neon: { t: 0.14, out: 0.04 },        // light line thickness, lift off the surface
   emblemOut: 0.03,
+  // Robot paint (every style, robotKit): dark palettes get a lightness floor per surface role (HSL in sRGB) so robots
+  // read against the ground and in shadow with a steady light → dark ladder (frame > hull > hullDark > dark); glossy
+  // metal (no environment map → near black) is toned down. plate = neutral emblem backing slab (never team).
+  paint: {
+    roles: {
+      hull: { light: 0.46, metal: 0.42, rough: 0.42 },
+      hullDark: { light: 0.3, metal: 0.38, rough: 0.5 },
+      frame: { light: 0.6, metal: 0.5, rough: 0.38 },
+      pipe: { light: 0.64, metal: 0.5, rough: 0.35 },
+      dark: { light: 0.12, metal: 0.25, rough: 0.7 },
+    },
+    plate: { color: '#c9ccd1', metal: 0.15, rough: 0.55 },
+    // full robot palette per silhouette (data key, not a faction): replaces the role colour / gloss outright.
+    // faceted: light cream metal body, mid grey secondary, dark only on joints and mechanics (big team surfaces carry it)
+    bySilhouette: {
+      faceted: {
+        hull: { color: '#d3cfc4', metal: 0.3, rough: 0.45 },
+        hullDark: { color: '#8f9197', metal: 0.35, rough: 0.5 },
+        frame: { color: '#4a4e57', metal: 0.45, rough: 0.42 },
+        pipe: { color: '#9ca0a8', metal: 0.5, rough: 0.38 },
+        dark: { color: '#18191d', metal: 0.25, rough: 0.7 },
+      },
+    },
+  },
+  budget: { triangles: 2500, drawCalls: 4, teamShare: 0.25 },   // per robot at LOD0 – buildRobot warns when broken
   anim: {
     blend: 5,              // 1/s – walk weight follows the speed
     minWalk: 0.05,         // walk weight under which the legs stop cycling
@@ -48,7 +77,8 @@ export const ROBOT_KIT = {
     rollFollow: 0.5,                   // chest roll share of the pelvis sway
     armSwing: 0.32,                    // rad, arms against the legs
     elbowSwing: 0.18,
-    power: { blend: 1.5, hip: 0.42, knee: 0.85, drop: 1.6, slump: 0.32, headDroop: 0.35, elbow: 0.25 },   // crewless pose
+    // crewless pose (the pelvis drop follows from hip / knee through the ground contact; `drop` is no longer used)
+    power: { blend: 1.5, hip: 0.42, knee: 0.85, drop: 1.6, slump: 0.32, headDroop: 0.35, elbow: 0.25 },
     hit: { time: 0.45, pitch: 0.14, roll: 0.12, freq: 2 },            // hit reaction (chest jolt)
     punch: {               // timeline shares of the attack + target angles (shoulder / elbow rx, − = forward)
       windup: 0.3, strike: 0.48, hold: 0.62,
@@ -57,6 +87,9 @@ export const ROBOT_KIT = {
     },
     turret: { yawRate: 2.4, pitchRate: 1.6, scanHz: 0.12, scanArc: 0.9, scanPitch: 0.55 },
     burst: { defaultShots: 4, share: 0.7 },   // a torso attack fires its burst in the first share of the attack time
+    // gun arms (attack 'gun'): forearm held forward (elbow), raised to aim during an attack; burst of `shots` spread over
+    // `share` of the attack time after the `raise` share; kick = elbow recoil jitter while firing (rad, Hz)
+    gun: { holdElbow: -1.45, holdShoulder: -0.08, aimShoulder: -0.3, aimElbow: -1.5, raise: 0.15, share: 0.75, kick: 0.035, kickHz: 11, defaultShots: 16, swing: 0.35 },
     visor: { idle: 0.75, depth: 0.25, hz: 0.6 },
   },
 };
@@ -108,6 +141,63 @@ function parseCombo(key) {
   return { legs, torso, leftArm, rightArm };
 }
 
+// ---------------------------------------------------------------- robot kit (style kit + robot paint)
+
+const robotKits = new Map();   // style key -> robot kit
+const _hsl = { h: 0, s: 0, l: 0 };
+
+/**
+ * Style kit with robot paint (ROBOT_KIT.paint): surface roles lifted to a lightness floor, metal / roughness clamped,
+ * plus S.plate (neutral emblem backing). Same key / style / glow colours as the style kit. Cached per style.
+ */
+export function robotKit(kit) {
+  if (kit.isRobotKit) return kit;
+  let rk = robotKits.get(kit.key);
+  if (rk) return rk;
+  const R = ROBOT_KIT.paint;
+  const S = { ...kit.S };
+  for (const [role, r] of Object.entries(R.roles)) {
+    const s = kit.S[role];
+    if (!s) continue;
+    const own = R.bySilhouette[kit.style.silhouette]?.[role];
+    if (own) {
+      S[role] = { ...s, color: new THREE.Color(own.color), metal: own.metal, rough: own.rough };
+      continue;
+    }
+    const color = s.color.clone();
+    color.getHSL(_hsl, THREE.SRGBColorSpace);
+    if (_hsl.l < r.light) color.setHSL(_hsl.h, _hsl.s, r.light, THREE.SRGBColorSpace);
+    S[role] = { ...s, color, metal: Math.min(s.metal, r.metal), rough: Math.max(s.rough, r.rough) };
+  }
+  S.plate = { color: new THREE.Color(R.plate.color), team: 0, metal: R.plate.metal, rough: R.plate.rough, glow: 0 };
+  rk = Object.freeze({ ...kit, S: Object.freeze(S), isRobotKit: true });
+  robotKits.set(kit.key, rk);
+  return rk;
+}
+
+// Area share of team-masked triangles in a paint geometry (indexed, aSurface.x = team mask) – build time only
+function teamShareOf(geo) {
+  const pos = geo.attributes.position;
+  const surf = geo.attributes.aSurface;
+  const idx = geo.index;
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  let total = 0;
+  let team = 0;
+  const n = idx ? idx.count : pos.count;
+  for (let i = 0; i < n; i += 3) {
+    const i0 = idx ? idx.getX(i) : i;
+    a.fromBufferAttribute(pos, i0);
+    b.fromBufferAttribute(pos, idx ? idx.getX(i + 1) : i + 1);
+    c.fromBufferAttribute(pos, idx ? idx.getX(i + 2) : i + 2);
+    const area = b.sub(a).cross(c.sub(a)).length() / 2;
+    total += area;
+    if (surf.getX(i0) > 0.5) team += area;
+  }
+  return total > 0 ? team / total : 0;
+}
+
 // ---------------------------------------------------------------- style primitives (construction time only)
 
 const SHAPE_BY_SILHOUETTE = {
@@ -151,7 +241,7 @@ export function block(b, kit, w, h, d, s, t = {}) {
   }
   if (kind === 'tapered') return b.taperedBox(w, w * ANGULAR_TAPER, h, d, s, { ...t, y: (t.y ?? 0) - h / 2 }, d * ANGULAR_TAPER);
   const r = edgeRadius(kit, w, h, d);
-  return r > 0 ? b.roundedBox(w, h, d, r, 1, s, t) : b.box(w, h, d, s, t);
+  return r > 0 ? b.add(chamferBox(w, h, d, r), s, t) : b.box(w, h, d, s, t);   // 60 triangles (rounded box: 108)
 }
 
 /** z of the front surface of a block of depth d at mid height (decals, plates) */
@@ -295,7 +385,7 @@ export function plate(b, kit, w, h, th, s, t = {}) {
   }
   if (kind === 'tapered') return b.taperedBox(w, w * ANGULAR_TAPER, h, th, s, { ...t, y: (t.y ?? 0) - h / 2 });
   const r = edgeRadius(kit, w, h, th);
-  return r > 0 ? b.roundedBox(w, h, th, r, 1, s, t) : b.box(w, h, th, s, t);
+  return r > 0 ? b.add(chamferBox(w, h, th, r), s, t) : b.box(w, h, th, s, t);
 }
 
 /**
@@ -331,11 +421,12 @@ export function markingStrip(b, kit, len, h, t = {}) {
  * torso on the 'torso' wrapper at the mount (bones 'chest' …, arm sockets), arms on 'armL' / 'armR' at the sockets.
  * Rig data for ProcRobot goes to meta.robot (plain data, bone names only).
  */
-function buildRobot(kit, variant) {
+function buildRobot(styleKitIn, variant) {
   const combo = parseCombo(variant);
-  const ub = new UnitBuilder(kit);
+  const kit = robotKit(styleKitIn);
+  const ub = new UnitBuilder(styleKitIn);
   const S = ROBOT_KIT.sockets;
-  const robot = { gltfNodes: [], legs: null, torso: null, arms: {}, extras: { spin: [], sway: [], pulse: [] } };
+  const robot = { gltfNodes: [], legs: null, torso: null, arms: {}, extras: { spin: [], sway: [], pulse: [] }, teamShare: 0 };
   ub.meta.robot = robot;
   const ctxBase = { robot, sockets: S };
 
@@ -357,7 +448,19 @@ function buildRobot(kit, variant) {
   }
   ub.socket(S.aim, 'chest', torso.aim);
   ub.socket(S.smoke, 'chest', torso.smoke ?? torso.aim);
-  return ub.build();
+  const data = ub.build();
+  robot.teamShare = teamShareOf(data.paint);
+  checkBudget(kit, variant, data, robot.teamShare);
+  return data;
+}
+
+// Console warning when a combination breaks the unit budget (ROBOT_KIT.budget) – build time, once per style + combo
+function checkBudget(kit, variant, data, teamShare) {
+  const B = ROBOT_KIT.budget;
+  const calls = 1 + (data.glow ? 1 : 0) + (data.emblem ? 1 : 0);
+  if (data.triangles > B.triangles || calls > B.drawCalls || teamShare < B.teamShare) {
+    console.warn(`[RobotKit] ${kit.key} ${variant}: ${data.triangles} triangles, ${calls} draw calls, team ${teamShare.toFixed(3)} (budget ${B.triangles} / ${B.drawCalls} / ≥ ${B.teamShare})`);
+  }
 }
 
 const ROBOT_CACHE = createUnitCache(buildRobot);
@@ -375,11 +478,14 @@ const clamp01 = (v) => (v <= 0 ? 0 : v >= 1 ? 1 : v);
 const wrap =(a) => (a > TAU || a < -TAU ? a % TAU : a);
 const lerp = (a, b, k) => a + (b - a) * k;
 const approach = (v, target, maxStep) => (v < target ? Math.min(target, v + maxStep) : Math.max(target, v - maxStep));
+// 0 → 1 (eased over `edge`) → hold → 1 → 0 (eased over the last `edge`) across u ∈ [0, 1]
+const plateauEase = (u, edge) => (u < edge ? smootherstep(u / edge) : u > 1 - edge ? smootherstep((1 - u) / edge) : 1);
 
 /**
  * Procedural robot model (THREE.Group, forward +Z, origin on the ground between the feet). Owner API, all visual:
  *   setGait(speed, turn)        units/s (signed) and yaw rate rad/s – drives the walk cycle (= ProcUnit.setMotion)
- *   playAttack(slot, duration)  'leftArm' | 'rightArm' → arm attack (punch), 'torso' → turret burst
+ *   playAttack(slot, duration, shots)  'leftArm' | 'rightArm' → arm attack (fist: punch, gun arm: raise + burst with
+ *                               spinning barrels), 'torso' → turret burst
  *   setAim(yaw, pitch) / clearAim()   torso turret aim relative to the chest (rad)
  *   setPowered(on)              crew on board: stand ready / crewless: power-down crouch, visor off
  *   hit(direction)              'front' | 'back' | 'left' | 'right' – chest jolt
@@ -429,9 +535,31 @@ export class ProcRobot extends ProcUnit {
       stride: L.stride, walkFull: L.walkFull, turnRadius: L.turnRadius, swing: L.swing, knee: L.knee,
       bob: L.bob, sway: L.sway, twist: L.twist, toe: L.toe ?? 0,
     };
-    this.chains = L.chains.map((c) => ({
-      phase: c.side > 0 ? 0 : Math.PI, thigh: bone(c.thigh), shin: bone(c.shin), foot: bone(c.foot),
-    }));
+    this.chains = L.chains.map((c) => {
+      const thigh = bone(c.thigh);
+      const shin = bone(c.shin);
+      const foot = bone(c.foot);
+      // hip / knee / ankle offsets for the ground contact of the pelvis (#body); fx = foot x in pelvis space (sway)
+      return {
+        phase: c.side > 0 ? 0 : Math.PI, thigh, shin, foot,
+        hy: thigh.position.y, ky: shin.position.y, kz: shin.position.z, ay: foot.position.y, az: foot.position.z,
+        fx: thigh.position.x + shin.position.x + foot.position.x,
+      };
+    });
+    // lowest sole points of the foot (foot space [z, y, half width]: heel, toe, claw / spur tips) as a flat
+    // [y, z, hw, …] list; hw = how far the edge reaches sideways (a rolled pelvis lowers the outer edge). Legs without
+    // the data fall back to the ankle itself
+    const soles = L.soles?.length ? L.soles : [[0, 0, 0]];
+    this.soles = soles.flatMap(([z, y, hw = 0]) => [y, z, hw]);
+    let soleMin = 0;
+    for (let i = 0; i < this.soles.length; i += 3) soleMin = Math.min(soleMin, this.soles[i]);
+    // lowest points carried by the shin (boot cuff, shin space [z, y, hw]) – they may dip below the sole when it tilts
+    this.shinPts = (L.shinPoints ?? []).flatMap(([z, y, hw = 0]) => [y, z, hw]);
+    let shinMin = 0;
+    for (let i = 0; i < this.shinPts.length; i += 3) shinMin = Math.min(shinMin, this.shinPts[i]);
+    const c0 = this.chains[0];
+    // lowest point below the pelvis at rest (= the ground): the sole, unless a shin point already reaches lower
+    this.restLowest = Math.min(c0.hy + c0.ky + c0.ay + soleMin, c0.hy + c0.ky + shinMin);
     const T = r.torso;
     this.chest = bone(T.chest);
     this.chestY = this.chest.position.y;
@@ -449,6 +577,9 @@ export class ProcRobot extends ProcUnit {
         slot, side: ROBOT_KIT.sides[slot].sign, shoulder: bone(a.shoulder), elbow: bone(a.elbow), fist: bone(a.fist),
         attack: a.attack, fire: a.fire, timer: 0, duration: 1, struck: false,
         legPhase: ROBOT_KIT.sides[slot].sign > 0 ? Math.PI : 0,   // swings with the opposite leg
+        // gun arms ('gun'): muzzle sockets, default burst, burst state (fired from update, also while clip driven)
+        gun: a.attack === 'gun', muzzles: a.muzzles ?? [], shots: a.shots ?? A.gun.defaultShots,
+        burstLeft: 0, burstTimer: 0, burstInterval: 0, burstIndex: 0,
       });
     }
     // pick proxy per slot: the coarsest far LOD of the slot's far group, invisible, child of the slot wrapper bone –
@@ -497,6 +628,13 @@ export class ProcRobot extends ProcUnit {
       const a = this.arms[i];
       if (a.slot !== slot) continue;
       a.timer = duration; a.duration = duration; a.struck = false;
+      if (a.gun && a.muzzles.length) {
+        const G = A.gun;
+        const n = shots > 0 ? shots : a.shots;
+        a.burstLeft = n;
+        a.burstInterval = (duration * G.share) / n;
+        a.burstTimer = duration * G.raise;   // first shot once the gun is up
+      }
       return true;
     }
     return false;
@@ -545,7 +683,10 @@ export class ProcRobot extends ProcUnit {
 
   /** Rig summary for the console */
   describe() {
-    return { race: this.race, combo: { ...this.combo }, ...this.stats(), dims: this.dims, sockets: this.socketNames };
+    return {
+      race: this.race, combo: { ...this.combo }, ...this.stats(), teamShare: this.shared?.meta.robot.teamShare ?? 0,
+      dims: this.dims, sockets: this.socketNames,
+    };
   }
 
   // ---------- per frame (ProcUnit.tick → generic drivers → update) ----------
@@ -570,6 +711,8 @@ export class ProcRobot extends ProcUnit {
 
     // turret: aim (or idle scan), burst
     if (this.turret) this.#turret(dt, t, pw);
+    // gun arm bursts (muzzle flash + barrel spin via the ProcUnit fire map), also while GLB clips drive the body
+    for (let i = 0; i < this.arms.length; i++) if (this.arms[i].burstLeft > 0) this.#gunBurst(this.arms[i], dt);
 
     // sensors / antennas
     const spin = this.kit.style.anim.spin ?? 1;
@@ -593,7 +736,15 @@ export class ProcRobot extends ProcUnit {
     const G = this.legRig;
     const P = A.power;
     const dir = this.speedSmooth < 0 ? -1 : 1;
-    // legs: hip swing (− = forward), knee lift while the foot travels forward, foot kept level
+    // legs: hip swing (− = forward), knee lift while the foot travels forward, foot kept level (toe up while lifted)
+    const s = Math.sin(phase);
+    const rz = G.sway * w * s;
+    const sinZ = Math.sin(rz);
+    const cosZ = Math.cos(rz);
+    const absZ = Math.abs(sinZ);
+    const sole = this.soles;
+    const shinPts = this.shinPts;
+    let lowest = 0;   // lowest sole point below the pelvis (most negative y); rotations about X: y' = y cos − z sin
     for (let i = 0; i < this.chains.length; i++) {
       const c = this.chains[i];
       const ph = phase + c.phase;
@@ -603,11 +754,30 @@ export class ProcRobot extends ProcUnit {
       const knee = G.knee * lift * w + P.knee * pw;
       c.thigh.rotation.x = hip;
       c.shin.rotation.x = knee;
-      c.foot.rotation.x = -(hip + knee) + G.toe * lift * w;
+      const footRot = -(hip + knee) - G.toe * lift * w;
+      c.foot.rotation.x = footRot;
+      const kneeY = c.hy + c.ky * Math.cos(hip) - c.kz * Math.sin(hip);
+      const cosS = Math.cos(hip + knee);   // shin pitch in pelvis space
+      const sinS = Math.sin(hip + knee);
+      const ankleY = kneeY + c.ay * cosS - c.az * sinS;
+      // pelvis roll (rotation about Z): y' = x sin + y cos, the outer bottom edge (x = fx ± hw) is the lower one
+      for (let k = 0; k < shinPts.length; k += 3) {
+        const y = c.fx * sinZ - shinPts[k + 2] * absZ + (kneeY + shinPts[k] * cosS - shinPts[k + 1] * sinS) * cosZ;
+        if (y < lowest) lowest = y;
+      }
+      const T = hip + knee + footRot;   // foot pitch in pelvis space
+      const cosT = Math.cos(T);
+      const sinT = Math.sin(T);
+      for (let k = 0; k < sole.length; k += 3) {
+        const y = c.fx * sinZ - sole[k + 2] * absZ + (ankleY + sole[k] * cosT - sole[k + 1] * sinT) * cosZ;
+        if (y < lowest) lowest = y;
+      }
     }
-    const s = Math.sin(phase);
-    this.pelvis.position.y = this.pelvisY - G.bob * w * Math.abs(s) - P.drop * pw;
-    this.pelvis.rotation.z = G.sway * w * s;
+    // ground contact = the LAST height correction of the pelvis: it sinks / rises just enough to keep the lowest point
+    // (sole edges, claws, boot cuff) on the ground. The walk bob and the crewless crouch come out of the leg angles
+    // (rig.bob is no longer applied – an extra dip would push the feet into the ground)
+    this.pelvis.position.y = this.pelvisY + (this.restLowest - lowest);
+    this.pelvis.rotation.z = rz;
     this.pelvis.rotation.y = G.twist * w * s;
 
     // torso: counter twist, lean, breathing, slump when crewless, hit jolt
@@ -636,7 +806,36 @@ export class ProcRobot extends ProcUnit {
     for (let i = 0; i < this.arms.length; i++) this.#arm(this.arms[i], dt, phase, w, pw);
   }
 
+  #gunBurst(a, dt) {
+    a.burstTimer -= dt;
+    if (a.burstTimer > 0) return;
+    this.fire(a.muzzles[a.burstIndex % a.muzzles.length]);
+    a.burstIndex = (a.burstIndex + 1) % a.muzzles.length;
+    a.burstLeft--;
+    a.burstTimer += a.burstInterval;
+  }
+
+  // Gun arm: forearm held forward (swinging a little with the walk), raised to aim during an attack, recoil jitter
+  #gunArm(a, dt, phase, w, pw) {
+    const G = A.gun;
+    const swing = Math.sin(phase + a.legPhase);
+    let shoulder = G.holdShoulder - A.armSwing * G.swing * swing * w;
+    let elbow = lerp(G.holdElbow, -A.power.elbow, pw);
+    if (a.timer > 0) {
+      a.timer = Math.max(0, a.timer - dt);
+      const u = 1 - a.timer / a.duration;
+      const k = plateauEase(u, G.raise);
+      shoulder = lerp(shoulder, G.aimShoulder, k);
+      elbow = lerp(elbow, G.aimElbow, k);
+      if (a.burstLeft > 0) elbow += G.kick * Math.sin(TAU * G.kickHz * this.time);
+    }
+    a.shoulder.rotation.x = shoulder;
+    a.elbow.rotation.x = elbow;
+    a.fist.rotation.z = 0;
+  }
+
   #arm(a, dt, phase, w, pw) {
+    if (a.gun) { this.#gunArm(a, dt, phase, w, pw); return; }
     const K = A.punch;
     const swing = Math.sin(phase + a.legPhase);
     let shoulder = -A.armSwing * swing * w;
@@ -694,4 +893,60 @@ export class ProcRobot extends ProcUnit {
 /** Creates a procedural robot (needs loadBuildingStyles() done and the part modules imported – RobotParts.js) */
 export function createProcRobot(race, teamColor, parts = {}) {
   return new ProcRobot({ race, teamColor, ...parts });
+}
+
+// ---------------------------------------------------------------- single part (arm wreck)
+
+/**
+ * Shared data of ONE arm built alone (variant "slot|partId"): the same registered arm builder as in a robot, wrapper
+ * bone (armL / armR) at the model origin = the arm socket, the arm hanging down along −Y, facing +Z. The wrapper is not
+ * a far group of its own, so the root far group holds the whole arm (pick proxy + far LOD).
+ */
+function buildRobotPart(styleKitIn, variant) {
+  const [slot, id] = variant.split('|');
+  const def = PARTS.arm.get(id);
+  const side = ROBOT_KIT.sides[slot];
+  if (!def || !side) throw new Error(`[RobotKit] no arm part "${id}" for slot "${slot}"`);
+  const kit = robotKit(styleKitIn);
+  const ub = new UnitBuilder(styleKitIn);
+  const robot = { gltfNodes: [], legs: null, torso: null, arms: {}, extras: { spin: [], sway: [], pulse: [] }, teamShare: 0 };
+  ub.meta.robot = robot;
+  const wrapper = ROBOT_KIT.slotBones[slot];
+  ub.bone(wrapper, 'root');
+  robot.arms[slot] = def.build(ub, kit, { robot, sockets: ROBOT_KIT.sockets, bone: wrapper, side: side.sign, sfx: side.suffix, slot }).rig;
+  const data = ub.build();
+  robot.teamShare = teamShareOf(data.paint);
+  return data;
+}
+
+const PART_CACHE = createUnitCache(buildRobotPart);
+
+/**
+ * One robot arm as its own model (THREE.Group, ProcUnit): wreck of a lost arm (ArmWreck) – same geometry builders,
+ * cached per (style, slot, part), ref-counted; dispose() releases it. Static pose (rest), sockets of the part
+ * (e.g. socket_Launch_R1, socket_SFX_1_L), team colour / highlight / batching like any ProcUnit.
+ */
+export class ProcRobotPart extends ProcUnit {
+  /** @param {object} o { race, teamColor, slot: 'leftArm' | 'rightArm', partId } */
+  constructor({ race, teamColor = ROBOT_KIT.defaultTeamColor, slot = 'rightArm', partId = ROBOT_KIT.defaults.rightArm } = {}) {
+    const side = ROBOT_KIT.sides[slot] ? slot : 'rightArm';
+    const id = PARTS.arm.has(partId) ? partId : ROBOT_KIT.defaults[side];
+    if (id !== partId) console.warn(`[RobotKit] no arm part "${partId}", using "${id}"`);
+    super({ race, teamColor, cache: PART_CACHE, variant: `${side}|${id}`, type: 'procRobotPart', name: 'ProcRobotPart' });
+    this.isProcRobotPart = true;
+    this.slot = side;
+    this.partId = id;
+  }
+
+  /** Wrapper bone of the arm (its root, at the model origin) */
+  getSlotBone() { return this.getBone(ROBOT_KIT.slotBones[this.slot]); }
+
+  describe() {
+    return { race: this.race, slot: this.slot, partId: this.partId, ...this.stats(), teamShare: this.shared?.meta.robot.teamShare ?? 0, dims: this.dims };
+  }
+}
+
+/** Creates one arm model (arm wreck): createProcRobotPart('W', '#3a5ccc', 'rightArm', 'gattling') */
+export function createProcRobotPart(race, teamColor, slot, partId) {
+  return new ProcRobotPart({ race, teamColor, slot, partId });
 }

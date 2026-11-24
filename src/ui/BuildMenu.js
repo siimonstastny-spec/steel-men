@@ -213,7 +213,8 @@ export class BuildMenu {
       return summary;
     }
     if (s.stats.supplyProvided) summary.push({ label: t('hud.population'), value: `+${s.stats.supplyProvided}` });
-    if (s.stats.income) summary.push({ label: t('structure.incomeLabel'), value: incomeText(s.stats.income) });
+    const income = incomeOf(s.stats);
+    if (income) summary.push({ label: t('structure.incomeLabel'), value: incomeText(income) });
     if (s.stats.storage) summary.push({ label: t('structure.storageLabel'), value: storageText(s.stats.storage) });
     const producer = this.producerId(s);
     if (this.#productionOptions(s).length) {
@@ -238,6 +239,7 @@ export class BuildMenu {
     if (s.hq) return 'hq';
     for (const kind of ['crew', 'vehicle', 'aircraft', 'part', 'mech']) if (produces.includes(kind)) return kind;
     if (produces.includes('research')) return 'research';
+    if (s.deepExtraction) return 'power'; // [H3] economy row (power / storage), not research, despite requiresTier
     if (s.requiresTier) return 'advancedResearch';
     if (s.income) return 'power';
     if (s.storage) return 'storage';
@@ -276,7 +278,7 @@ export class BuildMenu {
       const afford = this.economy?.canAfford(localTeam(), s.cost) ?? true;
       const extra = [
         s.supplyProvided ? t('structure.supply', { n: s.supplyProvided }) : '',
-        s.income ? t('structure.income', { list: incomeText(s.income) }) : '',
+        incomeOf(s) ? t('structure.income', { list: incomeText(incomeOf(s)) }) : '',
         s.storage ? t('structure.storage', { list: storageText(s.storage) }) : '',
         wallTip(s, this.race),
         req, afford ? '' : this.#missingText(s.cost),
@@ -408,6 +410,16 @@ export class BuildMenu {
       onClick: (e) => (e?.shift ? this.submitBatch({ type: 'queueUnit', ...payload }) : this.submit({ type: 'queueUnit', ...payload })),
     };
   }
+}
+
+/**
+ * [H3] Income of a building per second: stats.income plus the ore of its deepExtraction; null when it has none.
+ * Info panels and the build tooltip show incomeText(incomeOf(stats)).
+ */
+export function incomeOf(stats) {
+  const rate = stats?.deepExtraction?.ratePerSecond;
+  if (!rate) return stats?.income ?? null;
+  return { ...(stats.income ?? {}), ore: (stats.income?.ore ?? 0) + rate };
 }
 
 /** '2 energy/s' style text of an income object */

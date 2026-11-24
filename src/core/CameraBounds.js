@@ -14,8 +14,11 @@ export function setMapSizeProvider(fn) { sizeProvider = fn; }
 export function clampToMap(camera, controls) {
   const size = sizeProvider();
   if (!(size > 0)) return false;
-  const half = size / 2 + CAMERA_BOUNDS.overshoot;
   const t = controls.target;
+  // The farther the camera is (zoomed out), the more ground it sees around the look-at point: keep the point further
+  // inside so the view does not reach into the black area (never below -size/2, i.e. the centre stays reachable)
+  const distance = camera.position.distanceTo(t);
+  const half = Math.max(0, size / 2 + CAMERA_BOUNDS.overshoot - distance * CAMERA_BOUNDS.insetPerDistance);
   const cx = Math.max(-half, Math.min(half, t.x));
   const cz = Math.max(-half, Math.min(half, t.z));
   const dx = cx - t.x;

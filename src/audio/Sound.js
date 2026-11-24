@@ -9,6 +9,10 @@ const missing = new Set();   // files that failed to load once – not retried
 const cache = new Map();     // file -> HTMLAudioElement template
 let listener = null;         // { x, y, z } – where the player "hears" from (camera target)
 let music = null;
+let muted = false;           // [J1] restoring a saved game: game event sounds are skipped
+
+/** [J1] Mutes / unmutes game event sounds (play); music is not touched */
+export function setSoundMuted(on) { muted = Boolean(on); }
 
 /** Sets the point positional sounds are measured from (call each frame or on camera moves; optional) */
 export function setListenerPosition(p) { listener = p; }
@@ -39,6 +43,7 @@ function template(file) {
 
 /** Plays a game event sound. @param {string} eventName key of AUDIO.events @param {{position?: {x:number,y?:number,z:number}}} [opts] */
 export function play(eventName, { position } = {}) {
+  if (muted) return;
   const file = AUDIO.events[eventName];
   if (!file) return;
   const volume = categoryVolume(AUDIO.categories[eventName] ?? 'effects') * distanceGain(position);
