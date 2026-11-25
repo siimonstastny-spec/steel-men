@@ -258,7 +258,7 @@ export function createArmWreckView(part, fromMech, scene) {
   let model = null;
   const procId = procPartId(part.set, 'arm', part.stats);
   if (owner?.skin && owner.mech === fromMech && procRobotsOn()) { // [W-skin] the arm falls as the skin part it was drawn as
-    model = createSkinPartModel(owner.skin.race, part, TEAMS[part.paintTeam ?? fromMech.team]?.color);
+    model = createSkinPartModel(owner.skin.race, part, TEAMS[part.paintTeam ?? fromMech.team]?.color, owner.skin.lowered);
   } else if (owner && owner.mech === fromMech && make && procId && procRobotsOn()) {
     try {
       // built for the arm's own side (part.key); a mirrored GLB arm mirrors the model with it

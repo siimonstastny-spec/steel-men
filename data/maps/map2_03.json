@@ -144,7 +144,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 66, "row": 66 },
-  "starts": [[66, 22], [66, 110]],
+  "starts": [[65.5, 21.5], [65.5, 109.5]],
   "sides": [],
   "markers": [
     { "key": "h", "index": 1, "id": "h1", "type": "structure", "substrate": "B", "rect": [32, 24, 43, 31], "col": 38, "row": 28, "cells": 96, "label": "dome – hangárová kupole", "kind": "dome" },

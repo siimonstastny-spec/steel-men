@@ -236,7 +236,8 @@
       "modelRace": "X",
       "exclusive": {
         "partSets": ["Laser", "SniperLaser", "LaserSword", "PlasmaCannon", "ProtoBlast",
-                     "LaserDisc", "PhotonLauncher", "LaserShieldLegs"],
+                     "LaserDisc", "PhotonLauncher", "LaserShieldLegs",
+                     "LaserRepeater", "LaserRipper", "LaserShield"],
         "research": ["plasmaWeapons",
                      "focusedOptics", "lidarMapping", "prismArmor", "orbitalBombProgram"],
         "vehicles": ["lightLaserHover", "mediumLaserHover", "heavyLaserHover", "targetingVehicle", "lightLaserJet", "laserHeavyFighterJet"],
@@ -587,6 +588,19 @@
                "requiresResearch": ["mk3Arms"],
                "weapons": [{ "id": "photonLauncher", "damage": { "physical": 0, "energy": 45 }, "range": 70, "minRange": 15, "attackTime": 1.5, "cooldown": 3.5,
                              "projectileSpeed": 70, "projectileSize": 1.6, "projectileShape": "orb", "projectileColor": "#ffd75e", "splashRadius": 8, "accuracy": 0.85 }] }
+    },
+    "LaserRepeater": {
+      "arm": { "standInSet": "GattlingGun", "procModel": "gattling", "cost": { "ore": 100, "energy": 40 }, "buildTime": 10, "hp": 80, "armor": { "physical": 10, "energy": 20 }, "mass": 22,
+               "weapons": [{ "id": "laserRepeater", "damage": { "physical": 0, "energy": 2 }, "burst": 16, "range": 58, "attackTime": 1.4, "cooldown": 0.3, "spread": 8, "projectileColor": "#ffb62e",
+                             "targets": ["ground", "air"] }] }
+    },
+    "LaserRipper": {
+      "arm": { "standInSet": "LaserSword", "procModel": "laserSword", "cost": { "ore": 85, "energy": 45 }, "buildTime": 9, "hp": 85, "armor": { "physical": 10, "energy": 20 }, "mass": 17,
+               "weapons": [{ "id": "laserRipper", "stopsToFire": true, "class": "melee", "damage": { "physical": 6, "energy": 22 }, "range": 12, "attackTime": 1.4, "cooldown": 0.35 }] }
+    },
+    "LaserShield": {
+      "arm": { "standInSet": "EnergyShield", "procModel": "energyShield", "cost": { "ore": 80, "energy": 60 }, "buildTime": 10, "hp": 120, "armor": { "physical": 40, "energy": 50 }, "mass": 22,
+               "abilities": [{ "type": "shield", "absorbs": ["energy"], "capacity": 110, "regenPerSecond": 6 }] }
     },
     "LaserShieldLegs": {
       "legs": { "standInSet": "PowerShield", "procModel": "laserShieldLegs", "cost": { "ore": 140, "energy": 100 }, "buildTime": 13, "hp": 180, "armor": { "physical": 20, "energy": 35 }, "mass": 62, "loadCapacity": 100,

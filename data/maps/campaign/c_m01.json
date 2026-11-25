@@ -146,7 +146,7 @@
     { "width": 1.19, "points": [[48, 105], [47.98, 112.64], [47.85, 116.23]] }
   ],
   "superNode": "none",
-  "starts": [[66, 110], [66, 22]],
+  "starts": [[65.5, 109.5], [65.5, 21.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Merkur", "commander": "Ilja Voss", "start": 0, "ai": null, "label": "start jih, plná základna (výuka)" },
     { "seat": 2, "role": "enemy", "faction": "Země – inspekce", "start": 1, "ai": "AI-pevnost na severní polici", "label": "AI-pevnost na severní polici, malé vlny po 4 min" }

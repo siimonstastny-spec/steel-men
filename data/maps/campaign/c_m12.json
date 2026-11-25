@@ -112,7 +112,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[51, 87]],
+  "starts": [[50.5, 86.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Merkur – Odpadlíci", "commander": "Ilja Voss", "start": 0, "squad": true, "ai": null, "label": "squad – oddíl (posádky + 2 lehké mechy) u únikové šachty, bez základny" },
     { "seat": 2, "role": "enemy", "faction": "Věrní", "start": null, "ai": null, "label": "hlídky, nostart – statické věže (q) a hlídky (p), bez výroby" }

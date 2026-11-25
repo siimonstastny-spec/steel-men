@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[22, 98], [98, 22], [174, 98], [98, 174]],
+  "starts": [[21.5, 97.5], [97.5, 21.5], [173.5, 97.5], [97.5, 173.5]],
   "sides": [],
   "markers": [],
   "zones": { "built": [], "liquid": [], "builtKinds": [] },

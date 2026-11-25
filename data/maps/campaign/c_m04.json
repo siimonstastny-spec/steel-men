@@ -146,7 +146,7 @@
     { "width": 1.02, "points": [[52, 61], [49.22, 53.9], [43.91, 50.26]] }
   ],
   "superNode": "none",
-  "starts": [[66, 86]],
+  "starts": [[65.5, 85.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Merkur", "commander": "Ilja Voss", "start": 0, "ai": null, "label": "start ve středu u rozvodny, plná základna, obrana" },
     { "seat": 2, "role": "enemy", "faction": "Země", "start": null, "ai": "AI-vlny", "label": "AI-vlny, nostart – ze 3 stran (S, Z, V, značky w), 6 vln, poslední těžká; pozdní hovery kabelovým kanálem (v)" }

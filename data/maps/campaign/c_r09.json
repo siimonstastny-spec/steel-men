@@ -272,7 +272,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 130, "row": 130 },
-  "starts": [[130, 150], [38, 38], [222, 38], [222, 222]],
+  "starts": [[129.5, 149.5], [37.5, 37.5], [221.5, 37.5], [221.5, 221.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start střed u super nodu, plná základna" },
     { "seat": 2, "role": "enemy", "faction": "Země", "start": 1, "ai": "AI-základna", "label": "AI-základna, SZ roh" },

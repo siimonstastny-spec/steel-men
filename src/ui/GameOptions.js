@@ -4,7 +4,8 @@
 //   optionsHtml(values, { disabled })         rows "label + select" (pre-build, start set, energy cap, population cap,
 //                                             ore multiplier, start research, superweapons [A9-F3], game speed,
 //                                             fog of war, victory condition)
-//   mapSelectHtml(values, { maps, disabled, random })  the map select (above the map preview; random = "Random" entry)
+//   mapSelectHtml(values, { maps, disabled, random, minPlayers })  the map select (above the map preview; random = "Random" entry;
+//                                             minPlayers [A4-UI] = offer only maps with that many starts)
 //   readOptionChange(target)                  -> { key, value } of a changed `select[data-opt]` (typed value) or null
 //   friendlyFireHtml(ff, { disabled, attr })  the friendly-fire checkboxes (attr = data attribute name of the checkbox)
 //   syncOptions(root, values)                 sets every select[data-opt] in root from values (no re-render)
@@ -82,9 +83,11 @@ export function optionsHtml(values, { disabled = false } = {}) {
 }
 
 /** [W5a] Map combobox (shown above the map preview); random = add the "Random" entry (lobby); maps = GameMap list */
-export function mapSelectHtml(values, { maps, disabled = false, random = false } = {}) {
+export function mapSelectHtml(values, { maps, disabled = false, random = false, minPlayers = 0 } = {}) {
   if (!maps?.length) return '';
-  return rowHtml(mapDef(maps, random), values, disabled);
+  // [A4-UI] minPlayers: only maps with at least that many starts are offered (the chosen map always stays listed)
+  const fit = minPlayers ? maps.filter((m) => m.players >= minPlayers || m.id === values.map) : maps;
+  return rowHtml(mapDef(fit, random), values, disabled);
 }
 
 /** { key, value } of a change event target; the value has the type of the option (number / 'infinite' / id), null if foreign */

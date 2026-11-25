@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[98, 114]],
+  "starts": [[97.5, 113.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start v kaldeře, obrana místa jednání" },
     { "seat": 2, "role": "enemy", "faction": "Věrní", "start": null, "ai": "AI-vlny", "label": "AI-vlny, nostart, po rampách S a V" },

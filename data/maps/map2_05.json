@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[98, 162], [98, 34]],
+  "starts": [[97.5, 161.5], [97.5, 33.5]],
   "sides": [],
   "markers": [
     { "key": "h", "index": 1, "id": "h1", "type": "structure", "substrate": "B", "rect": [24, 56, 35, 63], "col": 30, "row": 60, "cells": 96, "label": "hall: hangáry", "kind": "hall" },

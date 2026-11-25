@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[98, 162], [98, 34]],
+  "starts": [[97.5, 161.5], [97.5, 33.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Venuše", "commander": "Selene Arvo", "start": 0, "ai": null, "label": "výsadek jih, plná základna" },
     { "seat": 2, "role": "enemy", "faction": "Věrní – flotilová základna", "start": 1, "ai": "AI-základna sever (doky)", "label": "AI-základna sever (doky)" }

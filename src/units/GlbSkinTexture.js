@@ -409,13 +409,162 @@ export function prepareSkinGltf(gltf) {
     if (!o.isMesh) return;
     ensureSkinUv(o.geometry);
     if (Array.isArray(o.material)) o.material.forEach(texturize); else texturize(o.material);
+    const share = !Array.isArray(o.material) && teamShare(o.material);
+    if (share > 0) ensureTeamMask(o.geometry, share);
   });
 }
+
+// --- [round 2] team colour over whole facets ------------------------------------------------------------------------
+
+/** Team share of a material by its kind (0 = never painted) */
+function teamShare(m) {
+  const T = CFG.team;
+  if (!CFG.enabled || !T?.enabled || !m) return 0;
+  return T.shares[CFG.kinds[m.name]] ?? 0;
+}
+
+/** FNV-1a of a string with the seed → [0, 1) */
+function hashUnit(str) {
+  let h = (0x811c9dc5 ^ CFG.seed) >>> 0;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d) >>> 0; h ^= h >>> 12;
+  return (h >>> 0) / 4294967296;
+}
+
+/**
+ * Per-vertex attribute `skinTeam` (0 / 1), once per geometry: flat facets (normal + plane, mirrored in x) taken in a
+ * seeded order until share × area is painted. Undersides stay graphite. Indexed geometry gets no paint (all 0).
+ */
+function ensureTeamMask(geometry, share) {
+  if (geometry.attributes.skinTeam) return;
+  const T = CFG.team;
+  const pos = geometry.attributes.position;
+  const count = pos.count;
+  const mask = new Float32Array(count);
+  if (!geometry.index && count % 3 === 0) {
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
+    const facets = new Map(); // key -> { key, area, nz, tris }
+    let total = 0;
+    for (let i = 0; i < count; i += 3) {
+      a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2);
+      n.subVectors(c, b).cross(_e.subVectors(a, b));
+      const len = n.length();
+      if (len < 1e-9) continue;
+      n.multiplyScalar(1 / len);
+      if (n.y < T.downLimit) continue;
+      const d = n.x * (a.x + b.x + c.x) / 3 + n.y * (a.y + b.y + c.y) / 3 + n.z * (a.z + b.z + c.z) / 3; // mirror-invariant
+      const q = T.normalQuant;
+      const key = `${Math.round(Math.abs(n.x) * q)},${Math.round(n.y * q)},${Math.round(n.z * q)},${Math.round(d * T.planeQuant)}`;
+      let f = facets.get(key);
+      if (!f) { f = { key, area: 0, nz: n.z, tris: [] }; facets.set(key, f); }
+      f.area += len / 2;
+      f.tris.push(i);
+      total += len / 2;
+    }
+    const list = [...facets.values()];
+    for (const f of list) f.prio = hashUnit(f.key) * (1 - T.frontBias) + T.frontBias * (0.5 - 0.5 * f.nz);
+    list.sort((p, r) => p.prio - r.prio || (p.key < r.key ? -1 : 1));
+    let acc = 0;
+    for (const f of list) {
+      if (acc >= share * total) break;
+      acc += f.area;
+      for (const i of f.tris) mask[i] = mask[i + 1] = mask[i + 2] = 1;
+    }
+  }
+  geometry.setAttribute('skinTeam', new THREE.BufferAttribute(mask, 1));
+}
+const _e = new THREE.Vector3();
+
+const TEAM_VERT = 'attribute float skinTeam;\nvarying float vSkinTeam;\n';
+const TEAM_FRAG = 'uniform vec3 skinTeamColor;\nuniform float skinTeamOn;\nuniform float skinTeamRough;\nuniform float skinTeamMetal;\nvarying float vSkinTeam;\n';
+const TEAM_MAP = `
+float skinTm = vSkinTeam * skinTeamOn;
+#ifdef USE_MAP
+  vec3 skinDetail = texture2D( map, vMapUv ).rgb;
+#else
+  vec3 skinDetail = vec3( 1.0 );
+#endif
+diffuseColor.rgb = mix( diffuseColor.rgb, skinTeamColor * skinDetail, skinTm );
+`;
+function teamCompile(shader, uniforms) {
+  Object.assign(shader.uniforms, uniforms);
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>\n${TEAM_VERT}`)
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSkinTeam = skinTeam;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', `#include <common>\n${TEAM_FRAG}`)
+    .replace('#include <map_fragment>', `#include <map_fragment>\n${TEAM_MAP}`)
+    .replace('#include <roughnessmap_fragment>',
+      '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, clamp( roughnessFactor + skinTeamRough, 0.0, 1.0 ), skinTm );')
+    .replace('#include <metalnessmap_fragment>',
+      '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, metalnessFactor * skinTeamMetal, skinTm );');
+}
+
+/**
+ * Adds the team paint shader to a per-robot material copy (once, when the copy is made). Returns its uniforms (pass them
+ * to setTeamPaint) or null when the material is never painted. Every copy shares one program.
+ */
+export function attachTeamPaint(material) {
+  if (!(teamShare(material) > 0)) return null;
+  const T = CFG.team;
+  const uniforms = {
+    skinTeamColor: { value: new THREE.Color() },
+    skinTeamOn: { value: 0 },
+    skinTeamRough: { value: T.roughAdd },
+    skinTeamMetal: { value: T.metalScale },
+  };
+  material.onBeforeCompile = (shader) => teamCompile(shader, uniforms);
+  material.customProgramCacheKey = () => 'glbSkinTeam';
+  material.needsUpdate = true;
+  return uniforms;
+}
+
+/** Team colour of the paint (null = off); luminance clamped to minLum..maxLum, darkened with the hulk. No allocation. */
+export function setTeamPaint(uniforms, teamColor, darkness) {
+  if (teamColor == null) { uniforms.skinTeamOn.value = 0; return; }
+  const T = CFG.team;
+  const c = uniforms.skinTeamColor.value.set(teamColor);
+  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  if (lum < T.minLum) c.lerp(_white, (T.minLum - lum) / (1 - lum));
+  else if (lum > T.maxLum) c.multiplyScalar(T.maxLum / lum);
+  c.multiplyScalar(T.paint * (1 - darkness));
+  uniforms.skinTeamOn.value = 1;
+}
+const _white = new THREE.Color(1, 1, 1);
 
 // --- emblem ---------------------------------------------------------------------------------------------------------
 
 /** Mercury logo: sun disc with a double vertical slit and a ring, rays with 45° bends (orange → gold gradient) */
-function paintEmblem() {
+function paintEmblem(withPlate, logo) {
+  const E = CFG.emblem;
+  const S = E.texSize;
+  const c = makeCanvas(S);
+  const ctx = c.getContext('2d');
+  const P = E.plate;
+  if (withPlate && P) {
+    // [round 2] dark graphite rhombus with a light outer and a dark inner rim under the logo
+    diamondPath(ctx, S, 0.5, 0.5, P.half);
+    ctx.fillStyle = P.color;
+    ctx.fill();
+    ctx.lineJoin = 'miter';
+    ctx.strokeStyle = P.rim;
+    ctx.lineWidth = P.rimWidth * S;
+    ctx.stroke();
+    diamondPath(ctx, S, 0.5, 0.5, P.half - P.rimWidth - P.innerRimWidth * 0.5);
+    ctx.strokeStyle = P.innerRim;
+    ctx.lineWidth = P.innerRimWidth * S;
+    ctx.stroke();
+  } else if (!withPlate) {
+    ctx.fillStyle = '#000000'; // emissive map: only the logo glows
+    ctx.fillRect(0, 0, S, S);
+  }
+  // the logo is its own transparent canvas (its slits are cut there, so the plate shows through them)
+  const w = S * (E.logoScale ?? 1);
+  ctx.drawImage(logo, (S - w) / 2, (S - w) / 2, w, w);
+  return c;
+}
+
+function paintLogo() {
   const E = CFG.emblem;
   const S = E.texSize;
   const c = makeCanvas(S);
@@ -468,14 +617,16 @@ function paintEmblem() {
 function emblem() {
   if (!emblemShared) {
     const E = CFG.emblem;
-    const texture = toTexture(paintEmblem(), true);
-    texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+    const logo = paintLogo();
+    const texture = toTexture(paintEmblem(true, logo), true);
+    const glow = toTexture(paintEmblem(false, logo), true);
+    texture.wrapS = texture.wrapT = glow.wrapS = glow.wrapT = THREE.ClampToEdgeWrapping;
     const material = new THREE.MeshStandardMaterial({
-      map: texture, emissiveMap: texture, emissive: new THREE.Color(E.color), emissiveIntensity: E.intensity,
+      map: texture, emissiveMap: glow, emissive: new THREE.Color(E.color), emissiveIntensity: E.intensity,
       transparent: true, depthWrite: false, metalness: 0.2, roughness: 0.3,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
     });
-    emblemShared = { texture, material, geometry: new THREE.PlaneGeometry(1, 1) };
+    emblemShared = { texture, glow, material, geometry: new THREE.PlaneGeometry(1, 1) };
   }
   return emblemShared;
 }
@@ -524,6 +675,7 @@ export function disposeSkinTextures() {
   texCache.clear();
   if (emblemShared) {
     emblemShared.texture.dispose();
+    emblemShared.glow.dispose();
     emblemShared.material.dispose();
     emblemShared.geometry.dispose();
     emblemShared = null;

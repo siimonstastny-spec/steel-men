@@ -149,7 +149,7 @@
     { "width": 0.83, "points": [[61, 36], [57.05, 34.73], [51.92, 28.95], [48.42, 25.14]] }
   ],
   "superNode": { "col": 66, "row": 66 },
-  "starts": [[66, 114], [66, 18]],
+  "starts": [[65.5, 113.5], [65.5, 17.5]],
   "sides": [],
   "markers": [
     { "key": "e", "index": 1, "id": "e1", "type": "explosive", "substrate": "B", "rect": [44, 60, 51, 71], "col": 48, "row": 66, "cells": 96, "label": "Plazmové kondenzátory u rozvaděče – výboj při zničení zasáhne okolí (~2 znaky) a spustí sousední" },

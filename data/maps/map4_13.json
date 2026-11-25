@@ -272,7 +272,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 130, "row": 130 },
-  "starts": [[38, 38], [222, 38], [222, 222], [38, 222]],
+  "starts": [[37.5, 37.5], [221.5, 37.5], [221.5, 221.5], [37.5, 221.5]],
   "sides": [],
   "markers": [
     { "key": "s", "index": 1, "id": "s1", "type": "salvage", "substrate": "%", "rect": [88, 72, 95, 79], "col": 92, "row": 76, "cells": 64, "label": "Opuštěná stanice u ropovodu (salvage)" },

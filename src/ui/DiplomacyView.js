@@ -9,7 +9,7 @@
 //   dip.onOpenChange = (open) => …             optional (HUD button state)
 //   dip.dispose()
 // Key: KEYBINDINGS.diplomacy toggles, KEYBINDINGS.cancel (Esc) closes. Styles: diplomacy.css (loaded here).
-import { DIPLOMACY, KEYBINDINGS, TEAMS } from '../config.js';
+import { DIPLOMACY, KEYBINDINGS, TEAMS, A4_UI } from '../config.js';
 import { commandBus } from '../game/commands/CommandBus.js';
 import { tributeKeep, tributeQuote } from '../game/commands/diplomacyCommands.js'; // also registers the command
 import { allianceOf, areAllies } from '../game/Alliances.js';
@@ -159,7 +159,8 @@ export class DiplomacyView {
         <td class="dip-state" data-state-of="${team}"></td>
       </tr>${this.#canTrade(team) ? this.#tradeRow(team) : ''}`;
     }).join('');
-    this.el.innerHTML = `<div class="dip-panel" role="dialog" aria-label="${esc(t('dip.title'))}">
+    // [A4-UI] 5–8 players: tighter rows, the panel scrolls with a sticky header (diplomacy.css .dip-many)
+    this.el.innerHTML = `<div class="dip-panel${teams.length > A4_UI.dipManyRowsAbove ? ' dip-many' : ''}" role="dialog" aria-label="${esc(t('dip.title'))}">
       <h2>${esc(t('dip.title'))}</h2>
       <p class="dip-own" data-own></p>
       <table class="dip-table">

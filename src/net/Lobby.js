@@ -46,11 +46,18 @@
 //   lobby.onContinueProgress(fn({ phase: 'send'|'receive', ratio, error?: i18n key })) -> unsubscribe
 // [A2-net] state.simVersion = the host's SIM_VERSION; a client of another version leaves join() with lobby.error.simVersion
 // and the host never seats a peer whose presence `sim` differs (every lobby, not only continue).
+// [A4-SIM] up to MAX_PLAYERS (8) seats. Spectators (peers without a seat) are limited to SPECTATORS.max: the host lists
+// the extra ones in state.full; such a joiner leaves join() with lobby.error.full when no open seat is free, and the
+// host cannot start while more than SPECTATORS.max peers sit without a seat (lobby.status.tooManySpectators).
+// More playing seats than the map has starts: startProblem() 'lobby.status.mapTooSmall', start() throws
+// lobby.error.mapTooSmall, a client ignores such a start (its map catalogue loaded). lobby.mapSeatLimit() = starts of
+// the chosen map (Random: the most of any map), null while the catalogue loads. Seats travel compacted (default fields
+// left out, wireLobbyState / unwireLobbyState); lobby.state always holds full seats.
 import { NET_SECURITY } from './netSecurity.js'; // [MP-SEC]
-import { NET, TEAMS, LOBBY, PROFILE, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, PREBUILD, UI_SMALL, MENU, ORE_MULTIPLIER, START_MULTIPLIER, START_RESEARCH, ECONOMY, SIM_VERSION, NET_CONTINUE, MAP_MODES, SUPERWEAPON } from '../config.js';
+import { NET, TEAMS, LOBBY, PROFILE, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, PREBUILD, UI_SMALL, MENU, ORE_MULTIPLIER, START_MULTIPLIER, START_RESEARCH, ECONOMY, SIM_VERSION, NET_CONTINUE, MAP_MODES, SUPERWEAPON, SPECTATORS } from '../config.js';
 import { ensureFingerprint, isCompatible } from '../core/SaveStore.js'; // [A2-net]
 import { SaveSender, SaveReceiver, encodeSave } from './SaveTransfer.js'; // [A2-net]
-import { loadMapCatalog, validMapChoice, isRandomMap, pickRandomMap } from '../game/MapCatalog.js'; // [W5a] Random map
+import { loadMapCatalog, validMapChoice, isRandomMap, pickRandomMap, maxMapPlayers } from '../game/MapCatalog.js'; // [W5a] Random map
 import { colorsTooSimilar, firstDistinctColor } from '../core/ColorCheck.js'; // [MP-POLISH]
 import { aiIdentity, cleanAiIdentity, hashSeed, pickAiIndex, usedNameIndices } from '../ai/AiProfiles.js'; // [N6]
 import { hasEnoughAlliances, isAllianceId, normalizeAlliances } from '../core/AllianceSetup.js';
@@ -84,6 +91,9 @@ const cleanPassword = (pw) => (typeof pw === 'string' ? pw.slice(0, LOBBY.passwo
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const clone = (v) => JSON.parse(JSON.stringify(v ?? null));
+const utf8 = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+/** [A4-SIM] UTF-8 bytes of a value's JSON (upper bound without TextEncoder) */
+export const jsonSize = (v) => { const s = JSON.stringify(v); return utf8 ? utf8.encode(s).length : s.length * 3; };
 
 function randomInt(max) {
   if (globalThis.crypto?.getRandomValues) {
@@ -115,6 +125,30 @@ export function roomName(code) {
   return NET.roomPrefix + normalizeCode(code).toLowerCase();
 }
 
+// [A4-SIM] seat fields left out on the wire while they hold their default (8 seats + continue summary must fit
+// NET.maxMessageBytes); unwireLobbyState puts them back, so lobby.state seats always have every field
+const SEAT_WIRE_DEFAULTS = { playerId: null, nickname: '', race: null, color: null, ready: false };
+
+/** [A4-SIM] Lobby state as sent (host presence + 'lobby' message): seats without default-valued fields (a copy) */
+export function wireLobbyState(state) {
+  const st = clone(state);
+  if (Array.isArray(st?.seats)) {
+    st.seats = st.seats.map((s) => {
+      const out = { ...s };
+      for (const [k, v] of Object.entries(SEAT_WIRE_DEFAULTS)) if (out[k] === v) delete out[k];
+      return out;
+    });
+  }
+  return st;
+}
+
+/** [A4-SIM] Received lobby state → full seats (missing default fields restored; a copy) */
+export function unwireLobbyState(st) {
+  const out = clone(st);
+  if (Array.isArray(out?.seats)) out.seats = out.seats.map((s) => (s && typeof s === 'object' ? { ...SEAT_WIRE_DEFAULTS, ...s } : s));
+  return out;
+}
+
 /** A fresh seat; only the first PLAYERS_UI.defaultOpenSeats seats are open, alliance = own index (everybody alone) */
 const newSeat = (team) => ({
   team, controller: 'open', playerId: null, nickname: '', race: null, color: null, ready: false,
@@ -139,8 +173,10 @@ export function playingSeats(seats) {
  * Why the game cannot start yet, as an i18n key, or null. At least PLAYERS_UI.minPlayers open seats must be filled
  * (human or computer; empty open seats are ignored), every human ready, and the alliances
  * must leave at least two sides.
+ * [A4-SIM] opts.mapPlayers = starts of the chosen map (null = unknown, not checked); opts.spectators = peers without a
+ * seat (more than SPECTATORS.max block the start).
  */
-export function lobbyStartProblem(seats) {
+export function lobbyStartProblem(seats, { mapPlayers = null, spectators = 0 } = {}) {
   // [MP-POLISH] open seats nobody sits at are ignored (closed at the start) as long as enough seats are filled
   const open = playingSeats(seats);
   const humans = open.filter((s) => s.controller === 'human' && s.playerId);
@@ -150,6 +186,8 @@ export function lobbyStartProblem(seats) {
   if (open.length < PLAYERS_UI.minPlayers) return 'lobby.status.waiting'; // only one filled seat: waiting for a second side
   if (!humans.every((s) => s.ready)) return 'lobby.status.notReady';
   if (!hasEnoughAlliances(open.map((s) => s.alliance))) return 'lobby.status.oneAlliance';
+  if (Number.isInteger(mapPlayers) && open.length > mapPlayers) return 'lobby.status.mapTooSmall'; // [A4-SIM]
+  if (spectators > SPECTATORS.max) return 'lobby.status.tooManySpectators'; // [A4-SIM]
   return null;
 }
 
@@ -193,6 +231,37 @@ export class Lobby {
     this.progressListeners = new Set();
     this.continueProgress = null; // last onContinueProgress event
     this.missingSaveReported = false;
+    // [A4-SIM]
+    this.mapCatalog = null;      // GameMaps of the multiplayer maps (start counts), loaded on create / join
+    this.oversizeWarned = false; // a state message over NET.maxMessageBytes was reported once in the console
+    this.fullRefused = false;    // client: no seat free and the spectator places taken (join fails with lobby.error.full)
+  }
+
+  /** [A4-SIM] Start positions of the chosen map (Random: the most of any map); null while the catalogue loads */
+  mapSeatLimit(settings = this.state?.settings) {
+    if (!this.mapCatalog) return null;
+    const id = validMapChoice(settings?.map, MAP_MODES.multiplayer);
+    if (isRandomMap(id)) return maxMapPlayers(this.mapCatalog) || null;
+    const m = this.mapCatalog.find((x) => x.id === id);
+    return m ? m.players : null;
+  }
+
+  /** [A4-SIM] Peers in the room without a seat (spectators), the host included when it left its seat */
+  spectatorCount() {
+    if (!this.state || !this.channel) return 0;
+    const seated = new Set(this.state.seats.filter((s) => s.playerId).map((s) => s.playerId));
+    const kicked = new Set(this.state.kicked ?? []);
+    // [A4] peers of another SIM_VERSION never get a seat: they take no spectator place
+    return this.channel.peers().filter((p) => !seated.has(p.id) && !kicked.has(p.id) && (p.id === this.selfId || p.presence?.sim === SIM_VERSION)).length;
+  }
+
+  /** [A4-SIM] loads the map catalogue once (start counts for the seat limit); a change refreshes the start problem */
+  #loadMaps() {
+    loadMapCatalog(MAP_MODES.multiplayer).then((maps) => {
+      if (this.closed) return;
+      this.mapCatalog = maps;
+      this.#notify();
+    }).catch((err) => console.warn('[lobby] map catalogue failed', err));
   }
 
   /** [A2-net] Is this a continue lobby (saved game)? */
@@ -250,6 +319,7 @@ export class Lobby {
     this.#recompute(true);
     this.resendTimer = setInterval(() => this.#publish(), NET.lobbyResendMs);
     this.#syncAnnouncer();
+    this.#loadMaps(); // [A4-SIM]
   }
 
   /** Client: joins the game of a code; resolves once the host's lobby state arrived */
@@ -263,6 +333,7 @@ export class Lobby {
     this.channel = await this.transport.join(roomName(norm), { password: pw, watchPassword: true });
     this.isHost = false;
     this.code = norm;
+    this.#loadMaps(); // [A4-SIM] the client checks a start against the map too
     const got = new Promise((resolve) => { this.stateWaiter = resolve; });
     // [LOBBY_LIST] P2P: a peer used another password. Another joiner with a wrong password causes the same signal, so
     // the host's state still has LOBBY.passwordGraceMs to arrive before we give up.
@@ -291,7 +362,7 @@ export class Lobby {
     this.stateWaiter = null;
     if (!ok || this.closed) {
       // P2P: relays down / wrong password / strict NAT / no host
-      let key = this.kicked ? 'lobby.error.kicked' : this.simMismatch ? 'lobby.error.simVersion' : this.closed ? null : this.transport?.joinFailureKey?.(); // [A2-net]
+      let key = this.kicked ? 'lobby.error.kicked' : this.simMismatch ? 'lobby.error.simVersion' : this.fullRefused ? 'lobby.error.full' : this.closed ? null : this.transport?.joinFailureKey?.(); // [A2-net] [A4-SIM]
       // [LOBBY_LIST] fallback: with a password typed, "nobody answered" may still be a password mismatch we did not see
       if (key === 'net.p2p.error.hostNotFound' && pw && supportsDirectory(this.transport)) key = 'lobby.error.passwordOrGone';
       await this.leave();
@@ -417,7 +488,10 @@ export class Lobby {
   }
 
   /** [N5b] null when the host can start, else the i18n key of the reason */
-  startProblem() { return this.state ? lobbyStartProblem(this.state.seats) : 'lobby.status.waiting'; }
+  startProblem() {
+    if (!this.state) return 'lobby.status.waiting';
+    return lobbyStartProblem(this.state.seats, { mapPlayers: this.isContinue ? null : this.mapSeatLimit(), spectators: this.spectatorCount() }); // [A4-SIM]
+  }
 
   /** Host only: change of an AI seat. patch = { difficulty?, race?, color? } */
   async setAi(team, patch) {
@@ -445,7 +519,12 @@ export class Lobby {
       settings.startPicksByTeam = {};
     }
     this.#recompute(false);
-    if (lobbyStartProblem(this.state.seats)) throw new Error(t('lobby.error.notReady'));
+    if (lobbyStartProblem(this.state.seats, { spectators: this.spectatorCount() })) throw new Error(t('lobby.error.notReady'));
+    // [A4-SIM] never more players than the map has starts (the map would reuse starts)
+    this.mapCatalog ??= await loadMapCatalog(MAP_MODES.multiplayer);
+    if (this.closed || this.started) return;
+    const starts = this.mapSeatLimit(settings);
+    if (Number.isInteger(starts) && playingSeats(this.state.seats).length > starts) throw new Error(t('lobby.error.mapTooSmall'));
     // [N5b] Pack the open seats: seat index (= team) is the order of the open seats; closed seats are not in the game
     const packed = clone(playingSeats(this.state.seats)).map((s, team) => ({ ...s, team })); // [MP-POLISH] empty seats dropped
     const payload = {
@@ -600,7 +679,7 @@ export class Lobby {
       s.difficulty = o?.difficulty ?? (AIMENU.difficulties.includes(NET_CONTINUE.aiFallbackDifficulty) ? NET_CONTINUE.aiFallbackDifficulty : AIMENU.defaultDifficulty);
       if (o?.aiName) { s.aiName = o.aiName; s.avatar = o.avatar; } else this.#assignAiName(s, seats);
     }
-    if (lobbyStartProblem(seats)) throw new Error(t('lobby.error.notReady'));
+    if (lobbyStartProblem(seats, { spectators: this.spectatorCount() })) throw new Error(t('lobby.error.notReady')); // [A4-SIM]
     const packed = clone(playingSeats(seats));
     // the saved match's teams must stay what they were (every saved seat is open and now filled, nothing else)
     if (packed.length !== cont.seats.length || packed.some((s, i) => s.team !== i)) throw new Error(t('lobby.error.generic'));
@@ -810,6 +889,7 @@ export class Lobby {
   #applyState(st) {
     if (this.isHost || this.started || this.closed) return;
     if (!this.#validState(st)) return;
+    st = unwireLobbyState(st); // [A4-SIM] compacted seats → full seats
     // [MP-SEC] the host is whoever sent the first valid state; a different claimant later (hijack attempt) is ignored
     if (this.hostPin === null) this.hostPin = st.hostId;
     else if (st.hostId !== this.hostPin) {
@@ -840,6 +920,14 @@ export class Lobby {
       this.#notify();
       return;
     }
+    // [A4-SIM] joining while every seat is taken and the spectator places are full: join() fails with lobby.error.full
+    if (this.stateWaiter && !st.started && Array.isArray(st.full) && st.full.includes(this.selfId)
+      && !st.seats.some((s) => s.open && s.controller === 'open' && !s.playerId)) {
+      this.fullRefused = true;
+      this.stateWaiter(false);
+      this.stateWaiter = null;
+      return;
+    }
     const changed = JSON.stringify(st) !== JSON.stringify(this.state);
     this.state = clone(st);
     if (this.stateWaiter) { this.stateWaiter(true); this.stateWaiter = null; }
@@ -859,6 +947,7 @@ export class Lobby {
     // [A2-net] continue summary / seat moves: plain objects
     if (st.continue != null && (typeof st.continue !== 'object' || !Array.isArray(st.continue.seats) || st.continue.seats.length > TEAMS.length)) return false;
     if (st.moves != null && (typeof st.moves !== 'object' || Array.isArray(st.moves))) return false;
+    if (st.full !== undefined && (!Array.isArray(st.full) || st.full.length > LOBBY.kickedMax)) return false; // [A4-SIM] same bound as the kick list
     return st.seats.every((s) => s && typeof s === 'object');
   }
 
@@ -866,6 +955,11 @@ export class Lobby {
   #validStart(p) {
     if (!p || typeof p !== 'object' || !Array.isArray(p.seats) || !Number.isFinite(p.seed)) return false;
     if (p.seats.length < 1 || p.seats.length > TEAMS.length) return false;
+    // [A4-SIM] more players than the map has starts (a fresh match; a continued one keeps its saved starts)
+    if (!p.continue && this.mapCatalog && p.settings && typeof p.settings === 'object') {
+      const starts = this.mapSeatLimit(p.settings);
+      if (Number.isInteger(starts) && p.seats.length > starts) { console.warn('[lobby] start ignored: more players than map starts'); return false; }
+    }
     if (p.continue != null && (typeof p.continue !== 'object' || typeof p.continue.id !== 'string' || !Number.isInteger(p.continue.tick))) return false; // [A2-net]
     const humans = new Set();
     const teams = new Set();
@@ -951,12 +1045,27 @@ export class Lobby {
     } else this.#uniqueColors(seats);
     const changed = JSON.stringify(seats) !== JSON.stringify(this.state.seats);
     if (changed) this.state.seats = seats;
-    if (changed || force || movesChanged) {
+    const fullChanged = this.#updateFull(peers, seats); // [A4-SIM]
+    if (changed || force || movesChanged || fullChanged) {
       this.state.v++;
       this.#publish();
       this.#notify();
       this.announcer?.update(); // [LOBBY_LIST] players / map changed: refresh the game list entry (rate limited)
     }
+  }
+
+  /**
+   * [A4-SIM] Host: peers without a seat beyond SPECTATORS.max (peer list order = first come first served; the host
+   * itself, when it left its seat, takes one of the places) → state.full. Returns true when the list changed.
+   */
+  #updateFull(peers, seats) {
+    const seated = new Set(seats.filter((s) => s.playerId).map((s) => s.playerId));
+    const unseated = [...peers.values()].filter((p) => p.id !== this.selfId && !seated.has(p.id) && !this.banned.has(p.id) && p.presence?.sim === SIM_VERSION).map((p) => p.id);
+    const places = Math.max(0, SPECTATORS.max - (seated.has(this.selfId) ? 0 : 1));
+    const full = unseated.slice(places);
+    const before = JSON.stringify(this.state.full ?? []);
+    if (full.length) this.state.full = full; else delete this.state.full;
+    return before !== JSON.stringify(full);
   }
 
   /**
@@ -974,15 +1083,23 @@ export class Lobby {
     };
     const active = seats.filter((s) => s.open && s.controller !== 'open');
     for (const s of active) if (s.color) give(s, s.color);
-    for (const s of active) if (!s.color) give(s, (TEAMS[s.team]?.color ?? palette[0]).toLowerCase());
+    // [A4-SIM] default = the palette colour of the seat position (TEAMS colours are overwritten by a running match)
+    for (const s of active) if (!s.color) give(s, (palette[s.team] ?? TEAMS[s.team]?.color ?? palette[0]).toLowerCase());
   }
 
   /** Host: state into own presence (late joiners, reliable) + a 'lobby' message (fast) */
   #publish() {
     if (!this.isHost || !this.state || !this.channel || this.closed) return;
-    const st = clone(this.state);
+    const st = wireLobbyState(this.state); // [A4-SIM] compact seats
     this.channel.setPresence({ lobby: st });
-    this.channel.send('lobby', { op: 'state', state: st });
+    const msg = { op: 'state', state: st };
+    // [A4-SIM] a state over the room limit still reaches everybody through the presence (P2P presence is not limited)
+    if (jsonSize(msg) > NET.maxMessageBytes) {
+      if (!this.oversizeWarned) console.warn(`[lobby] state of ${jsonSize(msg)} B is over NET.maxMessageBytes – sent in the presence only`);
+      this.oversizeWarned = true;
+      return;
+    }
+    this.channel.send('lobby', msg);
   }
 
   #begin(payload) {

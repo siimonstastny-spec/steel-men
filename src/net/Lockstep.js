@@ -630,7 +630,8 @@ export class Lockstep {
 
     const minAck = this.#minAck();
     const unacked = [...this.localTurns.keys()].filter((n) => n > minAck).sort((a, b) => a - b);
-    const limit = this.cfg.maxMessageBytes - this.cfg.messageHeadroomBytes;
+    // [A4-SIM] the header grows with the player count (acks / echoes / leave turns per team): never less room than it needs
+    const limit = this.cfg.maxMessageBytes - Math.max(this.cfg.messageHeadroomBytes, jsonBytes(header) + 8);
     const entries = [];
     for (const n of unacked) {
       const cmds = this.localTurns.get(n);

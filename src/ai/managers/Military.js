@@ -670,7 +670,8 @@ export class MilitaryManager {
       const buildings = p.knownStructures(team);
       if (!buildings.length) continue;
       const b = nearest(buildings, from, (m) => m);
-      const d = dist(from, b) * (focus.has(team) ? AI.allyFocus.factor : 1);
+      const votes = Math.min(focus.get(team) ?? 0, AI.allyFocus.maxStack); // [A4-SIM] more allies on it = nearer still
+      const d = dist(from, b) * (votes > 0 ? AI.allyFocus.factor ** votes : 1);
       if (!best || d < best.dist) best = { dist: d, kind: 'structure', point: { x: b.x, z: b.z }, eid: b.eid, team, key: `s${b.eid}` };
     }
     if (best) return best;
@@ -692,14 +693,17 @@ export class MilitaryManager {
     return null;
   }
 
-  /** v3: enemy teams allied AIs attack now (fresh allyBoard entries) */
+  /**
+   * v3: enemy teams allied AIs attack now (fresh allyBoard entries).
+   * [A4-SIM] Map enemy team -> number of allied AIs attacking it (several allies: the team most of them attack wins).
+   */
   #allyTargets(now) {
-    const out = new Set();
+    const out = new Map();
     const p = this.ai.perception;
     for (let t = 0; t < (this.ai.world.economy?.accounts?.length ?? 0); t++) {
       if (!p.isAllyTeam(t)) continue;
       const it = intentOf(t);
-      if (it && it.time <= now && now - it.time <= AI.allyFocus.seconds && p.isEnemyTeam(it.targetTeam)) out.add(it.targetTeam);
+      if (it && it.time <= now && now - it.time <= AI.allyFocus.seconds && p.isEnemyTeam(it.targetTeam)) out.set(it.targetTeam, (out.get(it.targetTeam) ?? 0) + 1);
     }
     return out;
   }

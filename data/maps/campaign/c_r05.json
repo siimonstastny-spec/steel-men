@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[98, 174], [106, 26]],
+  "starts": [[97.5, 173.5], [105.5, 25.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start jih, ústí hlavního kaňonu" },
     { "seat": 2, "role": "enemy", "faction": "Koloniální správa", "start": 1, "ai": "AI-základna", "label": "AI-základna, sever, + AI-vlny na osady" },

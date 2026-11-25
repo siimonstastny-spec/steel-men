@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v29';
+export const GAME_VERSION = 'v30';
 // Game name (brand, shown in the main menu title; not translated)
 export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
@@ -136,12 +136,20 @@ export const MAP = {
   rock: { color: 0x726b60, roughness: 1, detail: 1, jitter: 0.25, sink: 0.15 },
   ridge: { color: 0x655f55, roughness: 1 },
   superNode: {
-    platformColor: 0x4a4f57, platformHeight: 1.2, platformSegments: 40,
-    crystalColor: 0x39d4ff, crystalEmissive: 0x1a8fd0, crystalEmissiveIntensity: 1.4,
-    crystalCount: 6, crystalHeight: 22, crystalWidth: 4.5, crystalRingFactor: 0.55, // ring radius = coreRadius × factor
-    crystalTilt: 0.25,       // rad – outer crystals lean outwards
-    largeCrystalScale: 0.6, smallCrystalScale: 0.4, // outer crystals (alternating) relative to the central one
-    glowColor: 0x39d4ff, glowOpacity: 0.25, glowWidth: 2,
+    // [ore-mine-visual] the super node is the same open-pit mine as ORE_DEPOSIT.mine (pit radius = coreRadius), bigger,
+    // with blue glowing ore; these keys override ORE_DEPOSIT.mine (object values are merged one level deep)
+    mine: {
+      segments: 44, heightScale: 1.6,
+      oreColor: 0x39d4ff, oreEmissive: 0x1a8fd0, oreEmissiveIntensity: 1.4,
+      chunkCountScale: 2.5, chunkSizeScale: 1.5,
+      rubble: { count: 14 },
+      scars: { rf: [1.6, 2.9], scale: 1.5, heaps: 8, digs: 6 },
+    },
+    // worked gravel ground around the pit out to `radius` (replaces the old platform), draped on the terrain
+    // inner edge = largest possible lip radius × innerFactor (capped at radius × maxInnerShare); gravel fades to the field
+    // colour from fadeStart × width; lift between the mine collar (ORE_DEPOSIT.mine.collar.lift) and the scars
+    apron: { rings: 6, segments: 48, innerFactor: 1.05, maxInnerShare: 0.9, fadeStart: 0.5, lift: 0.07, coreMix: 0.55, jitter: 0.12, brightness: 0.9, roughness: 1 },
+    glowColor: 0x39d4ff, glowOpacity: 0.25, glowWidth: 2, glowSegments: 64,
   },
   // Sun shadows follow the camera target (the shadow box is small, the map is large)
   sunOffset: [60, 100, 40],
@@ -362,7 +370,7 @@ export const NET = {
   hashKeepTurns: 120,        // turns of hashes kept for comparison and desyncReport()
   historyTurns: 600,         // executed turns kept for desyncReport() (60 s at the defaults)
   maxMessageBytes: 4096,     // room limit for one message (UTF-8 bytes of its JSON)
-  messageHeadroomBytes: 384, // room left in a message for the header (acks, ping, hashes) when packing turns
+  messageHeadroomBytes: 640, // room left in a message for the header (acks, ping, hashes) when packing turns ([A4-SIM] 8 players: header up to ~470 B)
   maxCommandBytes: 2048,     // (~300 unit ids in one command; must fit one message part: maxMessageBytes - headroom) a bigger local command is split by its `units` list (maxCommandChunks), else refused (never sent, never executed)
   maxCommandChunks: 16,      // [A1-3] a too-big command is sent as at most this many chunks ({…, units: part, chunk: [i, n]}); CommandBus joins them back
   maxChunksPerSend: 4,       // a backlog of unacknowledged turns goes out in at most this many messages at once
@@ -404,7 +412,7 @@ export const NET = {
   embedScrollKeys: ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'PageUp', 'PageDown', 'Home', 'End'],
   // P2PTransport (static web: WebRTC, signalling over public Nostr relays; vendor/trystero, docs/notes/p2p-transport.md)
   p2p: {
-    appId: 'steel-men-rts-v1',  // Trystero namespace; change it when the wire format breaks (old clients never meet)
+    appId: 'steel-men-rts-v2',  // Trystero namespace; change it when the wire format breaks (old clients never meet). v2 [A4-SIM]: 8 lobby seats
     strategy: 'nostr',           // signalling strategy vendored in vendor/trystero/ (only 'nostr' is shipped)
     // wss:// signalling relays. Trystero's own default list is a random set of obscure relays (many dead), so we pin
     // well-known public ones; empty = Trystero's default list. Verify with relayCheck.js (docs/notes/g-web-iframe.md).
@@ -440,7 +448,7 @@ export const NET = {
   },
   // [LOBBY_LIST] list of open games over the same Nostr relays (src/net/LobbyDirectory.js, docs/notes/lobby-list.md)
   directory: {
-    topicSuffix: 'lobby-dir-v1', // Nostr `x` tag = p2p.appId + ':' + this (ephemeral kind derived from it by Trystero)
+    topicSuffix: 'lobby-dir-v2', // [A4-SIM] v2: up to 8 seats. Nostr `x` tag = p2p.appId + ':' + this (ephemeral kind derived from it by Trystero)
     relayCount: 6,               // first N relays of p2p.relayUrls (host and viewer use the same list)
     announceMs: 8000,            // host of a public game re-announces this often
     entryTtlMs: 25000,           // viewer drops an entry not refreshed for this long
@@ -586,7 +594,8 @@ export const AI = {
   // only by repoint or more (each move = new orders)
   allyHelp: { radius: 650, minShare: 0.3, keepHome: 0.3, repoint: 40 },
   // Allied AIs gang up: an enemy team an ally attacks (allyBoard entry not older than seconds) counts as nearer by factor
-  allyFocus: { seconds: 60, factor: 0.6 },
+  // [A4-SIM] several allies (4v4, 2×4): factor once per allied AI attacking that team, at most maxStack times
+  allyFocus: { seconds: 60, factor: 0.6, maxStack: 2 },
   // Super node squad (difficulty.squads.superNode): stands offset × node radius from the node centre towards our base;
   // leaves when the known enemy army near the node is stronger than maxDangerRatio × the squad
   superNodeHold: { offset: 1.0, maxDangerRatio: 1.5 },
@@ -829,12 +838,17 @@ export const SEATS = {
 // Teams: index = unit.team; color = colour painted onto the team's models (see TEAM_COLOR) and team rings
 // PLAYER_TEAM = default local seat only. UI code uses localTeam() from src/core/LocalPlayer.js instead.
 export const PLAYER_TEAM = 0;
-// [N5] one entry per seat, MAX_PLAYERS entries (blue, red, green, yellow); seats past the player count are not in the match
+// [N5] one entry per seat, MAX_PLAYERS entries; seats past the player count are not in the match
+// [A4-SIM] 8 seats; default colour of seat n = MENU.teamPalette[n] (blue, red, green, yellow, orange, purple, teal, pink)
 export const TEAMS = [
   { nameKey: 'common.player', color: '#3a5ccc' },  // nameKey = i18n key of the team name (t(nameKey))
   { nameKey: 'common.enemy', color: '#c8302c' },
-  { color: '#3f9e4d' },                            // no nameKey: SelectionPanel falls back to its generic name
-  { color: '#e8a21a' },                            // orange-yellow = default of seat 4, the faction W (races.W.uiColor.primary)
+  { color: '#3f9b4a' },                            // no nameKey: SelectionPanel falls back to its generic name
+  { color: '#e0b31e' },
+  { color: '#e0861e' },
+  { color: '#8a4fd0' },
+  { color: '#1fa5a5' },
+  { color: '#d0509a' },
 ];
 
 /**
@@ -891,6 +905,7 @@ export const KEYBINDINGS = {
   fullscreen: [],                // toggle browser fullscreen (no default key – set in Settings → Controls)
   diplomacy: ['KeyU'],           // [B4] open / close the diplomacy menu (src/ui/DiplomacyView.js)
   stockWindow: ['KeyI'],         // [F1] open / close the part stock window (src/ui/StockWindow.js)
+  perfPanel: ['F2'],             // [A4-UI] show / hide the performance overlay (src/ui/PerfPanel.js)
   chat: ['Enter', 'NumpadEnter'], // [N11] open the chat line (multiplayer only; Shift+Enter in the field = team chat)
   groupModifier: 'ctrl',      // 'ctrl' | 'shift' | 'alt'
   controlGroups: [
@@ -1297,7 +1312,7 @@ export const KEY_CATEGORIES = [
   { id: 'camera', actions: ['cameraForward', 'cameraBack', 'cameraLeft', 'cameraRight'] },
   { id: 'commands', actions: ['eject', 'dropLeft', 'dropRight', 'attackMove', 'guard', 'patrol', 'cancel', 'move', 'stop', 'deleteUnit', 'stanceRanged', 'stanceMelee',
     'behaviourAggressive', 'behaviourDefensive', 'behaviourPassive', 'repair', 'formation', 'wallGate'] },
-  { id: 'general', actions: ['rotateBuilding', 'idleCrew', 'idleBuilder', 'idleDrill', 'fullscreen', 'diplomacy', 'stockWindow', 'chat'] },
+  { id: 'general', actions: ['rotateBuilding', 'idleCrew', 'idleBuilder', 'idleDrill', 'fullscreen', 'diplomacy', 'stockWindow', 'chat', 'perfPanel'] },
 ];
 export const KEY_ACTIONS = {
   camera: KEY_CATEGORIES.find((c) => c.id === 'camera').actions,
@@ -1865,15 +1880,61 @@ export const GATE = {
 
 /** Ore deposits (src/game/OreDeposit.js); amount / rate are map data (data/maps/*.json) */
 export const ORE_DEPOSIT = {
-  crystalColor: 0xd99a3a, crystalEmissive: 0x7a4310, crystalEmissiveIntensity: 0.6,
-  crystalCount: 5,           // crystals around the central one
-  crystalHeight: 10, crystalWidth: 2.6,
-  ringFactor: 0.8,           // outer crystals stand at radius × this
-  outerScale: 0.6,
-  tilt: 0.3,                 // rad – outer crystals lean outwards
-  minScale: 0.25,            // crystals shrink to this size as the deposit runs out
-  depletedOpacity: 0.25,     // look of an exhausted deposit
   infiniteAmountLabel: '∞',
+  visualStep: 0.01,          // share of the deposit between two visual refreshes (no scene work every frame)
+  // [ore-mine-visual] small open-pit mine (src/game/OreMineVisual.js, docs/notes/ore-mine-visual.md). Purely visual:
+  // the pit is sunk below the ground: only the terrain MESH is lowered under it (never the height field the simulation
+  // reads – World.heightAt / heightField.heights stay untouched), a ground-coloured collar hides the coarse terrain dip.
+  // Lengths × deposit radius (= obstacle radius) unless "units", heights in units (× heightScale).
+  mine: {
+    minRadius: 4,            // deposits without a radius are drawn at least this big
+    segments: 32,            // around the pit
+    // pit profile outside → centre: [radius × deposit radius, height relative to the terrain]; ring 0 = lip (low dump)
+    rings: [[1.0, 0.25], [0.96, 0.05], [0.87, -1.5], [0.8, -1.55], [0.77, -1.6], [0.69, -3.0], [0.62, -3.05], [0.59, -3.1], [0.51, -4.5], [0, -4.7]],
+    bands: ['edge', 'wall', 'bench', 'edge', 'wall', 'bench', 'edge', 'wall', 'floor'], // surface between ring i and i + 1
+    wallRows: 3,             // a wall band is split into this many rows (ore strata run across the wall)
+    floorRows: 3,            // the floor band too (no long rays to the centre)
+    radiusJitter: 0.03, heightJitter: 0.15,
+    oval: 0.08,              // pit is up to this much elliptic (random axis)
+    outline: [[3, 0.07], [5, 0.05], [8, 0.03]], // irregular outline: [harmonic, amplitude], random phases per position
+    // rad – access ramp from the lip down to the floor; full depth within halfAngle × innerFactor, lumps / rubble avoid it
+    ramp: { halfAngle: 0.4, innerFactor: 0.5, strength: 0.9, topHeight: 0 },
+    // terrain mesh lowered within lip + radiusMargin (units) by the pit depth + extraDepth (units)
+    sink: { radiusMargin: 1.5, extraDepth: 2.5 },
+    // ground-coloured collar from the lip out past the lowered terrain (+ one terrain cell diagonal + margin, units);
+    // mound = low spoil just outside the lip, disturbed = spoil tint near the lip fading out at disturbedTo (share of width)
+    collar: { rings: 4, margin: 1.5, lift: 0.02, mound: 0.15, disturbed: 0.35, disturbedTo: 0.6 },
+    colors: { spoilLift: 1.1, wallShade: 0.8, benchMix: 0.4, benchLift: 1.2, edgeLift: 1.45, floorDarken: 0.65, jitter: 0.1 },
+    ao: 0.55,                // brightness at the pit floor (walls lighten up to the lip)
+    // ore strata: horizontal bands (period 2π / strataFreq in height units, slightly wavy), interrupted around the pit
+    vein: {
+      strataFreq: 4.5, wave: 0.35, waveFreq: 2, threshold: 0.6, soft: 0.2,
+      breakFreqA: 3, breakFreqB: 7, breakWeightA: 0.6, breakWeightB: 0.4, gapThreshold: 0.45, gapSoft: 0.25, noise: 0.3,
+      edgeFactor: 0.3, benchFactor: 0.15, floorFactor: 0.35, floorPatch: 0.7, // floor: random ore patches above floorPatch
+    },
+    oreColor: 0xd99a3a, oreEmissive: 0x7a4310, oreEmissiveIntensity: 0.5,
+    // ore lumps; listed order = order they stay (the last zone disappears first as the ore runs out)
+    chunks: [
+      { count: 9, rf: [0.04, 0.48], size: [0.35, 0.7] },  // floor – small, scattered
+      { count: 5, rf: [0.53, 0.58], size: [0.4, 0.7] },   // in the lowest wall
+      { count: 5, rf: [0.71, 0.75], size: [0.35, 0.6] },  // in the middle wall
+    ],
+    chunkCountScale: 1, chunkSizeScale: 1,
+    chunkJitter: 0.35,       // per-axis size spread of a lump
+    chunkSink: 0.35,         // share of a lump's size buried
+    rubble: { count: 6, rf: [1.05, 1.35], size: [0.3, 0.6], flatten: 0.6 }, // spoil stones around the lip
+    // mining scars on the ore field around the pit (same mesh, draped): small heaps, dug holes, tyre tracks from the ramp
+    scars: {
+      rf: [1.7, 3.2], scale: 1, lift: 0.12, sides: 7, jitter: 0.25,
+      heaps: 4, heapRadius: [1.0, 2.0], heapHeight: [0.5, 1.1],              // units
+      digs: 3, digRadius: [1.0, 2.0], digRim: 1.35, digRimHeight: 0.25, digDarken: 0.6,
+      trackLength: 2.6, trackStep: 2, trackWidth: 0.5, trackGap: 1.6, trackCurve: 0.5, trackDarken: 0.75,
+    },
+    depletedDarken: 0.35,    // stone this much darker when the deposit is exhausted
+    veinMinShown: 0.2,       // vein strength just before the deposit runs out
+    stoneRoughness: 0.95, oreRoughness: 0.4, oreMetalness: 0.25,
+    polygonOffset: -1,       // collar / scars win over the coplanar terrain
+  },
 };
 
 // --- [N4] game clock and game speed (docs/notes/n4-clock.md) ---
@@ -1894,13 +1955,25 @@ export const GAME_CLOCK = {
 SETTINGS_DEFAULTS.ui.showClock = GAME_CLOCK.defaultVisible; // Profile.js only keeps keys that exist in the defaults
 // --- [N4] end ---
 
-// --- [N5] 2–4 players and alliances in the simulation (src/game/Alliances.js, docs/notes/n5a-sim.md) ---
-export const MAX_PLAYERS = 4;  // seats of a match = TEAMS entries (TEAMS above has exactly this many)
+// --- [N5] 2–8 players and alliances in the simulation (src/game/Alliances.js, docs/notes/n5a-sim.md, [A4-SIM]) ---
+export const MAX_PLAYERS = 8;  // seats of a match = TEAMS entries (TEAMS above has exactly this many)
 export const PLAYERS = {
   min: 2,                      // fewest players of a match (a settings value below is clamped to min..MAX_PLAYERS)
   default: 2,                  // settings.playerCount missing = this many players (the 1-on-1 of earlier versions)
 };
 // --- [N5] end ---
+
+// --- [A4-SIM] up to 8 players: spectators, AI load spreading (docs/notes/a4-sim.md) ---
+export const SPECTATORS = {
+  max: 2,                      // lobby: peers without a seat on top of the MAX_PLAYERS seats (more = join refused when no seat is free, start blocked)
+};
+export const AI_SPREAD = {
+  // With at least minAis computer players, each AI's perception refresh and manager timers are shifted by
+  // rank / count × AI.perceptionInterval (rank = order of its team among the AI teams), so the AIs do not all think
+  // in the same tick. Fewer AIs keep the unshifted timing of earlier versions (1v1 AI-vs-AI stays identical).
+  minAis: 3,
+};
+// --- [A4-SIM] end ---
 
 // --- [N5b] players and alliances in the menus and HUD (docs/notes/n5b-ui.md, contract docs/notes/n5-contract.md) ---
 // The maximum number of players is TEAMS.length (N5a keeps TEAMS in step with MAX_PLAYERS); nothing here repeats it.
@@ -1909,16 +1982,47 @@ export const PLAYERS_UI = {
   defaultPlayerCount: 2,       // player count of a fresh new-game menu
   defaultOpenSeats: 2,         // lobby: seats that are open in a freshly created lobby (the host opens more)
   minAlliances: 2,             // a game needs at least this many different alliances (otherwise nobody can win)
-  allianceLetters: 'ABCD',     // label of alliance id n = letter n (past the end: the number n + 1)
-  // Quick alliance choices by player count (alliance id of each seat in order); "everybody alone" is always offered
+  allianceLetters: 'ABCDEFGH', // label of alliance id n = letter n (past the end: the number n + 1)
+  // Quick alliance choices by player count: a list of { id (i18n setup.alliance.<id>), alliances (id of each seat in
+  // order) }; "everybody alone" is always offered. [A4-UI] a count may have several layouts (2 teams, 4x2 …)
   presets: {
-    3: { id: 'twoVsOne', alliances: [0, 0, 1] },
-    4: { id: 'twoVsTwo', alliances: [0, 0, 1, 1] },
+    3: [{ id: 'twoVsOne', alliances: [0, 0, 1] }],
+    4: [{ id: 'twoVsTwo', alliances: [0, 0, 1, 1] }],
+    5: [{ id: 'threeVsTwo', alliances: [0, 0, 0, 1, 1] }],
+    6: [
+      { id: 'threeVsThree', alliances: [0, 0, 0, 1, 1, 1] },
+      { id: 'threeTeamsOfTwo', alliances: [0, 0, 1, 1, 2, 2] },
+    ],
+    7: [{ id: 'fourVsThree', alliances: [0, 0, 0, 0, 1, 1, 1] }],
+    8: [
+      { id: 'fourVsFour', alliances: [0, 0, 0, 0, 1, 1, 1, 1] },
+      { id: 'fourTeamsOfTwo', alliances: [0, 0, 1, 1, 2, 2, 3, 3] },
+    ],
   },
   minimapAllyOutline: '#ffffff', // outline of an allied (not own) unit on the minimap; the fill stays the team colour
   minimapAllyOutlineWidth: 1,    // px
 };
 // --- [N5b] end ---
+
+// --- [A4-UI] up to 8 players: performance warning, compact seat rows, perf overlay (docs/notes/a4-ui.md) ---
+export const A4_UI = {
+  perfWarnAiAbove: 5,          // menu / lobby show the performance warning when MORE AI than this play (= recommendedMaxAi, A4 measurement)
+  recommendedMaxAi: 5,         // number named in the warning ("recommended max X AI"); A4 measurement verify-a4.md (tick > 11 ms past 130 units with 7 AI)
+  compactSeatsAbove: 4,        // lobby / new game: seat rows get the compact look with more seats than this
+  dipManyRowsAbove: 4,         // diplomacy view: compact rows (class dip-many) with more teams than this
+  statsManyRowsAbove: 4,      // player stats bar: slimmer rows (class psb-many) with more teams than this
+  statsBarMinimapGap: 8,       // HUD units kept free between the stats bar top and the screen top (player-stats.css repeats it)
+  perf: {
+    windowSeconds: 5,          // PerfPanel: averages / maxima cover the last this many seconds
+    sampleHz: 60,              // buffer capacity = windowSeconds * sampleHz frames (ticks / AI calls fit easily)
+    refreshMs: 250,            // how often the text is redrawn
+    warnFrameMs: 22,           // frame time above this is shown as a warning colour
+    warnTickMs: 10,            // simulation tick time above this is shown as a warning colour
+    warnAiMs: 6,               // AI time per tick above this is shown as a warning colour
+    countsEveryFrames: 60,     // main.js: unit / player counts refresh every this many frames while the panel is open
+  },
+};
+// --- [A4-UI] end ---
 
 // --- [N7] map pings and lost-part alerts (src/ui/Pings.js, src/game/commands/pingCommands.js, docs/notes/n7-ping.md) ---
 export const PING = {
@@ -2099,15 +2203,87 @@ export const MAPS = {
     { id: 'gen_01AI', file: 'basic' },
     // Naming: Map<players>_<creation order among maps with that player count>; list sorted by players, then order
     { id: 'Map2_01', file: 'map2_01' },
-    { id: 'Map2_02', file: 'map2_02', modes: [MAP_MODES.skirmish, MAP_MODES.multiplayer] }, // Calorian basin (Mercury, from mission M1; docs/maps)
+    // Map2_02+ / Map4_03+ / Map6_03+: campaign locations made symmetric (tools/gen-maps.ps1 from docs/maps/blueprints)
+    { id: 'Map2_02', file: 'map2_02' },   // Calorian basin (Mercury, M1)
+    { id: 'Map2_03', file: 'map2_03' },   // Kova (asteroid, M8)
+    { id: 'Map2_04', file: 'map2_04' },   // Ishtar (Venus, V1)
+    { id: 'Map2_05', file: 'map2_05' },   // Docks (asteroid, V10)
+    { id: 'Map2_06', file: 'map2_06' },   // Selene (Moon, Z2)
+    { id: 'Map2_07', file: 'map2_07' },   // Battery (Moon, Z11)
+    { id: 'Map2_08', file: 'map2_08' },   // Marineris (Mars, R1)
+    { id: 'Map2_09', file: 'map2_09' },   // Ice mine (Mars, R4)
+    { id: 'Map2_10', file: 'map2_10' },   // Shipyard (Mars, R7)
     { id: 'Map4_01', file: 'map4_01' },
     { id: 'Map4_02', file: 'map4_02' },   // same layout as Map4_01 on Mercury
+    { id: 'Map4_03', file: 'map4_03' },   // Lakshmi islands (Venus, V3)
+    { id: 'Map4_04', file: 'map4_04' },   // Archive bunker (interior, M7)
+    { id: 'Map4_05', file: 'map4_05' },   // Terminal (Mercury, M3)
+    { id: 'Map4_06', file: 'map4_06' },   // Swarm (asteroid, M11)
+    { id: 'Map4_07', file: 'map4_07' },   // Aphrodite city (Venus, V9)
+    { id: 'Map4_08', file: 'map4_08' },   // Dry river (Earth, Z7)
+    { id: 'Map4_09', file: 'map4_09' },   // Canyons (Mars, R5)
+    { id: 'Map4_10', file: 'map4_10' },   // Polar cap (Mars, R11)
+    { id: 'Map4_11', file: 'map4_11' },   // Olympus (Mars, R13)
+    { id: 'Map4_12', file: 'map4_12' },   // Volcanic cauldron (Venus, V11)
+    { id: 'Map4_13', file: 'map4_13' },   // Crossroads (Mars, R9)
     { id: 'Map6_01', file: 'map6_01' },   // destroyed city (Venus)
     { id: 'Map6_02', file: 'map6_02' },   // ruined wasteland (Mars)
+    { id: 'Map6_03', file: 'map6_03' },   // Red planet (Mars, R12)
     { id: 'Map8_01', file: 'map8_01' },   // city (Earth)
+    { id: 'Map8_02', file: 'map8_02' },   // HELIOVRT node ring (asteroid, finale)
     // Campaign HELIOVRT (generated by tools/gen-maps.ps1 from docs/maps/blueprints; never offered in menus / lobby)
     { id: 'C_M01', file: 'campaign/c_m01', modes: [MAP_MODES.campaign] },
+    { id: 'C_M02', file: 'campaign/c_m02', modes: [MAP_MODES.campaign] },
+    { id: 'C_M03', file: 'campaign/c_m03', modes: [MAP_MODES.campaign] },
     { id: 'C_M04', file: 'campaign/c_m04', modes: [MAP_MODES.campaign] },
+    { id: 'C_M05', file: 'campaign/c_m05', modes: [MAP_MODES.campaign] },
+    { id: 'C_M06', file: 'campaign/c_m06', modes: [MAP_MODES.campaign] },
+    { id: 'C_M07', file: 'campaign/c_m07', modes: [MAP_MODES.campaign] },
+    { id: 'C_M08', file: 'campaign/c_m08', modes: [MAP_MODES.campaign] },
+    { id: 'C_M09', file: 'campaign/c_m09', modes: [MAP_MODES.campaign] },
+    { id: 'C_M10', file: 'campaign/c_m10', modes: [MAP_MODES.campaign] },
+    { id: 'C_M11', file: 'campaign/c_m11', modes: [MAP_MODES.campaign] },
+    { id: 'C_M12', file: 'campaign/c_m12', modes: [MAP_MODES.campaign] },
+    { id: 'C_M13', file: 'campaign/c_m13', modes: [MAP_MODES.campaign] }, // finale sector CORE
+    { id: 'C_V01', file: 'campaign/c_v01', modes: [MAP_MODES.campaign] },
+    { id: 'C_V02', file: 'campaign/c_v02', modes: [MAP_MODES.campaign] },
+    { id: 'C_V03', file: 'campaign/c_v03', modes: [MAP_MODES.campaign] },
+    { id: 'C_V04', file: 'campaign/c_v04', modes: [MAP_MODES.campaign] },
+    { id: 'C_V05', file: 'campaign/c_v05', modes: [MAP_MODES.campaign] },
+    { id: 'C_V06', file: 'campaign/c_v06', modes: [MAP_MODES.campaign] },
+    { id: 'C_V07', file: 'campaign/c_v07', modes: [MAP_MODES.campaign] },
+    { id: 'C_V08', file: 'campaign/c_v08', modes: [MAP_MODES.campaign] },
+    { id: 'C_V09', file: 'campaign/c_v09', modes: [MAP_MODES.campaign] },
+    { id: 'C_V10', file: 'campaign/c_v10', modes: [MAP_MODES.campaign] },
+    { id: 'C_V11', file: 'campaign/c_v11', modes: [MAP_MODES.campaign] },
+    { id: 'C_V12', file: 'campaign/c_v12', modes: [MAP_MODES.campaign] }, // finale sector SHIELD
+    { id: 'C_Z01', file: 'campaign/c_z01', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z02', file: 'campaign/c_z02', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z03', file: 'campaign/c_z03', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z04', file: 'campaign/c_z04', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z05', file: 'campaign/c_z05', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z06', file: 'campaign/c_z06', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z07', file: 'campaign/c_z07', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z08', file: 'campaign/c_z08', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z09', file: 'campaign/c_z09', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z10', file: 'campaign/c_z10', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z11', file: 'campaign/c_z11', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z12', file: 'campaign/c_z12', modes: [MAP_MODES.campaign] },
+    { id: 'C_Z13', file: 'campaign/c_z13', modes: [MAP_MODES.campaign] }, // finale sector BREACH
+    { id: 'C_R01', file: 'campaign/c_r01', modes: [MAP_MODES.campaign] },
+    { id: 'C_R02', file: 'campaign/c_r02', modes: [MAP_MODES.campaign] },
+    { id: 'C_R03', file: 'campaign/c_r03', modes: [MAP_MODES.campaign] },
+    { id: 'C_R04', file: 'campaign/c_r04', modes: [MAP_MODES.campaign] },
+    { id: 'C_R05', file: 'campaign/c_r05', modes: [MAP_MODES.campaign] },
+    { id: 'C_R06', file: 'campaign/c_r06', modes: [MAP_MODES.campaign] },
+    { id: 'C_R07', file: 'campaign/c_r07', modes: [MAP_MODES.campaign] },
+    { id: 'C_R08', file: 'campaign/c_r08', modes: [MAP_MODES.campaign] },
+    { id: 'C_R09', file: 'campaign/c_r09', modes: [MAP_MODES.campaign] },
+    { id: 'C_R10', file: 'campaign/c_r10', modes: [MAP_MODES.campaign] },
+    { id: 'C_R11', file: 'campaign/c_r11', modes: [MAP_MODES.campaign] },
+    { id: 'C_R12', file: 'campaign/c_r12', modes: [MAP_MODES.campaign] },
+    { id: 'C_R13', file: 'campaign/c_r13', modes: [MAP_MODES.campaign] },
+    { id: 'C_R14', file: 'campaign/c_r14', modes: [MAP_MODES.campaign] }, // finale sector REAR
   ],
   // Old ids (saved profiles, lobby settings) keep working
   aliases: { basic: 'gen_01AI', Map02: 'Map2_01', Map03: 'Map4_01', Map04: 'Map6_01', Map05: 'Map8_01', Map06: 'Map6_02' },
@@ -2214,19 +2390,21 @@ export const MAP_PLANETS = {
     sun: { color: 0xfff0dc, intensity: 2.6 },
     hemi: { sky: 0x8890a0, ground: 0x181616, intensity: 0.28 },
   },
-  interior: { // bunker: dark background, short dark fog, artificial warm light, concrete walls
-    colors: { grass: 0x4a4944, concrete: 0x6a6964, field: 0x57503f, fieldCore: 0x64543a, rift: 0x0c0c0b, wall: 0x2a2a28 },
-    ridge: 0x5e5d58,
-    sky: { color: 0x0b0a09, fogNear: 250, fogFar: 900 },
-    sun: { color: 0xffd9a0, intensity: 1.4 },
-    hemi: { sky: 0xe0c090, ground: 0x2a2620, intensity: 0.7 },
+  // Underground / deck look (estimates, tune by eye): neutral concrete-grey floor, walls LIGHTER than the floor so
+  // corridors read, low ambient, dim main light, short dark fog
+  interior: { // bunker: dim warm light
+    colors: { grass: 0x5c5d60, concrete: 0x68696d, field: 0x5f5e5a, fieldCore: 0x686560, rift: 0x08080a, wall: 0xa0a1a5 },
+    ridge: 0xa8a9ad,
+    sky: { color: 0x050505, fogNear: 120, fogFar: 520 },
+    sun: { color: 0xfff1e2, intensity: 0.9 },       // neutral-warm, so the grey floor stays grey
+    hemi: { sky: 0xc4c2c0, ground: 0x1e1e1f, intensity: 0.34 },
   },
   station: { // like interior, colder and metallic
-    colors: { grass: 0x4b4f55, concrete: 0x6b7077, field: 0x55524a, fieldCore: 0x625640, rift: 0x080a0c, wall: 0x25292e },
-    ridge: 0x6f767f,
-    sky: { color: 0x07090c, fogNear: 300, fogFar: 1000 },
-    sun: { color: 0xd8e6ff, intensity: 1.5 },
-    hemi: { sky: 0xb8d0f0, ground: 0x22262c, intensity: 0.7 },
+    colors: { grass: 0x4c5056, concrete: 0x5a5f66, field: 0x535457, fieldCore: 0x5d5b58, rift: 0x06080a, wall: 0xa4acb8 },
+    ridge: 0xaab2be,
+    sky: { color: 0x040608, fogNear: 140, fogFar: 600 },
+    sun: { color: 0xcfe0ff, intensity: 0.95 },
+    hemi: { sky: 0x90a8c8, ground: 0x181b20, intensity: 0.32 },
   },
 };
 // --- [MAPS] end ---
@@ -2444,15 +2622,37 @@ export const PROC_STATE = {
 export const GLB_SKINS = {
   enabled: true,
   teamColorTag: 'team-palette',  // glTF material extras.runtimeColor that takes the owner's colour
+  // [W-glb-arms] arm models with a weapon: nodes without a `_partNN` suffix (receiver, emitter glow, shield field…) follow
+  // this rig node of the stand-in arm (the wrist, `_part02`), like the Basic arm's hand
+  armAttachPart: '02',
+  // [W-glb-arms] meshes under a node named like this pulse their emission (a per-robot material copy; the phase advances
+  // per simulation tick, so no clock and no allocation): emissiveIntensity × (min .. max)
+  pulse: { nodePattern: '(Animated)', speed: 5, min: 0.55, max: 1.3, phaseStep: 1.7 },
   races: {
     W: {
-      offset: [0, -0.87, 0],     // skin soles 0.87 above the stand-in's (measured in game)
+      // skin soles 0.87 above the stand-in's (BasicLegsW_Skel 13:36: sole y −20.34, BasicLegsX part03 / part06: −21.21).
+      // Applied only while the legs are skinned too (torso / arms on stand-in legs stay at the stand-in's sockets).
+      offset: [0, -0.87, 0],
+      // shift = Assembly_BasicW.glb node translation minus the stand-in socket (torso 0,0,0 − TorsoMount 0.1,0.2,0.3;
+      // arms ∓4.3,6.6,0 − ArmLeft −5.4,6.7,−1.6 / ArmRight 5.3,6.7,−1.6). Weapon arms share the Basic arm's shoulder.
       sets: {
         Basic: {
           legs:     { path: 'RobotPartsMercuryDraft/BasicLegsW_Skel.glb',      shift: [0, 0, 0] },
           torso:    { path: 'RobotPartsMercuryDraft/BasicTorsoW_Skel.glb',     shift: [-0.1, -0.2, -0.3] },
           leftArm:  { path: 'RobotPartsMercuryDraft/BasicArmW_Left_Skel.glb',  shift: [1.1, -0.1, 1.6] },
           rightArm: { path: 'RobotPartsMercuryDraft/BasicArmW_Right_Skel.glb', shift: [-1.0, -0.1, 1.6] },
+        },
+        LaserRepeater: {
+          leftArm:  { path: 'RobotPartsMercuryDraft/LaserRepeaterArmW_Left_T1.glb',  shift: [1.1, -0.1, 1.6] },
+          rightArm: { path: 'RobotPartsMercuryDraft/LaserRepeaterArmW_Right_T1.glb', shift: [-1.0, -0.1, 1.6] },
+        },
+        LaserRipper: {
+          leftArm:  { path: 'RobotPartsMercuryDraft/LaserRipperArmW_Left_T1.glb',  shift: [1.1, -0.1, 1.6] },
+          rightArm: { path: 'RobotPartsMercuryDraft/LaserRipperArmW_Right_T1.glb', shift: [-1.0, -0.1, 1.6] },
+        },
+        LaserShield: {
+          leftArm:  { path: 'RobotPartsMercuryDraft/LaserShieldArmW_Left_T1.glb',  shift: [1.1, -0.1, 1.6] },
+          rightArm: { path: 'RobotPartsMercuryDraft/LaserShieldArmW_Right_T1.glb', shift: [-1.0, -0.1, 1.6] },
         },
       },
     },
@@ -2528,12 +2728,32 @@ export const GLB_SKIN_TEXTURE = {
     enabled: true,
     slot: 'torso',
     center: [0, 3.1],        // x, y in part space where the ray is cast (along -z from the front, torso front = +z)
-    size: 2.4,               // model units
+    size: 2.9,               // model units (whole backing rhombus)
     lift: 0.03,              // above the surface (also polygonOffset)
     texSize: 512,
     color: '#ffffff',        // emissive tint (the canvas carries the logo's orange-gold gradient)
     intensity: 1.1,
     rays: 40,
+    // [round 2] backing plate: the faction-coloured logo never melts into a similar team colour
+    plate: { color: '#14181e', rim: '#d2d7de', rimWidth: 0.014, innerRim: '#05070a', innerRimWidth: 0.01, half: 0.48 },
+    logoScale: 0.72,         // logo size on the plate (1 = logo rays reach 0.44 of the texture from the centre)
+  },
+  // [round 2] team colour painted over whole facets of the graphite / brushed parts (display only). Each geometry's
+  // triangles are grouped into flat facets (same normal + plane, mirrored left/right so the robot stays symmetric);
+  // facets are taken in a seeded order (front faces preferred) until share × facet area is team coloured. The texture
+  // detail (seams, traces, panel tone, brushing) multiplies the team colour, so it shows through.
+  team: {
+    enabled: true,
+    shares: { graphite: 0.55, brushed: 0.6 }, // share of the material's (non-underside) area in team colour
+    downLimit: -0.55,        // facets whose normal.y is below stay graphite (undersides = frame)
+    frontBias: 0.35,         // 0 = random facet order, 1 = strictly front (+z) faces first
+    normalQuant: 24,         // facet grouping: normal rounded to 1/normalQuant
+    planeQuant: 3,           // facet grouping: plane distance rounded to 1/planeQuant model units
+    paint: 0.9,              // team colour × this (linear) before the texture detail
+    minLum: 0.05,            // a very dark team colour is lifted to this linear luminance (black team stays visible)
+    maxLum: 0.55,            // a very light one is scaled down to this (white team does not glare)
+    roughAdd: 0.08,          // painted facets: roughness + this (lacquer / ceramic, not bare metal)
+    metalScale: 0.4,         // painted facets: metalness × this (colour reads without an environment map)
   },
 };
 

@@ -144,7 +144,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 66, "row": 98 },
-  "starts": [[26, 66], [106, 66]],
+  "starts": [[25.5, 65.5], [105.5, 65.5]],
   "sides": [],
   "markers": [
     { "key": "f", "index": 1, "id": "f1", "type": "structure", "substrate": "B", "rect": [40, 48, 47, 51], "col": 44, "row": 50, "cells": 32, "label": "farm Řady skleníkových farem vybíhající zpod archy", "kind": "farm" },

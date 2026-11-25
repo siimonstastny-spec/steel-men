@@ -144,7 +144,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[34, 66]],
+  "starts": [[33.5, 65.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start západ, základna v kaňonu" },
     { "seat": 2, "role": "ally", "faction": "Merkur – sklad zbraní", "start": null, "ai": null, "label": "skript, nostart, AI-pevnost ve skladu m; po vysílání z Venuše (polovina mise) nepřítel" },

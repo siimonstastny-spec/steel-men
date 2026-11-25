@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[98, 26], [98, 170]],
+  "starts": [[97.5, 25.5], [97.5, 169.5]],
   "sides": [],
   "markers": [
     { "key": "e", "index": 1, "id": "e1", "type": "explosive", "substrate": "B", "rect": [52, 68, 55, 71], "col": 54, "row": 70, "cells": 16, "label": "Palivová nádrž (řetězový výbuch)" },

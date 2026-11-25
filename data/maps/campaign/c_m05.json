@@ -211,7 +211,7 @@
     { "width": 1.1, "points": [[71, 149], [67.18, 142.3], [64.14, 138.6]] }
   ],
   "superNode": "none",
-  "starts": [[26, 98], [166, 30]],
+  "starts": [[25.5, 97.5], [165.5, 29.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Merkur", "commander": "Ilja Voss", "start": 0, "ai": null, "label": "start západ na osvětlené pláni, plná základna (musí se přestěhovat do stínu)" },
     { "seat": 2, "role": "enemy", "faction": "Země", "start": 1, "ai": "AI-základna v nočním stínu SV pánve", "label": "AI-základna v nočním stínu SV pánve" },

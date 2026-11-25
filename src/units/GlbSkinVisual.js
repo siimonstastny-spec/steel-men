@@ -5,9 +5,9 @@
 // The skin lives under the mech in its own group (never inside a part's hierarchy), so Box3.setFromObject on parts
 // (#placeOnGround, wreck landing) and part.meshes (radius, aim height, muzzles) never see it; it is not pickable.
 import * as THREE from 'three';
-import { GLB_SKINS, HIGHLIGHT } from '../config.js';
+import { GLB_SKINS, HIGHLIGHT, SIM } from '../config.js';
 import { loadGltf } from '../core/AssetLoader.js';
-import { prepareSkinGltf, findEmblemPlacement, createEmblemMesh } from './GlbSkinTexture.js';
+import { prepareSkinGltf, findEmblemPlacement, createEmblemMesh, attachTeamPaint, setTeamPaint } from './GlbSkinTexture.js';
 
 export const SKIN_SLOTS = ['legs', 'torso', 'leftArm', 'rightArm'];
 const PART_SUFFIX = /_part(\d+)$/;
@@ -20,6 +20,14 @@ const _q = new THREE.Quaternion();
 const ONE = new THREE.Vector3(1, 1, 1);
 const HOVER = new THREE.Color(HIGHLIGHT.color);
 const noRaycast = () => {};
+const NO_OFFSET = new THREE.Matrix4();
+const ARM_SLOTS = ['leftArm', 'rightArm'];
+// [W-glb-arms] emission pulse of "(Animated)" meshes: phase step per simulation tick, mid / amplitude of the factor
+const PULSE = GLB_SKINS.pulse;
+const PULSE_STEP = PULSE.speed / SIM.tickRate;
+const PULSE_MID = (PULSE.min + PULSE.max) / 2;
+const PULSE_AMP = (PULSE.max - PULSE.min) / 2;
+let skinSeq = 0; // phase offset of the next skin (creation order; display only)
 
 /** Skin data of a race ({ offset, sets }) or null */
 const raceSkin = (race) => (GLB_SKINS.enabled ? GLB_SKINS.races[race] ?? null : null);
@@ -60,24 +68,29 @@ export function partSkinned(part, race) {
 }
 
 /**
- * The mech is drawn with the skin: legs and torso have one. Arms without a skin (weapon sets not modelled yet) stay
- * drawn as their GLB parts, following the same rig.
+ * The mech is drawn with the skin as soon as ANY mounted part has one ([W-glb-arms]). A part without a skin (other
+ * weapon sets, captured parts) stays drawn as its stand-in GLB part, following the same rig.
  */
 export function skinReady(mech, race) {
-  return !!raceSkin(race) && partSkinned(mech.parts.legs, race) && partSkinned(mech.parts.torso, race);
+  if (!raceSkin(race)) return false;
+  for (const slot of SKIN_SLOTS) if (partSkinned(mech.parts[slot], race)) return true;
+  return false;
 }
 
 // Per-robot material copies (highlight, darkness, team colour): one copy per source material
 class SkinMaterials {
   constructor(teamColor) {
     this.map = new Map(); // source material -> copy
+    this.animMap = new Map(); // [W-glb-arms] source material -> copy for "(Animated)" meshes (pulsing emission)
+    this.pulsed = [];         // copies in animMap that have an emission
     this.teamColor = teamColor;
     this.highlighted = false;
     this.darkness = 0;
   }
 
-  get(source) {
-    let m = this.map.get(source);
+  get(source, animated = false) {
+    const map = animated ? this.animMap : this.map;
+    let m = map.get(source);
     if (!m) {
       m = source.clone();
       m.userData.skinBase = m.color.clone();
@@ -86,23 +99,35 @@ class SkinMaterials {
       // the torso marks it extras.runtimeColor, legs and arms extras.role
       m.userData.skinTeam = source.userData?.runtimeColor === GLB_SKINS.teamColorTag || source.userData?.role === GLB_SKINS.teamColorTag;
       m.userData.skinEmissiveMap = m.emissiveMap; // [W-skin-tex] dropped while highlighted (the whole part lights up)
-      this.map.set(source, m);
+      m.userData.skinPaint = attachTeamPaint(m);  // [W-skin-tex round 2] team colour on whole facets (uniforms or null)
+      map.set(source, m);
+      if (animated && m.emissive) this.pulsed.push(m);
       this.#apply(m);
     }
     return m;
+  }
+
+  /** Emission factor of the pulsing copies (a hulk and a highlighted part keep their fixed emission); no allocation */
+  setPulse(factor) {
+    if (this.highlighted || this.darkness > 0) return;
+    for (let i = 0; i < this.pulsed.length; i++) this.pulsed[i].emissiveIntensity = this.pulsed[i].userData.skinEmissiveIntensity * factor;
   }
 
   setTeamColor(color) { this.teamColor = color; this.#applyAll(); }
   setHighlighted(on) { this.highlighted = on; this.#applyAll(); }
   setDarkness(d) { if (this.darkness === d) return; this.darkness = d; this.#applyAll(); } // a hulk calls it every step
 
-  #applyAll() { for (const m of this.map.values()) this.#apply(m); }
+  #applyAll() {
+    for (const m of this.map.values()) this.#apply(m);
+    for (const m of this.animMap.values()) this.#apply(m);
+  }
 
   #apply(m) {
     const u = m.userData;
     if (u.skinTeam && this.teamColor != null) m.color.set(this.teamColor).multiply(_tint.copy(u.skinBase));
     else m.color.copy(u.skinBase);
     if (this.darkness > 0) m.color.multiplyScalar(1 - this.darkness);
+    if (u.skinPaint) setTeamPaint(u.skinPaint, this.teamColor, this.darkness);
     if (!m.emissive) return;
     const emap = this.highlighted ? null : u.skinEmissiveMap;
     if (m.emissiveMap !== emap) { m.emissiveMap = emap; m.needsUpdate = true; }
@@ -111,7 +136,13 @@ class SkinMaterials {
     m.emissiveIntensity = this.darkness > 0 ? 0 : u.skinEmissiveIntensity; // a hulk's photon lights go out
   }
 
-  dispose() { for (const m of this.map.values()) m.dispose(); this.map.clear(); }
+  dispose() {
+    for (const m of this.map.values()) m.dispose();
+    for (const m of this.animMap.values()) m.dispose();
+    this.map.clear();
+    this.animMap.clear();
+    this.pulsed.length = 0;
+  }
 }
 const _tint = new THREE.Color();
 
@@ -122,16 +153,24 @@ function sceneMatrix(obj, root, out) {
   return out;
 }
 
-/** Skin meshes of a part model: [{ mesh, suffix, matrix }] (matrix = mesh in part space incl. the slot shift) */
-function skinMeshes(entry) {
+/**
+ * Skin meshes of a part model: [{ mesh, suffix, animated, matrix }] (matrix = mesh in part space incl. the slot shift).
+ * [W-glb-arms] An arm mesh under a node without `_partNN` (weapon) gets the wrist suffix; a node named "(Animated)" pulses.
+ */
+function skinMeshes(entry, slot) {
   const root = loaded.get(entry.path).scene;
   const shift = new THREE.Matrix4().makeTranslation(entry.shift?.[0] ?? 0, entry.shift?.[1] ?? 0, entry.shift?.[2] ?? 0);
+  const attach = ARM_SLOTS.includes(slot) ? GLB_SKINS.armAttachPart : null;
   const out = [];
   root.traverse((o) => {
     if (!o.isMesh) return;
     let suffix = null;
-    for (let n = o; n && n !== root && suffix === null; n = n.parent) suffix = PART_SUFFIX.exec(n.name)?.[1] ?? null;
-    out.push({ mesh: o, suffix, matrix: shift.clone().multiply(sceneMatrix(o, root, new THREE.Matrix4())) });
+    let animated = false;
+    for (let n = o; n && n !== root; n = n.parent) {
+      if (suffix === null) suffix = PART_SUFFIX.exec(n.name)?.[1] ?? null;
+      if (n.name.includes(PULSE.nodePattern) || (n === o && o.material?.name?.includes?.(PULSE.nodePattern))) animated = true;
+    }
+    out.push({ mesh: o, suffix: suffix ?? attach, animated, matrix: shift.clone().multiply(sceneMatrix(o, root, new THREE.Matrix4())) });
   });
   return out;
 }
@@ -142,9 +181,12 @@ function emblemOf(entry, slot, list) {
   return emblems.get(entry.path);
 }
 
-function cloneMesh(src, mats) {
-  const mesh = new THREE.Mesh(src.geometry, Array.isArray(src.material) ? src.material.map((m) => mats.get(m)) : mats.get(src.material));
-  mesh.castShadow = true;
+/** A transparent skin mesh (energy field of the shield arm): no shadow, hidden on a hulk */
+const isField = (mesh) => !!mesh.material?.transparent;
+
+function cloneMesh(src, mats, animated = false) {
+  const mesh = new THREE.Mesh(src.geometry, Array.isArray(src.material) ? src.material.map((m) => mats.get(m, animated)) : mats.get(src.material, animated));
+  mesh.castShadow = !isField(mesh);
   mesh.receiveShadow = true;
   mesh.raycast = noRaycast;
   mesh.matrixAutoUpdate = false;
@@ -193,8 +235,11 @@ export class GlbSkin {
     this.slots = {};              // slot -> THREE.Group
     this.covered = new Set();     // MechParts drawn by the skin (their GLB meshes stay hidden); others are drawn as GLB
     this.emblems = [];            // [W-skin-tex] emblem decals (shared geometry / material; hidden on a hulk)
+    this.fields = [];             // [W-glb-arms] transparent energy fields (hidden on a hulk)
     const off = raceSkin(race).offset ?? [0, 0, 0];
     this.offset = new THREE.Matrix4().makeTranslation(off[0], off[1], off[2]);
+    this.lowered = false;         // the legs are skinned: the whole skin is lowered by `offset` (feet on the ground)
+    this.phase = (skinSeq++ * PULSE.phaseStep) % (Math.PI * 2); // [W-glb-arms] emission pulse
     this.key = '';
     mech.add(this.root);
   }
@@ -204,6 +249,8 @@ export class GlbSkin {
     this.key = key;
     this.#clear();
     const m = this.mech;
+    this.lowered = partSkinned(m.parts.legs, this.race); // parts on stand-in legs stay at the stand-in's sockets
+    const offset = this.lowered ? this.offset : NO_OFFSET;
     for (const slot of SKIN_SLOTS) {
       const part = m.parts[slot];
       const slotGroup = new THREE.Group();
@@ -215,7 +262,7 @@ export class GlbSkin {
       const nodes = rigNodes(part);
       const byNode = new Map(); // node -> follower
       const entry = skinEntry(this.race, part);
-      const list = skinMeshes(entry);
+      const list = skinMeshes(entry, slot);
       const groups = [];        // list index -> follower group
       for (const s of list) {
         const node = (s.suffix !== null && nodes.get(s.suffix)) || part.object;
@@ -224,11 +271,12 @@ export class GlbSkin {
           const group = new THREE.Group();
           group.matrixAutoUpdate = false;
           slotGroup.add(group);
-          f = { node, root: part.object, rest: restInverse(node, part.object, new THREE.Matrix4()), group };
+          f = { node, root: part.object, rest: restInverse(node, part.object, new THREE.Matrix4()), group, offset };
           byNode.set(node, f);
           this.followers.push(f);
         }
-        const mesh = cloneMesh(s.mesh, this.mats);
+        const mesh = cloneMesh(s.mesh, this.mats, s.animated);
+        if (isField(mesh)) { mesh.visible = this.mats.darkness <= 0; this.fields.push(mesh); }
         mesh.matrix.copy(s.matrix);
         f.group.add(mesh);
         groups.push(f.group);
@@ -252,8 +300,12 @@ export class GlbSkin {
       const mat = f.group.matrix;
       mat.identity();
       for (let o = f.node; o && o !== mech; o = o.parent) { o.updateMatrix(); mat.premultiply(o.matrix); }
-      mat.multiply(f.rest).premultiply(this.offset);
+      mat.multiply(f.rest).premultiply(f.offset);
       f.group.matrixWorldNeedsUpdate = true;
+    }
+    if (this.mats.pulsed.length) { // [W-glb-arms] pulsing emission of the "(Animated)" meshes
+      this.phase += PULSE_STEP;
+      this.mats.setPulse(PULSE_MID + PULSE_AMP * Math.sin(this.phase));
     }
   }
 
@@ -265,6 +317,7 @@ export class GlbSkin {
   setDarkness(d) {
     this.mats.setDarkness(d);
     for (let i = 0; i < this.emblems.length; i++) this.emblems[i].visible = d <= 0; // a hulk's emblem goes dark
+    for (let i = 0; i < this.fields.length; i++) this.fields[i].visible = d <= 0;   // and its shield field goes out
   }
 
   #clear() {
@@ -272,6 +325,7 @@ export class GlbSkin {
     this.slots = {};
     this.followers.length = 0;
     this.emblems.length = 0;
+    this.fields.length = 0;
     this.covered.clear();
   }
 
@@ -286,18 +340,19 @@ export class GlbSkin {
  * Stand-alone model of one skinned part (arm wreck): the skin meshes in the part's root space, frozen in the rest
  * pose. Returns null when the part has no loaded skin. The group has dispose() / setHighlighted().
  */
-export function createSkinPartModel(race, part, teamColor) {
+export function createSkinPartModel(race, part, teamColor, lowered = true) {
   const e = skinEntry(race, part);
   if (!e || !loaded.has(e.path)) return null;
   const mats = new SkinMaterials(teamColor);
   const group = new THREE.Group();
   group.name = 'glbSkinPart';
-  const list = skinMeshes(e);
+  const list = skinMeshes(e, part.slot);
   // the live skin's mech-space offset (feet on the ground), so the torn-off arm does not jump when it becomes a wreck
-  const off = raceSkin(race).offset ?? [0, 0, 0];
+  const off = lowered ? raceSkin(race).offset ?? [0, 0, 0] : [0, 0, 0];
   const offset = new THREE.Matrix4().makeTranslation(off[0], off[1], off[2]);
   for (const s of list) {
-    const mesh = cloneMesh(s.mesh, mats);
+    if (isField(s.mesh)) continue; // a torn-off arm has no energy field
+    const mesh = cloneMesh(s.mesh, mats, s.animated);
     mesh.matrix.copy(s.matrix).premultiply(offset);
     group.add(mesh);
   }

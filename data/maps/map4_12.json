@@ -217,7 +217,7 @@
     { "width": 0.97, "points": [[167, 10], [173.43, 13.18], [179.95, 14.47], [182.65, 19.03], [182.36, 21.11]] }
   ],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[166, 166], [30, 30], [166, 30], [30, 166]],
+  "starts": [[165.5, 165.5], [29.5, 29.5], [165.5, 29.5], [29.5, 165.5]],
   "sides": [],
   "markers": [
     { "key": "z", "index": 1, "id": "z1", "type": "zone", "substrate": "?", "rect": [20, 20, 175, 175], "col": 98, "row": 98, "cells": 2432, "label": "Hranice stoupající lávy: z1 (vnější) – po 1. vzestupu je láva všude vně z1; z2, z3, z4 po 2., 3., 4. vzestupu (vnitřek z4 zůstane)" },

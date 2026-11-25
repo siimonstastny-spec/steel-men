@@ -124,3 +124,20 @@
   .setup-ff { margin-top: 2px; padding-top: 4px; }
   .setup-map .map-preview { max-height: 160px; width: auto; max-width: 100%; }
 }
+
+/* [A4-UI] 5–8 seats: compact rows (single line, small swatches / buttons) so 8 seats fit even at 1280x720; the
+   count threshold is A4_UI.compactSeatsAbove (class added by LobbyScreen / MainMenu). */
+.setup-seats.compact { gap: 3px; }
+.setup-seats.compact .setup-seat { padding: 2px 8px; gap: 4px 8px; }
+.setup-seats.compact .setup-seat .swatches { flex-wrap: wrap; gap: 2px; }
+.setup-seats.compact .setup-seat .swatch { width: 15px; height: 15px; }
+.setup-seats.compact .setup-seat .swatch.custom { font-size: 11px; }
+.setup-seats.compact .seat-player, .setup-seats.compact .seat-cell { font-size: 12px; }
+.setup-seats.compact .seat-select { padding-top: 1px; padding-bottom: 1px; font-size: 12px; min-height: 0; }
+.setup-seats.compact .seat-actions .menu-btn { padding: 2px 8px; min-height: 0; font-size: 11px; clip-path: none; }
+.setup-seats.compact .human-avatar, .setup-seats.compact .ai-avatar { transform: scale(0.8); transform-origin: left center; }
+.menu-warn.perf-warn { margin: 6px 0; }
+.setup-tools .players-count .faction { min-width: 36px; padding: 4px 8px; }
+@container (max-width: 640px) { /* = var(--seat-compact-below): the width switch still wins, rows stay tight */
+  .setup-seats.compact .setup-seat, .setup-seats.compact .setup-seat.with-actions { gap: 3px 8px; padding: 3px 8px; }
+}

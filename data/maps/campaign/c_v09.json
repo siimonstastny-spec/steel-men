@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[98, 170], [170, 98]],
+  "starts": [[97.5, 169.5], [169.5, 97.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Venuše", "commander": "Selene Arvo", "start": 0, "ai": null, "label": "start vládní čtvrť (jih), plná základna" },
     { "seat": 2, "role": "ally", "faction": "Země", "start": 1, "ai": "AI-základna", "label": "AI-základna, přistání na východním náměstí" },

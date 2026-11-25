@@ -144,7 +144,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[66, 114], [66, 22]],
+  "starts": [[65.5, 113.5], [65.5, 21.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start jih, nákladní nádraží na okraji města" },
     { "seat": 2, "role": "enemy", "faction": "Kolaboranti", "commander": "marťanská milice", "start": 1, "ai": "AI-základna", "label": "AI-základna, koloniální čtvrť na severu" },

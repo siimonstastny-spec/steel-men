@@ -275,7 +275,7 @@
     { "width": 1.19, "points": [[119, 132], [119.49, 125.08], [118.14, 120.96], [119.82, 116.51], [120.41, 110.68]] }
   ],
   "superNode": "none",
-  "starts": [[18, 130], [138, 94]],
+  "starts": [[17.5, 129.5], [137.5, 93.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Venuše", "commander": "Selene Arvo", "start": 0, "ai": null, "label": "start západ (úpatí), plná základna; eskorta senzorových sond" },
     { "seat": 2, "role": "enemy", "faction": "Země", "start": 1, "ai": "AI-pevnost na severním výběžku uprostřed", "label": "AI-pevnost na severním výběžku uprostřed" },

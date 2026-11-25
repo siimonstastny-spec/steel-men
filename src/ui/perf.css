@@ -1,0 +1,13 @@
+/* Steel Men – [A4-UI] performance overlay (src/ui/PerfPanel.js) */
+#perf-panel {
+  position: fixed; left: 8px; top: 8px; z-index: 30; min-width: 190px; box-sizing: border-box; padding: 6px 8px;
+  background: rgba(8, 12, 16, 0.78); border: 1px solid var(--hud-border, #3a4652);
+  font: 11px/1.5 ui-monospace, Consolas, monospace; color: var(--hud-text, #dfe6ee);
+  pointer-events: none; /* never blocks clicks on the scene */
+}
+#perf-panel[hidden] { display: none; }
+#perf-panel .perf-title { display: block; margin-bottom: 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; }
+#perf-panel .perf-row { display: flex; justify-content: space-between; gap: 12px; }
+#perf-panel .perf-label { opacity: 0.75; }
+#perf-panel .perf-val { font-variant-numeric: tabular-nums; text-align: right; }
+#perf-panel .perf-row.warn .perf-val { color: #ff9a6a; font-weight: 700; }

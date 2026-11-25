@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[98, 170]],
+  "starts": [[97.5, 169.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start jih, skrýš v kaňonu, malá základna" },
     { "seat": 2, "role": "enemy", "faction": "Koloniální správa", "start": null, "ai": "AI-pevnost", "label": "AI-pevnost, nostart, 4 malé stanice b1–b4 + hlídky" }

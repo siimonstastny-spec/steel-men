@@ -213,7 +213,7 @@
     { "width": 0.89, "points": [[31, 39], [25.43, 42.07], [23.54, 43.95]] }
   ],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[22, 150], [174, 150], [98, 22]],
+  "starts": [[21.5, 149.5], [173.5, 149.5], [97.5, 21.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Merkur", "commander": "Ilja Voss", "start": 0, "ai": null, "label": "start západ, plná základna" },
     { "seat": 2, "role": "ally", "faction": "Venuše", "start": 1, "ai": "AI-základna", "label": "AI-základna, start východ (zrcadlo hráče)" },

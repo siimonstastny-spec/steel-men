@@ -4,9 +4,7 @@
 //   def: { x, z, radius, amount, rateFactor, maxHarvesters, superNode? }
 import * as THREE from 'three';
 import { ORE_DEPOSIT } from '../config.js';
-
-// Visual refresh granularity (share of the deposit) – avoids touching the scene graph every frame
-const VISUAL_STEP = 0.01;
+import { OreMineVisual, acquireMineMaterials, releaseMineMaterials } from './OreMineVisual.js'; // [ore-mine-visual]
 
 export class OreDeposit {
   constructor(def, world, economy) {
@@ -24,7 +22,8 @@ export class OreDeposit {
     this.harvesters = new Set(); // vehicles mining this frame (refreshed every frame)
     this._mining = new Set();
     this.group = null;
-    if (!this.superNode) this.#build(); // the super node already has its own crystals (Map.js)
+    this.visual = null;
+    this.#build(); // [ore-mine-visual] open-pit mine; the super node's apron + glow ring stay in Map.js
   }
 
   get infinite() { return this.economy.infiniteDeposits; }
@@ -32,7 +31,7 @@ export class OreDeposit {
   /** Share left 0..1 */
   get ratio() { return this.initial > 0 ? Math.max(0, this.amount / this.initial) : 0; }
 
-  /** Pathfinding obstacle: the crystal core (the super node core is already a map obstacle) */
+  /** Pathfinding obstacle: the mine pit inside `radius` (the super node core is already a map obstacle) */
   get obstacle() {
     return this.superNode || !this.radius ? null : { x: this.x, z: this.z, radius: this.radius, owner: this };
   }
@@ -64,57 +63,42 @@ export class OreDeposit {
   }
 
   dispose() {
-    if (!this.group) return;
-    this.group.parent?.remove(this.group);
-    this.group.traverse((o) => { o.geometry?.dispose(); o.material?.dispose?.(); });
+    if (!this.visual) return;
+    this.visual.dispose();
+    releaseMineMaterials(this.materials);
+    this.visual = null;
+    this.materials = null;
     this.group = null;
   }
 
   // ---------- visuals ----------
 
+  /** [ore-mine-visual] Open-pit mine (src/game/OreMineVisual.js); shared materials are fog-patched once per map */
   #build() {
-    const cfg = ORE_DEPOSIT;
-    const group = new THREE.Group();
-    group.name = 'oreDeposit';
-    group.position.copy(this.position);
-    const mat = new THREE.MeshStandardMaterial({
-      color: cfg.crystalColor, emissive: cfg.crystalEmissive, emissiveIntensity: cfg.crystalEmissiveIntensity,
-      roughness: 0.35, metalness: 0.1, flatShading: true, transparent: true, opacity: 1,
+    const world = this.world;
+    if (!world.scene) return;
+    this.materials = acquireMineMaterials(world);
+    this.visual = new OreMineVisual({
+      x: this.x, z: this.z, radius: this.radius, superNode: this.superNode,
+      heightAt: (x, z) => world.heightAt(x, z), planet: world.map?.planet ?? null,
+      terrain: world.ground?.geometry ?? null, // mesh lowered under the pit (visual only, restored by dispose)
+      batch: this.materials.batch, // all mines of the map drawn merged (3 draw calls in total)
     });
-    this.material = mat;
-    const crystal = (height, width) => {
-      const geo = new THREE.OctahedronGeometry(1, 0);
-      geo.scale(width, height / 2, width);
-      geo.translate(0, height / 2, 0);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.castShadow = true;
-      mesh.userData.deposit = this;
-      return mesh;
-    };
-    this.crystals = new THREE.Group();
-    this.crystals.add(crystal(cfg.crystalHeight, cfg.crystalWidth));
-    for (let i = 0; i < cfg.crystalCount; i++) {
-      const a = (i / cfg.crystalCount) * Math.PI * 2;
-      const c = crystal(cfg.crystalHeight * cfg.outerScale, cfg.crystalWidth * cfg.outerScale);
-      c.position.set(Math.sin(a) * this.radius * cfg.ringFactor, 0, Math.cos(a) * this.radius * cfg.ringFactor);
-      c.rotation.set(Math.cos(a) * cfg.tilt, 0, -Math.sin(a) * cfg.tilt);
-      this.crystals.add(c);
-    }
-    group.add(this.crystals);
-    this.world.scene.add(group);
-    this.world.fog?.patchMaterial(mat); // darkened by the fog of war like the rest of the map
-    this.group = group;
-    this._shown = -1;
+    for (const mesh of this.visual.meshes) mesh.userData.deposit = this; // invisible pick proxy → Economy.depositMeshes
+    this.group = this.visual.group;
+    this.group.name = 'oreDeposit';
+    world.scene.add(this.group);
+    this._shown = 1;
+    this._depletedShown = false;
   }
 
   #refreshVisual() {
-    if (!this.crystals) return;
+    if (!this.visual) return;
     const ratio = this.infinite ? 1 : this.ratio;
-    if (Math.abs(ratio - this._shown) < VISUAL_STEP && !(this.depleted && this._shown > 0)) return;
+    const depleted = this.depleted;
+    if (Math.abs(ratio - this._shown) < ORE_DEPOSIT.visualStep && depleted === this._depletedShown) return;
     this._shown = ratio;
-    const cfg = ORE_DEPOSIT;
-    const s = this.depleted ? cfg.minScale : cfg.minScale + (1 - cfg.minScale) * ratio;
-    this.crystals.scale.setScalar(s);
-    this.material.opacity = this.depleted ? cfg.depletedOpacity : 1;
+    this._depletedShown = depleted;
+    this.visual.setRemaining(ratio, depleted);
   }
 }

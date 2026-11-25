@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 114, "row": 114 },
-  "starts": [[98, 166], [98, 98]],
+  "starts": [[97.5, 165.5], [97.5, 97.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Merkur – Odpadlíci", "commander": "Ilja Voss", "start": 0, "ai": null, "label": "start na jižním asteroidu, plná základna" },
     { "seat": 2, "role": "enemy", "faction": "Věrní", "start": 1, "ai": "AI-základna na centrálním asteroidu (sklad zbraní)", "label": "AI-základna na centrálním asteroidu (sklad zbraní)" },

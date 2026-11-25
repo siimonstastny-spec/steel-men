@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[98, 170], [98, 26], [170, 98], [26, 98]],
+  "starts": [[97.5, 169.5], [97.5, 25.5], [169.5, 97.5], [25.5, 97.5]],
   "sides": [],
   "markers": [
     { "key": "d", "index": 1, "id": "d1", "type": "structure", "substrate": "B", "rect": [16, 16, 51, 51], "col": 34, "row": 34, "cells": 1104, "label": "dome: obytné kopule Afrodity v rozích města", "kind": "dome" },

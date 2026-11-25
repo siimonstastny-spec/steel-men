@@ -1,7 +1,7 @@
 // Steel Men – start menu: title screen, new game setup (faction + team colour per team, fog of war, rules)
 // and the Settings screen (SettingsScreen.js). The last new-game choice is kept in the player profile
 // (src/core/Profile.js) and handed to the game through onStart(settings). All texts go through i18n.
-import { MENU, ECONOMY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, GAME_VERSION, GAME_NAME } from '../config.js';
+import { MENU, ECONOMY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, GAME_VERSION, GAME_NAME, A4_UI } from '../config.js';
 import { pickAiNames } from '../ai/AiProfiles.js'; // [N6] call signs of computer players
 import { avatarHtml, humanAvatarHtml } from './Avatar.js';
 import { validPrebuild } from '../game/PreBuild.js'; // [N8] pre-build phase option
@@ -13,7 +13,7 @@ import { startResearchFromSettings } from '../game/StartResearch.js';
 import { optionsHtml, mapSelectHtml, readOptionChange, syncOptions, friendlyFireHtml } from './GameOptions.js'; // [B1]
 import { validPopulationCap } from '../game/Economy.js'; // [W5a]
 import {
-  allianceLetter, ffaAlliances, presetAlliances, normalizeAlliances, hasEnoughAlliances, isAllianceId,
+  allianceLetter, ffaAlliances, presetAlliances, alliancePresets, matchingPresetId, normalizeAlliances, aiPerfWarning, hasEnoughAlliances, isAllianceId,
 } from '../core/AllianceSetup.js';
 import { validCondition, validConditionForSet } from '../game/Victory.js';
 import { colorsTooSimilar, firstDistinctColor } from '../core/ColorCheck.js';
@@ -21,7 +21,7 @@ import { getNewGame, getSettings, saveNewGame, getAvatarImage } from '../core/Pr
 import { onLanguageChange, t } from '../i18n/i18n.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { LobbyScreen } from './LobbyScreen.js';
-import { loadMapCatalog, validMapId } from '../game/MapCatalog.js'; // [MAPS]
+import { loadMapCatalog, validMapId, maxMapPlayers } from '../game/MapCatalog.js'; // [MAPS]
 import { cleanPicks } from '../game/MapStarts.js';
 import { MapPreview, applyStartPick } from './MapPreview.js';
 
@@ -267,37 +267,51 @@ export class MainMenu {
         <span class="row-label">${t('setup.alliances')}</span>
         <div class="factions">
           <button class="faction" data-alliance-preset="ffa" title="${escapeHtml(t('setup.alliance.ffa.hint'))}"><b>${t('setup.alliance.ffa')}</b></button>
-          <button class="faction" data-alliance-preset="team"><b data-role="preset-label"></b></button>
+          <span class="factions" data-role="preset-buttons"></span>
         </div>
-      </div>`;
+      </div>
+      <p class="menu-warn perf-warn" data-role="perf-warn" role="note" hidden></p>`;
   }
 
   #refreshPlayers() {
     const count = this.settings.playerCount;
-    const fit = this.#mapPlayers(); // [MAPS] a map has room for this many players
+    // [A4-UI] a count is offered when some map has that many starts (choosing it switches to such a map)
+    const fit = Math.min(this.maxPlayers, this.maps.length ? maxMapPlayers(this.maps) : this.maxPlayers);
     for (const b of this.el.querySelectorAll('[data-player-count]')) {
       b.classList.toggle('on', Number(b.dataset.playerCount) === count);
       b.disabled = Number(b.dataset.playerCount) > fit;
       b.title = b.disabled ? t('setup.map.tooManyPlayers') : '';
     }
-    const preset = PLAYERS_UI.presets[count];
-    const presetBtn = this.el.querySelector('[data-alliance-preset="team"]');
-    if (presetBtn) {
-      presetBtn.hidden = !preset;
-      if (preset) {
-        presetBtn.querySelector('[data-role="preset-label"]').textContent = t(`setup.alliance.${preset.id}`);
-        presetBtn.title = t(`setup.alliance.${preset.id}.hint`);
-      }
-    }
     const active = this.settings.alliances.slice(0, count);
     const ffa = active.every((a, i) => active.indexOf(a) === i);
-    const same = preset && normalizeAlliances(active).join() === preset.alliances.join();
+    const onId = matchingPresetId(count, active);
+    const presetBox = this.el.querySelector('[data-role="preset-buttons"]');
+    if (presetBox) {
+      const key = `${count}|${t('setup.alliances')}`; // redrawn only when the count (or language) changes
+      if (presetBox.dataset.key !== key) {
+        presetBox.dataset.key = key;
+        presetBox.innerHTML = alliancePresets(count).map((p) => `
+          <button class="faction" data-alliance-preset="${p.id}" title="${escapeHtml(t(`setup.alliance.${p.id}.hint`))}"><b>${t(`setup.alliance.${p.id}`)}</b></button>`).join('');
+      }
+      for (const b of presetBox.querySelectorAll('[data-alliance-preset]')) b.classList.toggle('on', b.dataset.alliancePreset === onId);
+    }
     this.el.querySelector('[data-alliance-preset="ffa"]')?.classList.toggle('on', ffa);
-    presetBtn?.classList.toggle('on', !!same);
+    this.el.querySelector('[data-role="seats"]')?.classList.toggle('compact', count > A4_UI.compactSeatsAbove);
+    const warn = this.el.querySelector('[data-role="perf-warn"]'); // computer players = all seats but the human one
+    if (warn) {
+      const show = aiPerfWarning(count - 1);
+      warn.hidden = !show;
+      if (show) warn.textContent = t('perf.aiWarning', { n: count - 1, max: A4_UI.recommendedMaxAi });
+    }
   }
 
   #setPlayerCount(n) {
     this.settings.playerCount = Math.min(this.maxPlayers, Math.max(PLAYERS_UI.minPlayers, n));
+    // [A4-UI] the chosen map has too few starts: switch to the first map that has enough
+    if (this.maps.length && (this.#currentMap()?.players ?? 0) < this.settings.playerCount) {
+      const fitMap = this.maps.find((m) => m.players >= this.settings.playerCount);
+      if (fitMap) { this.settings.map = fitMap.id; this.settings.startPicks = {}; this.pickSeat = 0; }
+    }
     this.#clampToMap(); // [MAPS]
     this.#dedupeColors(this.settings.colors, this.settings.playerCount);
     this.#alliancesMessage('');
@@ -307,7 +321,7 @@ export class MainMenu {
 
   #applyAlliancePreset(kind) {
     const count = this.settings.playerCount;
-    const layout = kind === 'ffa' ? ffaAlliances(count) : presetAlliances(count);
+    const layout = kind === 'ffa' ? ffaAlliances(count) : presetAlliances(count, kind);
     if (!layout) return;
     layout.forEach((id, i) => { this.settings.alliances[i] = id; });
     this.#alliancesMessage('');
@@ -345,10 +359,16 @@ export class MainMenu {
     const box = this.el.querySelector('[data-role="options"]');
     const mapBox = this.el.querySelector('[data-role="map-select"]'); // [W5a] map select above the preview
     if (box) {
+      // [A4-UI] the map list also depends on the player count (only maps with enough starts are offered)
+      const mapKey = `${this.settings.playerCount}|${this.settings.map}`;
       if (this.optionsMaps !== this.maps) { // first draw, or the map catalogue arrived
         this.optionsMaps = this.maps;
+        this.optionsMapKey = mapKey;
         box.innerHTML = optionsHtml(this.settings);
-        if (mapBox) mapBox.innerHTML = mapSelectHtml(this.settings, { maps: this.maps });
+        if (mapBox) mapBox.innerHTML = mapSelectHtml(this.settings, { maps: this.maps, minPlayers: this.settings.playerCount });
+      } else if (mapBox && this.optionsMapKey !== mapKey) {
+        this.optionsMapKey = mapKey;
+        mapBox.innerHTML = mapSelectHtml(this.settings, { maps: this.maps, minPlayers: this.settings.playerCount });
       }
       syncOptions(box, this.settings);
       if (mapBox) syncOptions(mapBox, this.settings);
@@ -415,7 +435,7 @@ export class MainMenu {
           <div class="setup-layout">
             <div class="setup-main">
               ${this.#playersBlock()}
-              <div class="setup-seats">
+              <div class="setup-seats" data-role="seats">
                 <div class="setup-seat head"><span>${t('setup.player')}</span><span>${t('setup.faction')}</span><span>${t('setup.teamColor')}</span><span>${t('setup.alliance.short')}</span><span>${t('ai.difficulty')}</span></div>
                 ${this.teams.map((tm, i) => this.#teamBlock(i)).join('')}
               </div>

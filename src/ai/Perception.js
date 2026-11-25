@@ -183,16 +183,48 @@ export class Perception {
     this.#readAllyThreat(now);
   }
 
-  /** v3: armed enemies next to an allied building (the base of the most threatened ally) */
+  /**
+   * v3: armed enemies next to an allied building (the base of the most threatened ally).
+   * [A4-SIM] Several allies (4v4, 2×4, 7v1): each enemy counts for the ally whose building is nearest to it; the ally
+   * picked is the one still being helped (while attacked and within AI.allyHelp.radius of our base), else the most
+   * attacked ally within that radius, else the most attacked one (ties: lower team). One ally = the same as before.
+   */
   #readAllyThreat(now) {
     const allies = this.own.allyStructures;
     const a = this.allyThreat;
-    const units = allies.length ? this.visibleEnemies.filter((u) => !u.isStructure && strengthOf(u) > 0
-      && allies.some((s) => dist(posOf(u), posOf(s)) < AI.baseRadius)) : [];
+    let units = [];
+    let team = null;
+    if (allies.length) {
+      const byTeam = new Map(); // ally team -> { units, strength }
+      for (const u of this.visibleEnemies) {
+        if (u.isStructure || strengthOf(u) <= 0) continue;
+        let best = null;
+        let bestD = AI.baseRadius;
+        for (const s of allies) {
+          const d = dist(posOf(u), posOf(s));
+          if (d < bestD || (d === bestD && best && s.team < best.team)) { bestD = d; best = s; }
+        }
+        if (!best) continue;
+        let e = byTeam.get(best.team);
+        if (!e) { e = { units: [], strength: 0 }; byTeam.set(best.team, e); }
+        e.units.push(u);
+        e.strength += strengthOf(u);
+      }
+      const anchor = this.own.anchor;
+      const near = (e) => anchor && dist(anchor, centroid(e.units)) <= AI.allyHelp.radius;
+      const teams = [...byTeam.keys()].sort((x, y) => x - y);
+      const pick = (filter) => {
+        let out = null;
+        for (const t of teams) { const e = byTeam.get(t); if (filter(e) && (out === null || e.strength > byTeam.get(out).strength)) out = t; }
+        return out;
+      };
+      team = a.active && byTeam.has(a.team) && near(byTeam.get(a.team)) ? a.team : (pick(near) ?? pick(() => true));
+      if (team !== null) units = byTeam.get(team).units;
+    }
     if (units.length) {
       a.strength = units.reduce((sum, u) => sum + strengthOf(u), 0);
       a.point = centroid(units);
-      a.team = nearest(allies, a.point)?.team ?? null;
+      a.team = team;
       a.lastSeen = now;
       if (!a.active) { a.active = true; a.since = now; }
     } else if (a.active && now - a.lastSeen > AI.threatForgetSeconds) {

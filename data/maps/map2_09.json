@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[26, 98], [170, 98]],
+  "starts": [[25.5, 97.5], [169.5, 97.5]],
   "sides": [],
   "markers": [
     { "key": "e", "index": 1, "id": "e1", "type": "explosive", "substrate": "B", "rect": [80, 80, 83, 83], "col": 82, "row": 82, "cells": 16, "label": "Cisterny s vodou (řetězový výbuch)" },

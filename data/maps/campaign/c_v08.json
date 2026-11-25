@@ -144,7 +144,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[66, 106]],
+  "starts": [[65.5, 105.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Venuše", "commander": "Selene Arvo", "start": 0, "ai": null, "label": "start jižní dok, plná základna (energie z dobytých generátorů)" },
     { "seat": 2, "role": "enemy", "faction": "Merkur – posádka stanice", "start": null, "ai": "AI-pevnost uvnitř (věže", "label": "AI-pevnost uvnitř (věže, posádky), nostart" },

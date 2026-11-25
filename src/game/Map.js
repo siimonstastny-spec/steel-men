@@ -3,7 +3,7 @@
 // File format (see data/maps/basic.json, described in data/README.md):
 //   size             – width = depth of the square map (units), centred on 0,0
 //   startPositions   – [{ x, z, yaw? }] one per player; yaw defaults to facing the map centre
-//   superNode        – { x, z, radius, coreRadius } central resource node (radius = platform, core = obstacle)
+//   superNode        – { x, z, radius, coreRadius } central resource node (radius = gravel apron, core = obstacle + mine pit)
 //   symmetry         – 'rotate4': every obstacle is copied 3× rotated by 90° around the centre
 //                      (an obstacle with "mirror": false is placed once)
 //   obstacles        – { type: 'rock', x, z, radius, height } | { type: 'ridge', x, z, halfX, halfZ, height }
@@ -21,6 +21,7 @@ import { parseAsciiMap, cellAt, CELL } from './AsciiMap.js';
 import { applyMapEdgeFade } from './MapEdgeFade.js'; // [W9]
 import { terrainGridForMap, lavaCracksForMap } from './TerrainTypes.js'; // [A8-terrain]
 import { MapFx, createWallGeometry, createLavaRibbonGeometry } from '../procedural/maps/MapMaterials.js'; // [A8-style]
+import { OreMineVisual, MineBatch, createMineMaterials, createApronGeometry, createApronMaterial, createDrapedRingGeometry } from './OreMineVisual.js'; // [ore-mine-visual]
 
 /** Canonical map id for an id or alias (unknown ids are returned unchanged and loaded as data/maps/<id>.json) */
 export function resolveMapId(name) {
@@ -224,7 +225,7 @@ export class GameMap {
     applyMapEdgeFade(stoneMat, this.half);
     this.#buildStone(group, stoneMat, heightAt);
     this.#buildLava(group, heightAt);
-    if (this.superNode) group.add(this.#superNode(this.superNode, heightAt));
+    if (this.superNode) group.add(this.#superNode(this.superNode, heightAt, ground?.geometry ?? null));
     for (const p of this.startPositions) group.add(this.#startMarker(p, heightAt));
 
     scene.add(group);
@@ -431,51 +432,45 @@ export class GameMap {
 
   #material(mat) { this.materials.push(mat); return mat; }
 
-  #superNode(node, heightAt) {
+  #superNode(node, heightAt, terrain) {
+    // [ore-mine-visual] worked gravel apron + edge glow; the pit itself belongs to the super node's OreDeposit
+    // (OreMineVisual, depletes like any deposit). A super node without ore gets a static pit here.
     const cfg = MAP.superNode;
     const group = new THREE.Group();
     group.name = 'superNode';
     group.position.set(node.x, heightAt(node.x, node.z), node.z);
+    const core = node.coreRadius ?? node.radius;
 
-    const platform = new THREE.Mesh(
-      new THREE.CylinderGeometry(node.radius, node.radius, cfg.platformHeight, cfg.platformSegments),
-      this.#material(new THREE.MeshStandardMaterial({ color: cfg.platformColor, roughness: 0.8 })),
+    const apron = new THREE.Mesh(
+      createApronGeometry({ x: node.x, z: node.z, radius: node.radius, coreRadius: core, heightAt, planet: this.planet }),
+      this.#material(createApronMaterial()),
     );
-    platform.position.y = cfg.platformHeight / 2;
-    platform.receiveShadow = true;
-    group.add(platform);
+    apron.name = 'superNodeApron';
+    apron.receiveShadow = true;
+    group.add(apron);
 
-    const crystalMat = this.#material(new THREE.MeshStandardMaterial({
-      color: cfg.crystalColor, emissive: cfg.crystalEmissive, emissiveIntensity: cfg.crystalEmissiveIntensity,
-      roughness: 0.3, metalness: 0.1, flatShading: true,
-    }));
-    const crystal = (height, width) => {
-      const geo = new THREE.OctahedronGeometry(1, 0);
-      geo.scale(width, height / 2, width);
-      geo.translate(0, height / 2, 0);
-      const mesh = new THREE.Mesh(geo, crystalMat);
-      mesh.castShadow = true;
-      return mesh;
-    };
-    const centre = crystal(cfg.crystalHeight, cfg.crystalWidth);
-    centre.position.y = cfg.platformHeight;
-    group.add(centre);
-    const ring = (node.coreRadius ?? node.radius) * cfg.crystalRingFactor;
-    for (let i = 0; i < cfg.crystalCount; i++) {
-      const a = (i / cfg.crystalCount) * Math.PI * 2;
-      const scale = i % 2 ? cfg.smallCrystalScale : cfg.largeCrystalScale;
-      const c = crystal(cfg.crystalHeight * scale, cfg.crystalWidth * scale);
-      c.position.set(Math.sin(a) * ring, cfg.platformHeight, Math.cos(a) * ring);
-      c.rotation.set(Math.cos(a) * cfg.crystalTilt, 0, -Math.sin(a) * cfg.crystalTilt);
-      group.add(c);
+    if (!node.ore) {
+      const mats = createMineMaterials();
+      mats.ore.dispose(); // regular ore material not needed here
+      const superOre = this.#material(mats.superOre);
+      // own batch in the super node group's space (origin = group position); geometries freed by Map.dispose
+      const batch = new MineBatch({ stone: this.#material(mats.stone), ore: superOre, superOre }, group.position);
+      const pit = new OreMineVisual({
+        x: node.x, z: node.z, radius: core, superNode: true, heightAt, planet: this.planet, terrain, batch,
+      });
+      batch.flush();
+      pit.group.position.set(0, 0, 0); // pick proxy, local to the super node group
+      group.add(pit.group, batch.group);
     }
 
     const glow = new THREE.Mesh(
-      new THREE.RingGeometry(node.radius - cfg.glowWidth, node.radius, cfg.platformSegments),
+      createDrapedRingGeometry({
+        x: node.x, z: node.z, inner: node.radius - cfg.glowWidth, outer: node.radius, segments: cfg.glowSegments,
+        lift: cfg.apron.lift + MAP.startMarker.height, heightAt,
+      }),
       this.#material(new THREE.MeshBasicMaterial({ color: cfg.glowColor, transparent: true, opacity: cfg.glowOpacity, side: THREE.DoubleSide, depthWrite: false })),
     );
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.y = cfg.platformHeight + MAP.startMarker.height;
+    glow.name = 'superNodeGlow';
     group.add(glow);
     return group;
   }

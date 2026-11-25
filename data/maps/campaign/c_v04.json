@@ -210,7 +210,7 @@
     { "width": 1.19, "points": [[182, 171], [175.81, 175.77], [170.28, 180.26], [167.78, 180.24]] }
   ],
   "superNode": "none",
-  "starts": [[98, 98], [162, 22]],
+  "starts": [[97.5, 97.5], [161.5, 21.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Venuše", "commander": "Selene Arvo", "start": 0, "ai": null, "label": "start střed, datová stanice, plná základna" },
     { "seat": 2, "role": "enemy", "faction": "Země", "start": 1, "ai": "AI-pevnost SV", "label": "AI-pevnost SV" },

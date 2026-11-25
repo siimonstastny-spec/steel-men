@@ -426,9 +426,11 @@ export function delayLoads(ms, world = handle().world) {
   return () => { delete world.spawnDeferred; delete world.deferLoad; delete world.trackLoad; };
 }
 
-async function defaultRaces() {
+/** First `count` playable races of stats.json, repeated in order when there are fewer races than seats ([A4-SIM]) */
+async function defaultRaces(count = 2) {
   await loadStats();
-  return Object.keys(getStats().races ?? {}).slice(0, 2);
+  const all = Object.keys(getStats().races ?? {});
+  return Array.from({ length: count }, (_, i) => all[i % all.length]);
 }
 
 // Starts a match frozen at tick 0 (world.paused): nothing ticks before the harness says so
@@ -469,7 +471,7 @@ function saveable(run) {
 
 const autoKey = (c) => (c.mode === 'human'
   ? `human:${c.races.join('-')}:${c.startSet ?? 'default'}${c.loop ? ':loop' : ''}`
-  : `ai:${c.races.join('-')}:${[].concat(c.difficulty).join('-')}:t${c.startResearch ?? 0}:${c.startSet ?? 'default'}:${c.seconds}${c.loop ? ':loop' : ''}`);
+  : `ai:${c.races.join('-')}:${[].concat(c.difficulty).join('-')}:t${c.startResearch ?? 0}:${c.startSet ?? 'default'}:${c.seconds}${c.loop ? ':loop' : ''}${c.races.length > 2 && c.map ? `:${c.map}` : ''}${c.alliances ? `:a${c.alliances.join('')}` : ''}`); // [A4-SIM] map (3+ seats) / alliances: old 2-seat keys unchanged
 
 // Save key and reference key of a run (opts.save / opts.compareWith / opts.compare)
 function keysOf(config, opts) {
@@ -551,11 +553,16 @@ function submitAttackMoves(h) {
  * @param {object} [opts] races, difficulty (id or one per team), startResearch (0–3 = starting tier), startSet, map,
  *   seed, seconds, points, loop (game loop ticks), delayMs (artificial load delay), speed (loop mode), detailAt,
  *   save, compare, compareWith
+ *   [A4-SIM] 2–8 players: players = seat count when races is missing (races repeat), races.length = seat count,
+ *   alliances = alliance id per seat (missing = everybody alone), e.g.
+ *   det.ai({ players: 8, map: 'Map8_01', alliances: [0, 0, 0, 0, 1, 1, 1, 1], seconds: 600 })
  */
 export async function runAi(opts = {}) {
   const h = handle();
+  const races = opts.races ?? await defaultRaces(opts.players ?? 2);
   const config = {
-    mode: 'ai', races: opts.races ?? await defaultRaces(), difficulty: opts.difficulty ?? 'normal',
+    mode: 'ai', races, difficulty: opts.difficulty ?? 'normal',
+    alliances: Array.isArray(opts.alliances) ? opts.alliances.slice(0, races.length) : null, // [A4-SIM]
     startResearch: opts.startResearch ?? 0, startSet: opts.startSet ?? null, map: opts.map ?? null,
     seed: opts.seed ?? DETERMINISM.seed, seconds: opts.seconds ?? DETERMINISM.aiSeconds,
     points: opts.points ?? DETERMINISM.aiPoints, loop: Boolean(opts.loop), delayMs: opts.delayMs ?? 0,
@@ -564,8 +571,8 @@ export async function runAi(opts = {}) {
   const keys = keysOf(config, opts);
   const ref = await loadReference(keys.against);
   await startMatch(h, {
-    playerCount: 2, races: config.races, seats: ['human', 'human'], seed: config.seed, startSet: config.startSet,
-    map: config.map, startResearch: config.startResearch,
+    playerCount: config.races.length, races: config.races, seats: config.races.map(() => 'human'), seed: config.seed, // [A4-SIM] 2–8 seats
+    startSet: config.startSet, map: config.map, startResearch: config.startResearch, alliances: config.alliances,
   });
   await startAiVsAi({ difficulty: config.difficulty }); // AI data loaded, tick still 0 (world.paused)
   if (h.world.tick !== 0) throw loopTickedError();

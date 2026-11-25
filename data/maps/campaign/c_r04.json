@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[26, 98], [170, 98]],
+  "starts": [[25.5, 97.5], [169.5, 97.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start západ, plná základna" },
     { "seat": 2, "role": "enemy", "faction": "Koloniální správa", "start": 1, "ai": "AI-základna", "label": "AI-základna, východ, zrcadlově k hráči" },

@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[98, 38], [158, 98], [98, 158], [38, 98]],
+  "starts": [[97.5, 37.5], [157.5, 97.5], [97.5, 157.5], [37.5, 97.5]],
   "sides": [],
   "markers": [
     { "key": "s", "index": 1, "id": "s1", "type": "salvage", "substrate": "%", "rect": [48, 36, 51, 39], "col": 50, "row": 38, "cells": 16, "label": "Plovoucí kontejnery a trosky na malé skalce" },

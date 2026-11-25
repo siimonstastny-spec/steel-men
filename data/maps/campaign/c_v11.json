@@ -217,7 +217,7 @@
     { "width": 1.16, "points": [[12, 34], [13.67, 29.39], [12.02, 25.4], [9.22, 20.13]] }
   ],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[98, 82], [98, 166]],
+  "starts": [[97.5, 81.5], [97.5, 165.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Venuše", "commander": "Selene Arvo", "start": 0, "ai": null, "label": "start u startovních ramp uprostřed, plná základna; eskorta reaktorů" },
     { "seat": 2, "role": "ally", "faction": "Země", "start": 1, "ai": null, "label": "„spojenec“ AI-základna jih, snaží se odvézt reaktory k sobě" },

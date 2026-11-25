@@ -144,7 +144,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[30, 58], [114, 62]],
+  "starts": [[29.5, 57.5], [113.5, 61.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start západ, osada klanu pod skalou, malá základna" },
     { "seat": 2, "role": "enemy", "faction": "Koloniální policie", "start": 1, "ai": "AI-pevnost", "label": "AI-pevnost, policejní stanice na východě, hlídky k farmám" },

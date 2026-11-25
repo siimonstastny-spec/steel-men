@@ -211,7 +211,7 @@
     { "width": 1.32, "points": [[79, 27], [77.79, 33.59], [80.88, 37.96]] }
   ],
   "superNode": "none",
-  "starts": [[98, 170], [178, 34]],
+  "starts": [[97.5, 169.5], [177.5, 33.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Venuše", "commander": "Selene Arvo", "start": 0, "ai": null, "label": "start přistávací plochy jih, plná základna; evakuace" },
     { "seat": 2, "role": "enemy", "faction": "Země", "start": 1, "ai": "AI-základna SV za valem Hermopolu", "label": "AI-základna SV za valem Hermopolu" },

@@ -10,7 +10,7 @@
 // a small label (#match-observer), Leave instead of Surrender in the menu, and the alliance's real result at the end.
 // The defeat screen comes when he leaves (menu → Leave) or when his whole alliance is out.
 // Styles: src/ui/match.css. Texts: i18n keys match.*, dialog.surrender, dialog.quit, dialog.leave, victory.*.
-import { MATCH_STATS, MATCH_UI, TEAMS, PAUSE, GAME_SPEED } from '../config.js';
+import { MATCH_STATS, MATCH_UI, TEAMS, PAUSE, GAME_SPEED, A4_UI } from '../config.js';
 import { gameSpeed, speedLabel } from '../game/GameSpeed.js';
 import { getStats } from '../data/Stats.js';
 import { t } from '../i18n/i18n.js';
@@ -393,7 +393,7 @@ export class MatchUi {
     const section = (label) => `<tr class="section"><th colspan="${count + 1}">${label}</th></tr>`;
     const kindRows = (bag) => MATCH_STATS.unitKinds.map((k) => row(t(`match.kind.${k}`), (tm) => tm[bag][k]));
     const amount = (n) => Math.round(n);
-    return `<table class="match-stats"><thead>${groupRow}<tr><th></th>${head}</tr>${outcomeRow}</thead><tbody>
+    return `<table class="match-stats${count > A4_UI.statsManyRowsAbove ? ' many' : ''}"><thead>${groupRow}<tr><th></th>${head}</tr>${outcomeRow}</thead><tbody>
       ${section(t('match.stats.produced'))}${kindRows('produced').join('')}
       ${section(t('match.stats.lost'))}${kindRows('lost').join('')}
       ${section(t('match.stats.destroyed'))}

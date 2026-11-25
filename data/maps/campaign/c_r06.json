@@ -272,7 +272,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[130, 30], [130, 234]],
+  "starts": [[129.5, 29.5], [129.5, 233.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Mars – domobrana", "commander": "Kaja Orlov", "start": 0, "ai": null, "label": "start sever, tajné horské přistání, eskorta zásilky (bez stavby základny)" },
     { "seat": 2, "role": "ally", "faction": "Mars – domobrana", "commander": "cílová základna", "start": 1, "ai": "AI-pevnost", "label": "AI-pevnost, cíl eskorty na jihu" },

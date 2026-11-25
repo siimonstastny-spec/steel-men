@@ -144,7 +144,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[66, 110], [66, 62]],
+  "starts": [[65.5, 109.5], [65.5, 61.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Merkur – Odpadlíci", "commander": "Ilja Voss", "start": 0, "ai": null, "label": "start v malém sále na jihu, základna (půlka v čase T přeběhne)" },
     { "seat": 2, "role": "enemy", "faction": "Věrní", "start": 1, "ai": "AI-pevnost v kasárnách uprostřed (stejná frakce", "label": "AI-pevnost v kasárnách uprostřed (stejná frakce, jiná barva)" }

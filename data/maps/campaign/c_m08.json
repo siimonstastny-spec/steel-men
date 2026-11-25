@@ -144,7 +144,7 @@
   ] },
   "lavaCracks": [],
   "superNode": "none",
-  "starts": [[66, 94]],
+  "starts": [[65.5, 93.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Merkur", "commander": "Ilja Voss", "start": 0, "ai": null, "label": "start na hlavní plošině, plná základna" },
     { "seat": 2, "role": "enemy", "faction": "Země – průzkum", "start": null, "ai": "AI-vlny", "label": "AI-vlny, nostart – slabé výsadky na okrajích (a)" }

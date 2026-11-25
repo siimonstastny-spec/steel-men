@@ -65,6 +65,9 @@ export class AiPlayer {
     this.tokens = AI.apmBurst;
     this.stats = { commands: 0, dropped: 0, wavesSent: 0, wavesRecalled: 0, firstAttackAt: null, startedAt: null };
     this.log = [];         // recent decisions (console debugging): { time, text }
+    this.phased = false;   // [A4-SIM] setPhase applied (src/ai/index.js, AI_SPREAD)
+    this.phase = 0;        // [A4-SIM] its timer shift (s)
+    this.tickResult = { perceived: false, managers: 0 }; // [A4-SIM] update() result, reused
     /** Blackboard shared by the managers */
     this.bb = {
       state: 'build',            // Strategy: 'build' | 'attack' | 'defend'
@@ -161,13 +164,16 @@ export class AiPlayer {
    * Cheap when nothing is due.
    */
   update(simTime) {
-    if (!this.isReady || this.finished || !this.world.economy || !this.world.production) return;
+    if (!this.isReady || this.finished || !this.world.economy || !this.world.production) return null;
+    const r = this.tickResult; // [A4-SIM] what this call did (aiTickStats), reused – no allocation per tick
+    r.perceived = false;
+    r.managers = 0;
     if (this.lastTime === null) { this.lastTime = simTime; this.stats.startedAt = simTime; }
     const dt = Math.min(AI.maxUpdateStep, Math.max(0, simTime - this.lastTime));
     this.lastTime = simTime;
     this.now = simTime;
-    this.perception.update(simTime, dt);
-    if (!this.perception.own.anchor) return; // nothing left to play with
+    r.perceived = this.perception.update(simTime, dt);
+    if (!this.perception.own.anchor) return r; // nothing left to play with
     if (!this.bootstrapped) { // [A2-ai] once, with the first own-unit refresh: read the game in progress
       this.bootstrapped = true;
       if (this.resumed) resumeFromWorld(this, simTime);
@@ -177,9 +183,24 @@ export class AiPlayer {
       e.timer -= dt;
       if (e.timer > 0) continue;
       e.timer = e.interval * scale;
+      r.managers++;
       try { e.m.think(simTime); } catch (err) { console.error(`[AI ${this.team}] ${e.m.constructor.name} failed`, err); }
     }
     this.#flush(dt);
+    return r;
+  }
+
+  /**
+   * [A4-SIM] Shifts this AI's perception refresh and manager timers later by `seconds` (once; src/ai/index.js gives
+   * each AI its own shift so many AIs do not think in the same tick). Deterministic: depends on the teams only.
+   */
+  setPhase(seconds) {
+    if (this.phased) return;
+    this.phased = true;
+    this.phase = seconds;
+    if (!(seconds > 0)) return;
+    this.perception.timer += seconds;
+    for (const e of this.managers) e.timer += seconds;
   }
 
   // ---------- commands (rate limited) ----------
@@ -311,6 +332,7 @@ export class AiPlayer {
       resumed: this.resumed ? (this.stats.resumedAt === undefined ? 'pending' : Math.round(this.stats.resumedAt)) : '-',
       commands: this.stats.commands,
       dropped: this.stats.dropped,
+      phase: this.phase ? `${this.phase.toFixed(2)} s` : '-', // [A4-SIM] timer shift against the other AIs (AI_SPREAD)
     };
   }
 

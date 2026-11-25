@@ -1,7 +1,7 @@
 // Steel Men – multiplayer lobby screen (opened from MainMenu). Talks only to the Lobby API of
 // docs/MULTIPLAYER.md (src/net/Lobby.js): create / join, seat list, own faction + colour + ready,
 // host game settings, Start. Texts go through t('lobby.*'); styles in lobby.css (loaded by this module).
-import { NET, MENU, ECONOMY, VICTORY, LOBBY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, LOBBY_CONTINUE, MAP_MODES } from '../config.js';
+import { NET, MENU, ECONOMY, VICTORY, LOBBY, AIMENU, GAME_SPEED, AI_PLAYERS, LOBBY_CONTINUE, MAP_MODES, A4_UI } from '../config.js';
 import { cleanAiIdentity } from '../ai/AiProfiles.js'; // [N6]
 import { avatarForNetwork, avatarHtml, humanAvatarHtml } from './Avatar.js';
 import { validPrebuild } from '../game/PreBuild.js'; // [N8] pre-build phase option
@@ -12,7 +12,7 @@ import { oreMultiplierFromSettings } from '../game/OreMultiplier.js'; // [B1]
 import { startMultiplierFromSettings } from '../game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings } from '../game/StartResearch.js';
 import { optionsHtml, mapSelectHtml, readOptionChange, friendlyFireHtml } from './GameOptions.js'; // [B1]
-import { allianceLetter, ffaAlliances, hasEnoughAlliances, normalizeAlliances, presetAlliances } from '../core/AllianceSetup.js';
+import { allianceLetter, ffaAlliances, hasEnoughAlliances, presetAlliances, alliancePresets, matchingPresetId, aiPerfWarning } from '../core/AllianceSetup.js';
 import { colorsTooSimilar, firstDistinctColor } from '../core/ColorCheck.js';
 import { getAvatarImage, getSettings, getLobbyPrefs, saveLobbyPrefs } from '../core/Profile.js';
 import { t } from '../i18n/i18n.js';
@@ -622,7 +622,7 @@ export class LobbyScreen {
   #alliancePreset(kind) {
     if (!this.#isHost()) return;
     const count = this.#seats().filter((s) => s.open).length;
-    const layout = kind === 'ffa' ? ffaAlliances(count) : presetAlliances(count);
+    const layout = kind === 'ffa' ? ffaAlliances(count) : presetAlliances(count, kind);
     if (layout) this.#call(() => this.lobby.setAllianceLayout(layout));
   }
 
@@ -783,7 +783,10 @@ export class LobbyScreen {
   #addAi(team) {
     if (!this.#isHost()) return;
     const taken = this.#seats().filter((s) => s.color).map((s) => s.color);
-    const color = firstDistinctColor(MENU.teamPalette.map((p) => p.color), taken) ?? this.teams[team]?.color;
+    // [A4-UI] default colour = the seat's own (by position) when it is distinct from the taken ones, else the first free palette colour
+    const own = this.teams[team]?.color;
+    const color = own && !taken.some((c) => colorsTooSimilar(c, own)) ? own
+      : firstDistinctColor(MENU.teamPalette.map((p) => p.color), taken) ?? own;
     const race = this.races[team % Math.max(1, this.races.length)]?.key;
     this.error = '';
     this.#call(() => this.lobby.addAi(team, { difficulty: AIMENU.defaultDifficulty, race, color }));
@@ -1100,7 +1103,8 @@ export class LobbyScreen {
       <div class="setup-layout">
         <div class="setup-main">
           ${host && !cont ? this.#presetBar(seats) : ''}
-          <div class="setup-seats${cont ? ' continue' : ''}" role="list">
+          ${this.#perfWarning(seats)}
+          <div class="setup-seats${cont ? ' continue' : ''}${seats.filter((s) => s.open).length > A4_UI.compactSeatsAbove ? ' compact' : ''}" role="list">
             <div class="setup-seat head with-actions"><span>${t('setup.player')}</span><span>${t('setup.faction')}</span><span>${t('setup.teamColor')}</span><span>${t('setup.alliance.short')}</span><span>${t('lobby.state')}</span><span></span></div>
             ${seats.map((s, i) => this.#seatRow(s, i, mine, host)).join('')}
           </div>
@@ -1135,16 +1139,23 @@ export class LobbyScreen {
     const open = seats.filter((s) => s.open);
     const ids = open.map((s) => s.alliance);
     const ffa = ids.every((a, i) => ids.indexOf(a) === i);
-    const preset = PLAYERS_UI.presets[open.length];
-    const layoutOn = !!preset && normalizeAlliances(ids).join() === preset.alliances.join();
+    const on = matchingPresetId(open.length, ids); // [A4-UI] several layouts per player count
+    const buttons = alliancePresets(open.length).map((p) => `<button class="faction${on === p.id ? ' on' : ''}" data-lb="alliancePreset" data-value="${p.id}" title="${escapeHtml(t(`setup.alliance.${p.id}.hint`))}"><b>${t(`setup.alliance.${p.id}`)}</b></button>`).join('');
     return `
       <div class="setup-tools lobby-alliances">
         <span class="row-label">${t('setup.alliances')}</span>
         <div class="factions">
           <button class="faction${ffa ? ' on' : ''}" data-lb="alliancePreset" data-value="ffa" title="${escapeHtml(t('setup.alliance.ffa.hint'))}"><b>${t('setup.alliance.ffa')}</b></button>
-          ${preset ? `<button class="faction${layoutOn ? ' on' : ''}" data-lb="alliancePreset" data-value="team" title="${escapeHtml(t(`setup.alliance.${preset.id}.hint`))}"><b>${t(`setup.alliance.${preset.id}`)}</b></button>` : ''}
+          ${buttons}
         </div>
       </div>`;
+  }
+
+  // [A4-UI] Performance warning when many computer players play (host and guests see it)
+  #perfWarning(seats) {
+    const ai = seats.filter((s) => s.open && s.controller === 'ai').length;
+    if (!aiPerfWarning(ai)) return '';
+    return `<p class="menu-warn perf-warn" role="note">${escapeHtml(t('perf.aiWarning', { n: ai, max: A4_UI.recommendedMaxAi }))}</p>`;
   }
 
   // [N5b] Closed seat: not in the game; the host can open it

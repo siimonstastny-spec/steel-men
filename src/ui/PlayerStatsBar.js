@@ -8,13 +8,24 @@
 //   bar.refresh()          re-read now
 //   bar.dispose()
 // Styles: HUD v2 – the panel is built from stats_top (header) + one stats_row per team + stats_bottom (hud2 artwork);
-// the rules live in hud.css (#player-stats-bar). player-stats.css is no longer loaded (obsolete file).
-import { PLAYER_STATS_BAR, TEAMS } from '../config.js';
+// the rules live in hud.css (#player-stats-bar). [A4-UI] player-stats.css only adds the slim rows (.psb-many, 5+ teams).
+import { PLAYER_STATS_BAR, TEAMS, A4_UI } from '../config.js';
 import { allianceOf } from '../game/Alliances.js';
 import { playerLabel } from '../core/PlayerLabels.js';
 import { onLanguageChange, t } from '../i18n/i18n.js';
 
 const P = PLAYER_STATS_BAR;
+
+// [A4-UI] player-stats.css (slim rows for many teams) is a separate file next to this module
+try {
+  const href = new URL('./player-stats.css', import.meta.url).href;
+  if (!document.querySelector(`link[href="${href}"]`)) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    document.head.appendChild(link);
+  }
+} catch { /* no DOM / odd URL: the bar still works with the hud.css look */ }
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 /** 950 → "950", 12345 → "12.3k" */
@@ -73,6 +84,7 @@ export class PlayerStatsBar {
     const foot = document.createElement('div'); // stats_bottom piece
     foot.className = 'psb-foot';
     this.el.appendChild(foot);
+    this.el.classList.toggle('psb-many', teams.length > A4_UI.statsManyRowsAbove); // [A4-UI] slimmer rows for 5–8 teams
     this.lastSolo = this.rows.map(() => NaN);
     this.lastAlly = this.rows.map(() => NaN);
     this.lastOut = this.rows.map(() => null);

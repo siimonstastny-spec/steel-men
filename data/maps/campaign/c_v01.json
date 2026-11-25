@@ -147,7 +147,7 @@
     { "width": 0.98, "points": [[63, 59], [57.49, 62.96], [52.54, 64.17], [46.1, 68.32]] }
   ],
   "superNode": "none",
-  "starts": [[66, 102]],
+  "starts": [[65.5, 101.5]],
   "sides": [
     { "seat": 1, "role": "player", "faction": "Venuše", "commander": "Selene Arvo", "start": 0, "ai": null, "label": "start, elektrárna Ištar, plná základna" },
     { "seat": 2, "role": "enemy", "faction": "Země – rekviziční sbor", "start": null, "ai": "AI-vlny z přistávací plochy", "label": "AI-vlny z přistávací plochy, po 8 min AI-pevnost na severní plošině, nostart" }

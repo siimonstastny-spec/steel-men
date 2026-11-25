@@ -6,7 +6,8 @@
 // In the browser console (game page open, any state):
 //   (await import('./src/net/selftest.js')).runNetSelftest()
 // Returns { ok, results: [...] } and prints a table.
-import { NET, NET_LEAVE, SAVE, SIM_VERSION } from '../config.js';
+import { NET, NET_LEAVE, SAVE, SIM_VERSION, TEAMS, PROFILE, AI_PLAYERS, LOBBY } from '../config.js';
+import { wireLobbyState, unwireLobbyState, jsonSize } from './Lobby.js'; // [A4-SIM]
 import { SaveSender, SaveReceiver, encodeSave } from './SaveTransfer.js'; // [A2-net]
 import { Lockstep } from './Lockstep.js';
 import { commandBus, splitCommand, registerCommand, isRegistered } from '../game/commands/CommandBus.js';
@@ -117,21 +118,23 @@ class FakeNet {
  * One scenario: two players, random commands, optional burst (forces split messages), optional corrupted hash.
  * @returns {{name, ok, problems: string[], ...}}
  */
-function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks: span = 600, burstAtTick = -1, slowB = 1, corruptBAt = Infinity, startTick = 0 }) {
+function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks: span = 600, burstAtTick = -1, slowB = 1, corruptBAt = Infinity, startTick = 0, ids = ['A', 'B'], aiTeams = [] }) {
   // [A2-net] startTick: a continued match – both worlds already stand at startTick, the lockstep goes on from there
+  // [A4-SIM] ids: 2–8 human clients (ids[0] = host, team = index); aiTeams: computer teams the host commands
   const ticks = startTick + span;
   const net = new FakeNet({ drop, latency, jitter, seed });
   const rng = mulberry32(seed * 7919);
-  const players = [{ team: 0, playerId: 'A' }, { team: 1, playerId: 'B' }];
+  const players = ids.map((id, team) => ({ team, playerId: id }));
   const config = { hashEveryTurns: 5 };
-  const clients = ['A', 'B'].map((id, team) => {
+  const clients = ids.map((id, team) => {
     const channel = net.channel(id);
     const world = new FakeWorld();
     world.tick = startTick;
     const bus = new FakeBus();
-    const ls = new Lockstep({ channel, world, commandBus: bus, players, localTeam: team, hostId: 'A', timers: false, now: () => net.time, config, startTick });
+    const ls = new Lockstep({ channel, world, commandBus: bus, players, localTeam: team, hostId: ids[0], timers: false, now: () => net.time, config, startTick, aiTeams });
     return { id, team, world, bus, ls, submitted: 0, burstDone: false, stalls: 0 };
   });
+  const aiSubmitted = new Map(aiTeams.map((t) => [t, 0])); // [A4-SIM] commands the host gave for each AI team
   clients[1].world.corruptFrom = corruptBAt;
   for (const c of clients) c.ls.start();
 
@@ -144,6 +147,7 @@ function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks:
       if (c.team === 1 && rng() > slowB) continue; // B is a slower machine: skips frames
       if (c.world.tick < stopSubmitAt) {
         if (rng() < 0.15) { c.bus.submit({ type: 'test', team: c.team, n: c.submitted++ }); }
+        if (c.team === 0) for (const t of aiTeams) if (rng() < 0.15) { const n = aiSubmitted.get(t); aiSubmitted.set(t, n + 1); c.bus.submit({ type: 'test', team: t, n }); } // [A4-SIM] host = AI
         if (c.world.tick >= burstAtTick && burstAtTick >= 0 && !c.burstDone) {
           c.burstDone = true;
           const pad = 'x'.repeat(700);
@@ -168,11 +172,14 @@ function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks:
   const [A, B] = clients;
   const logOf = (c) => c.bus.log.map((e) => `${e.tick}:${e.cmd.team}:${e.cmd.type}:${e.cmd.n}`);
   const la = logOf(A);
-  const lb = logOf(B);
-  if (A.world.tick < ticks || B.world.tick < ticks) problems.push(`did not finish: A ${A.world.tick}, B ${B.world.tick} / ${ticks}`);
-  if (la.join() !== lb.join()) {
-    const i = la.findIndex((x, k) => x !== lb[k]);
-    problems.push(`command logs differ at #${i}: A ${la[i]} vs B ${lb[i]}`);
+  const unfinished = clients.filter((c) => c.world.tick < ticks);
+  if (unfinished.length) problems.push(`did not finish: ${clients.map((c) => `${c.id} ${c.world.tick}`).join(', ')} / ${ticks}`);
+  for (const c of clients.slice(1)) { // [A4-SIM] every client against the host
+    const lc = logOf(c);
+    if (la.join() !== lc.join()) {
+      const i = la.findIndex((x, k) => x !== lc[k]);
+      problems.push(`command logs differ at #${i}: A ${la[i]} vs ${c.id} ${lc[i]}`);
+    }
   }
   if (startTick > 0 && A.bus.log.some((e) => e.tick <= startTick)) problems.push(`a command ran at or before the start tick ${startTick}`); // [A2-net]
   const executed = (c, team) => c.bus.log.filter((e) => e.cmd.team === team).length;
@@ -181,6 +188,7 @@ function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks:
       if (executed(other, c.team) !== c.submitted) problems.push(`${other.id} executed ${executed(other, c.team)} of ${c.submitted} commands of team ${c.team}`);
     }
   }
+  for (const [t, n] of aiSubmitted) for (const c of clients) if (executed(c, t) !== n) problems.push(`${c.id} executed ${executed(c, t)} of ${n} commands of AI team ${t}`); // [A4-SIM]
   // order inside a tick: team ascending
   for (let i = 1; i < A.bus.log.length; i++) {
     const p = A.bus.log[i - 1];
@@ -191,8 +199,9 @@ function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks:
   if (B.bus.log.some((e) => e.cmd.team === 0 && e.cmd.origin !== 'A')) problems.push('remote origin not the sender');
   if (net.stats.oversize) problems.push(`${net.stats.oversize} oversize messages`);
   const expectDesync = corruptBAt < ticks;
-  const desync = !!(A.ls.status.desync || B.ls.status.desync);
-  if (desync !== expectDesync) problems.push(expectDesync ? 'corrupted hash NOT detected' : `false desync ${JSON.stringify(A.ls.status.desync || B.ls.status.desync)}`);
+  const desyncOf = clients.map((c) => c.ls.status.desync).find(Boolean) ?? null;
+  const desync = !!desyncOf;
+  if (desync !== expectDesync) problems.push(expectDesync ? 'corrupted hash NOT detected' : `false desync ${JSON.stringify(desyncOf)}`);
   if (expectDesync) problems.splice(0, problems.length, ...problems.filter((p) => p.startsWith('corrupted'))); // logs equal is all that matters there
   for (const c of clients) c.ls.stop();
   const seconds = net.time / 1000;
@@ -200,9 +209,9 @@ function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks:
     name,
     ok: problems.length === 0,
     problems,
-    ticks: `${A.world.tick}/${B.world.tick}`,
+    ticks: clients.map((c) => c.world.tick).join('/'),
     commands: la.length,
-    msgsPerSecPerClient: +(net.stats.sent / 2 / seconds).toFixed(1),
+    msgsPerSecPerClient: +(net.stats.sent / clients.length / seconds).toFixed(1),
     dropped: net.stats.dropped,
     maxBytes: net.stats.maxBytes,
     realTimeS: +seconds.toFixed(1),
@@ -383,6 +392,46 @@ function runChunkTest() {
   return { name: 'splitCommand / chunk join', ok: problems.length === 0, problems };
 }
 
+/** [A4-SIM] eight client ids (team = index, 'A' = host) */
+const IDS8 = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+/**
+ * [A4-SIM] Size of the host's lobby message with MAX_PLAYERS seats (half human with the longest nicknames in 2-byte
+ * characters, half AI with long call signs), 4 kicked ids, 2 spectators over the limit, optionally a continue summary.
+ * Must fit NET.maxMessageBytes (the state also travels in the host presence) and survive wire → unwire unchanged.
+ */
+function runLobbySizeTest(withContinue) {
+  const problems = [];
+  const pid = (i) => `peer${i}`.padEnd(20, 'x');
+  const nick = 'Ž'.repeat(PROFILE.nicknameMaxLength);
+  const seats = TEAMS.map((_, team) => (team % 2 === 0
+    ? { team, controller: 'human', playerId: pid(team), nickname: nick, race: 'X', color: '#3a5ccc', ready: true, open: true, alliance: team % 4 }
+    : { team, controller: 'ai', playerId: null, nickname: '', race: 'Y', color: '#c8302c', ready: true, open: true, alliance: team % 4,
+      difficulty: 'normal', aiName: 'W'.repeat(AI_PLAYERS.nameMaxLength), avatar: 11 }));
+  const settings = {
+    map: 'Map8_01', fogOfWar: 'explored', victory: 'annihilation', energyCap: 1000, populationCap: 200, speed: 1, prebuild: 0,
+    startSet: 'default', oreMultiplier: 1, startMultiplier: 1, startResearch: 0, superweapons: true,
+    friendlyFire: { enabled: false, artilleryOnly: false, reduced: false },
+    startPicks: Object.fromEntries(TEAMS.map((_, t) => [t, t])), startPicksByTeam: Object.fromEntries(TEAMS.map((_, t) => [t, t])),
+  };
+  const state = {
+    code: 'ABCDE', name: 'Ž'.repeat(LOBBY.nameMaxLength), hostId: pid(0), seats, settings, v: 12345, simVersion: SIM_VERSION,
+    kicked: [pid(90), pid(91), pid(92), pid(93)], full: [pid(94), pid(95)],
+  };
+  if (withContinue) {
+    state.continue = {
+      name: 'Ž'.repeat(SAVE.nameMaxLength ?? 60), mapId: 'Map8_01', mapName: 'Map8_01', durationTicks: 1234567, simVersion: SIM_VERSION,
+      seats: seats.map((s) => ({ team: s.team, race: s.race, color: s.color, alliance: s.alliance, originalController: s.controller, originalName: nick, start: s.team })),
+    };
+  }
+  const bytes = jsonSize({ op: 'state', state: wireLobbyState(state) });
+  const raw = jsonSize({ op: 'state', state });
+  if (bytes > NET.maxMessageBytes) problems.push(`lobby message ${bytes} B > NET.maxMessageBytes ${NET.maxMessageBytes} (would travel in the presence only)`);
+  const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x)); // [A4] key order does not matter
+  if (canon(unwireLobbyState(wireLobbyState(state))) !== canon(state)) problems.push('wire → unwire changed the state');
+  return { name: `lobby state size, ${TEAMS.length} seats${withContinue ? ' + continue summary' : ''}`, ok: problems.length === 0, problems, maxBytes: bytes, rawBytes: raw };
+}
+
 export function runNetSelftest() {
   const scenarios = [
     { name: 'perfect network', seed: 1 },
@@ -411,11 +460,24 @@ export function runNetSelftest() {
     { leave: true, name: 'b6: host A + AI 2 allied with B, A leaves → B\'s side wins', ids: ['A', 'B'], leaveId: 'A', aiTeams: [2], alliances: { 0: 0, 1: 0, 2: 1 }, latency: 40, seed: 29, expectOut: [0, 2], expectWinners: [1] },
     { leave: true, name: 'leave2: A + AI 2 allied vs B, B leaves → A\'s alliance wins', ids: ['A', 'B'], leaveId: 'B', aiTeams: [2], alliances: { 0: 0, 1: 1, 2: 0 }, latency: 40, seed: 24, expectOut: [1], expectWinners: [0, 2] },
     { leave: true, name: 'leave2: 3 players, C leaves (10 % loss) → C defeated, A vs B go on', drop: 0.1, latency: 60, jitter: 40, seed: 25, expectOut: [2], expectWinners: null },
+    // [A4-SIM] up to 8 players
+    { name: '8 players, 80±60 ms, 20 % loss, burst', ids: IDS8, drop: 0.2, latency: 80, jitter: 60, seed: 51, burstAtTick: 150 },
+    { name: '8 players, slow client B (skips 40 % frames)', ids: IDS8, drop: 0.1, latency: 60, jitter: 30, seed: 52, slowB: 0.6 },
+    { name: '2 players + 6 AI (host commands teams 2–7), 20 % loss', aiTeams: [2, 3, 4, 5, 6, 7], drop: 0.2, latency: 80, jitter: 60, seed: 53, burstAtTick: 120 },
+    { name: '8 players, corrupted hash detected', ids: IDS8, latency: 40, seed: 54, corruptBAt: 300 },
+    { leave: true, name: 'leave: 8 players, E leaves → 7 go on', ids: IDS8, leaveId: 'E', latency: 40, jitter: 20, seed: 55, expectOut: [4], expectWinners: null },
+    { leave: true, name: 'leave: 8 players, F\'s last turns only reach B (relay), 10 % loss', ids: IDS8, leaveId: 'F', cutTo: 'A', drop: 0.1, latency: 60, jitter: 40, seed: 56, expectOut: [5], expectWinners: null },
+    { leave: true, name: 'leave: 8 players, host A leaves → B coordinates', ids: IDS8, leaveId: 'A', latency: 40, seed: 57, expectOut: [0], expectWinners: null },
+    { leave: true, name: 'leave: 2 players + 6 AI, B leaves → A vs AI go on', ids: ['A', 'B'], leaveId: 'B', aiTeams: [2, 3, 4, 5, 6, 7], latency: 40, seed: 58, expectOut: [1], expectWinners: null },
+    { leave: true, name: 'leave: 7v1 – host A + 6 allied AI vs B, B leaves → A\'s side wins', ids: ['A', 'B'], leaveId: 'B', aiTeams: [2, 3, 4, 5, 6, 7], alliances: { 0: 0, 1: 1, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 }, latency: 40, seed: 59, expectOut: [1], expectWinners: [0, 2, 3, 4, 5, 6, 7] },
   ];
   const results = scenarios.map(({ leave, ...s }) => {
     try { return leave ? runLeaveScenario(s) : runScenario(s); } catch (err) { return { name: s.name, ok: false, problems: [String(err?.stack ?? err)] }; }
   });
   try { results.push(runChunkTest()); } catch (err) { results.push({ name: 'splitCommand / chunk join', ok: false, problems: [String(err?.stack ?? err)] }); }
+  for (const cont of [false, true]) { // [A4-SIM]
+    try { results.push(runLobbySizeTest(cont)); } catch (err) { results.push({ name: 'lobby state size', ok: false, problems: [String(err?.stack ?? err)] }); }
+  }
   const ok = results.every((r) => r.ok);
   console.table(results.map(({ problems, ...r }) => ({ ...r, problems: problems.join(' | ') })));
   console.log(ok ? '[net selftest] ALL PASSED' : '[net selftest] FAILED', results.filter((r) => !r.ok));

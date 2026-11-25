@@ -18,7 +18,7 @@ import { FullscreenOffer } from './ui/FullscreenOffer.js'; // [A5] one-time "tur
 import { Minimap } from './ui/Minimap.js';
 import { Hud } from './ui/Hud.js';
 import { EdgeScroll } from './ui/EdgeScroll.js';
-import { MAP, MENU, PLAYER_TEAM, TEAMS, basicLoadout, ECONOMY, START_LAYOUT, TEST_SCENE, SIM, NET, NET_LEAVE, SEATS, AIMENU, MAP_MODE_ANY } from './config.js';
+import { MAP, MENU, PLAYER_TEAM, TEAMS, basicLoadout, ECONOMY, START_LAYOUT, TEST_SCENE, SIM, NET, NET_LEAVE, SEATS, AIMENU, MAP_MODE_ANY, A4_UI } from './config.js';
 import { assignStarts } from './game/MapStarts.js';
 import { validMapId } from './game/MapCatalog.js';
 import { loadStats, raceList, raceName, createUnlocks, getStats, unitStats, crewStats, modelRaceOf, partStats } from './data/Stats.js';
@@ -56,7 +56,8 @@ import { play as playSound, disposeAudio, unlockAudio, setListenerPosition, setS
 import { GameSounds } from './audio/GameSounds.js'; // [A6] announcements (unit ready, research, under attack…)
 import { install as installUiSounds } from './audio/UiSounds.js'; // [A6] UI click / hover
 import { RallyMarkers } from './ui/RallyMarkers.js';
-import { createAi, updateAis, clearAis } from './ai/index.js';
+import { createAi, updateAis, clearAis, aiTickStats } from './ai/index.js';
+import { PerfPanel } from './ui/PerfPanel.js'; // [A4] F2 performance overlay
 import { setAlliances, normalizeAlliances, startOrder, alliesOf, areAllies, clampPlayerCount } from './game/Alliances.js';
 import { installAiConsole } from './ai/aiVsAi.js';
 import { installDeterminismConsole } from './debug/DeterminismHarness.js';
@@ -187,6 +188,8 @@ input.onGameMenu = () => matchUi.toggleMenu();
 const nameOf = (team) => playerLabel(team) || (isLocal(team) ? (getSettings().nickname || t('common.player'))
   : window.steelMen?.net?.nameOf?.(team) || t('ping.player', { n: team + 1 }));
 const statsBar = new PlayerStatsBar({ nameOf });
+const perfPanel = new PerfPanel(); // [A4] measures outside the simulation only (performance.now never feeds the state)
+let perfTickMs = -1, perfAiMs = -1, perfTicks = 0, perfLastFrameMs = 0, perfCountFrames = 0; // tick / AI ms summed over the frame, perfTicks = ticks in it
 const diplomacy = new DiplomacyView({ nameOf });
 const stockWindow = new StockWindow(); // [F1]
 input.onStockWindow = () => stockWindow.toggle();
@@ -195,7 +198,7 @@ let econAlerts = null; // [D2] no main building / low energy; created at the fir
 // Debug handle for the browser console, e.g. steelMen.input.selection, steelMen.game.playerRace
 // commandBus: steelMen.commandBus.submit({...}); world.stateHash() / world.rng / world.tick for determinism checks
 // startGame(settings): console tests of N players, e.g. steelMen.startGame({ playerCount: 4, alliances: [0, 0, 1, 1], … })
-window.steelMen = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow, saveGame, saveStore };installAiConsole(); // steelMen.ai.start / fastForward / report / log / stop (AI vs AI test)
+window.steelMen = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow, saveGame, saveStore, perfPanel, aiTickStats };installAiConsole(); // steelMen.ai.start / fastForward / report / log / stop (AI vs AI test)
 installDeterminismConsole(); // [I1] steelMen.det – determinism runs (docs/notes/i1-determinism.md)
 window.steelMen.modelBudget = (opts) => import('./procedural/debug/ModelBudget.js').then((B) => B.runModelBudget(opts)); // [B4] model triangle / draw call budget
 window.steelMen.sound = { play: playSound, unlock: unlockAudio, stopAll: stopAllSounds, dispose: disposeAudio, weapon: weaponSoundEvent }; // [A6] steelMen.sound.play('shotCannon')
@@ -422,7 +425,7 @@ function enemyJobs(race, loadouts) {
  * @param {{races: string[], colors: string[], friendlyFire: object, seed?: number|string}} settings
  *   races/colors: index = team (0 player, 1 enemy); seed = simulation seed (multiplayer: from the host;
  *   missing = random, single player)
- *   [N5] playerCount (2–4, missing = 2) = seats 0..playerCount-1 take part; alliances[team] = alliance id (missing =
+ *   [N5] playerCount (2–8, missing = 2) = seats 0..playerCount-1 take part; alliances[team] = alliance id (missing =
  *   everybody alone); races / colors / seats / aiDifficulty are read for those seats only. Test units: seats 0 and 1
  *   as before, the other seats get only their starting base.
  */
@@ -935,6 +938,7 @@ function startSimulation(seed) {
 function stopSimulation() { simRunning = false; }
 
 function simTick() {
+  const perfT0 = performance.now(); // [A4] UI measurement only
   captureTransforms();
   commandBus.executeTick(world, world.tick + 1); // world.update raises world.tick to the same number
   world.update(SIM_DT);
@@ -942,7 +946,12 @@ function simTick() {
   damageSmoke.update(); // smoke on hurt units / buildings (visual only)
   bloodStains?.update(SIM_DT); // [A7] blood stains fade (visual only)
   game.match?.update(SIM_DT);
+  const perfT1 = performance.now();
   updateAis(world.tick / SIM.tickRate);
+  const perfT2 = performance.now();
+  perfTickMs = (perfTickMs < 0 ? 0 : perfTickMs) + (perfT2 - perfT0); // whole tick incl. AI, summed over the frame
+  perfAiMs = (perfAiMs < 0 ? 0 : perfAiMs) + (perfT2 - perfT1);
+  perfTicks++;
 }
 
 // --- render interpolation: only the drawn matrices are blended; position / rotation (simulation state) are never
@@ -1091,6 +1100,15 @@ renderer.setAnimationLoop(() => {
   updateNetOverlay();
   matchUi.update();     // multiplayer pause banner
   rallyMarkers.update(); // rally lines of the selected own building
+  if (perfPanel.visible) { // [A4] performance overlay (F2)
+    if (perfLastFrameMs) perfPanel.sample(lastFrameTime - perfLastFrameMs, perfTicks ? perfTickMs / perfTicks : -1, perfTicks ? perfAiMs / perfTicks : -1); // per-tick average of the frame
+    if (++perfCountFrames >= A4_UI.perf.countsEveryFrames) {
+      perfCountFrames = 0;
+      perfPanel.setCounts({ units: world.mechs.length + world.crews.length + world.vehicles.length,
+        players: game.match?.teams.length ?? 0, aiTeams: aiTickStats.ais });
+    }
+  }
+  perfLastFrameMs = lastFrameTime; perfTickMs = -1; perfAiMs = -1; perfTicks = 0;
 });
 
 showMenu();

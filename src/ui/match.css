@@ -98,3 +98,8 @@
 
 /* [N6] avatar in the stats header */
 .match-stats th .ai-avatar { margin-right: 6px; }
+/* [A4-UI] result table with 5–8 team columns: slim cells, names clipped, avatars smaller (the overlay scrolls anyway) */
+.match-stats.many { font-size: 12px; }
+.match-stats.many th, .match-stats.many td { padding-left: 4px; padding-right: 4px; }
+.match-stats.many thead th { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.match-stats.many th .ai-avatar, .match-stats.many th .human-avatar { transform: scale(0.8); margin-right: 2px; }

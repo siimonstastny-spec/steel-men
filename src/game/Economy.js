@@ -405,7 +405,7 @@ export class Economy {
     for (const d of this.deposits) this.world.register?.(d); // commands target deposits by eid
     if (map.superNode && map.group) {
       const node = this.deposits.find((d) => d.superNode);
-      // The super node's own crystals are the deposit's visual: clicking them targets it
+      // The super node's apron + glow ring (Map.js) belong to the deposit too: clicking them targets it
       map.group.getObjectByName('superNode')?.traverse((o) => { if (o.isMesh) o.userData.deposit = node; });
     }
     // Meshes a right click can hit to send DrillTrucks to a deposit (CommandInput)
@@ -415,7 +415,7 @@ export class Economy {
     return this.deposits;
   }
 
-  /** Deposit whose crystals were clicked (walks up the parents) */
+  /** Deposit whose mine was clicked (walks up the parents) */
   depositOf(object) {
     for (let o = object; o; o = o.parent) if (o.userData.deposit) return o.userData.deposit;
     return null;

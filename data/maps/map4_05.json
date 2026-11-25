@@ -208,7 +208,7 @@
   ] },
   "lavaCracks": [],
   "superNode": { "col": 98, "row": 98 },
-  "starts": [[30, 30], [166, 30], [166, 166], [30, 166]],
+  "starts": [[29.5, 29.5], [165.5, 29.5], [165.5, 165.5], [29.5, 165.5]],
   "sides": [],
   "markers": [
     { "key": "e", "index": 1, "id": "e1", "type": "explosive", "substrate": "B", "rect": [68, 68, 79, 79], "col": 74, "row": 74, "cells": 144, "label": "Palivové nádrže u předpolí – řetězový výbuch zasáhne boj o super node" },
