@@ -1127,7 +1127,7 @@
       "deepExtraction": { "ratePerSecond": 1.5, "infinite": true }
     },
     "railGun": {
-      "model": "3DStructures{race}/RailGun{race}_Anim.glb",
+      "model": "3DStructures{race}/RailGun{race}_Anim.glb", "buildable": false,
       "simBody": { "halfX": 10, "halfZ": 10, "bodyHeight": 14.3637 },
       "cost": { "ore": 350, "energy": 200 }, "buildTime": 50,
       "hp": 1100, "armor": { "physical": 50, "energy": 40 }, "sightRange": 120,
@@ -1183,7 +1183,7 @@
     },
     "attackEnhancer": {
       "note": "A9: aura (src/game/Auras.js): +value share of damage dealt. Stand-in GLB scaled to ~reconTower size (modelScale 0.3, simBody = GLB × 0.3) until the procedural model (B3).",
-      "model": "3DStructuresZ/AttackEnhancer{race}_Anim.glb", "modelScale": 0.3,
+      "model": "3DStructuresZ/AttackEnhancer{race}_Anim.glb", "modelScale": 0.3, "buildable": false,
       "simBody": { "halfX": 6.9872, "halfZ": 7.9082, "bodyHeight": 12.6418 },
       "cost": { "ore": 240, "energy": 120 }, "buildTime": 35,
       "hp": 800, "armor": { "physical": 30, "energy": 30 }, "sightRange": 60,
@@ -1192,7 +1192,7 @@
     },
     "defenseEnhancer": {
       "note": "A9: aura (Auras.js): value = change of damage taken (-0.10 = 10 % less), units and buildings. Stand-in GLB × 0.3.",
-      "model": "3DStructuresZ/DefenseEnhancer{race}_Anim.glb", "modelScale": 0.3,
+      "model": "3DStructuresZ/DefenseEnhancer{race}_Anim.glb", "modelScale": 0.3, "buildable": false,
       "simBody": { "halfX": 6.3718, "halfZ": 6.3718, "bodyHeight": 9.049 },
       "cost": { "ore": 240, "energy": 120 }, "buildTime": 35,
       "hp": 800, "armor": { "physical": 30, "energy": 30 }, "sightRange": 60,
@@ -1201,7 +1201,7 @@
     },
     "reconEnhancer": {
       "note": "A9: aura (Auras.js): +value share of unit sight range; detection of cloaked units within the radius (Stealth.js). Stand-in GLB × 0.3.",
-      "model": "3DStructuresZ/ReconEnhancer{race}_Anim.glb", "modelScale": 0.3,
+      "model": "3DStructuresZ/ReconEnhancer{race}_Anim.glb", "modelScale": 0.3, "buildable": false,
       "simBody": { "halfX": 7.4341, "halfZ": 7.5092, "bodyHeight": 9.4701 },
       "cost": { "ore": 200, "energy": 100 }, "buildTime": 30,
       "hp": 700, "armor": { "physical": 25, "energy": 30 }, "sightRange": 80,
@@ -1211,7 +1211,7 @@
     },
     "constructionEnhancer": {
       "note": "A9: aura (Auras.js): value = build / repair speed bonus of buildings, productionValue = production speed bonus of buildings in range (not research). Stand-in GLB × 0.3.",
-      "model": "3DStructuresZ/ConstructionEnhancer{race}_Anim.glb", "modelScale": 0.3,
+      "model": "3DStructuresZ/ConstructionEnhancer{race}_Anim.glb", "modelScale": 0.3, "buildable": false,
       "simBody": { "halfX": 7.307, "halfZ": 9.3236, "bodyHeight": 11.0195 },
       "cost": { "ore": 220, "energy": 100 }, "buildTime": 35,
       "hp": 800, "armor": { "physical": 30, "energy": 30 }, "sightRange": 60,
@@ -1228,7 +1228,7 @@
     },
     "archeologyStation": {
       "note": "A9: finished + powered: salvage analysis time ÷ analysisSpeed; vehicleWrecks = enemy vehicles destroyed in the team's sight become analysable loot that unlocks a foreign vehicle (Research.js).",
-      "model": "3DStructuresX/ArcheologyStation{race}_Anim.glb",
+      "model": "3DStructuresX/ArcheologyStation{race}_Anim.glb", "buildable": false,
       "simBody": { "halfX": 14.85, "halfZ": 19.4156, "bodyHeight": 18.9925 },
       "cost": { "ore": 300, "energy": 150 }, "buildTime": 50,
       "hp": 1000, "armor": { "physical": 30, "energy": 40 }, "sightRange": 60,
@@ -1237,7 +1237,7 @@
     },
     "orbitalBomb": {
       "note": "A9: superweapon (F3, src/game/Superweapons.js). Exclusive X, W (W uses the X model).",
-      "model": "3DStructures{race}/OrbitalBomb{race}_Skel.glb",
+      "model": "3DStructures{race}/OrbitalBomb{race}_Skel.glb", "buildable": false,
       "simBody": { "halfX": 10, "halfZ": 10, "bodyHeight": 16.0845 },
       "cost": { "ore": 800, "energy": 200 }, "buildTime": 120,
       "hp": 3000, "armor": { "physical": 60, "energy": 50 }, "sightRange": 80,
@@ -1247,7 +1247,7 @@
     },
     "tectonicTorpedo": {
       "note": "A9: superweapon (F3). Exclusive Y.",
-      "model": "3DStructuresY/TectonicTorpedoY_Skel.glb",
+      "model": "3DStructuresY/TectonicTorpedoY_Skel.glb", "buildable": false,
       "simBody": { "halfX": 10, "halfZ": 11.0177, "bodyHeight": 17.3893 },
       "cost": { "ore": 800, "energy": 200 }, "buildTime": 120,
       "hp": 3000, "armor": { "physical": 60, "energy": 50 }, "sightRange": 80,
@@ -1257,7 +1257,7 @@
     },
     "phaseCharge": {
       "note": "A9: superweapon (F3). Exclusive Z.",
-      "model": "3DStructuresZ/PhaseChargeZ_Skel.glb",
+      "model": "3DStructuresZ/PhaseChargeZ_Skel.glb", "buildable": false,
       "simBody": { "halfX": 10, "halfZ": 11.3625, "bodyHeight": 15.7775 },
       "cost": { "ore": 800, "energy": 200 }, "buildTime": 120,
       "hp": 3000, "armor": { "physical": 60, "energy": 50 }, "sightRange": 80,
@@ -1267,7 +1267,7 @@
     },
     "neutronBomb": {
       "note": "A9: superweapon of the super tier (F3), every faction.",
-      "model": "3DStructures{race}/NeutronBomb{race}_Skel.glb",
+      "model": "3DStructures{race}/NeutronBomb{race}_Skel.glb", "buildable": false,
       "simBody": { "halfX": 10, "halfZ": 12.75, "bodyHeight": 15 },
       "cost": { "ore": 800, "energy": 200 }, "buildTime": 120,
       "hp": 3000, "armor": { "physical": 60, "energy": 50 }, "sightRange": 80,

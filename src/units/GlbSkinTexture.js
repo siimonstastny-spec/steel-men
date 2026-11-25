@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { GLB_SKIN_TEXTURE as CFG } from '../config.js';
 
 const texCache = new Map();      // kind -> { map, rm, normal, emissive }
+const PART_NODE = /_part\d+$/;   // body nodes of a skin model (weapon nodes have none)
 const preparedMats = new WeakSet();
 let layoutCache = null;
 let emblemShared = null;         // { texture, material, geometry }
@@ -36,13 +37,13 @@ for (let i = 0; i < 8; i++) DIRS.push([Math.round(Math.cos(i * Math.PI / 4) * 1e
 // --- UV ---------------------------------------------------------------------------------------------------------
 
 /** Box-projected UVs in the geometry's own (part) space, once per geometry; a model with its own UVs is kept */
-export function ensureSkinUv(geometry) {
+export function ensureSkinUv(geometry, tileSize = CFG.tileSize) {
   if (geometry.attributes.uv) return;
   const pos = geometry.attributes.position;
   const nrm = geometry.attributes.normal;
   const count = pos.count;
   const uv = new Float32Array(count * 2);
-  const inv = 1 / CFG.tileSize;
+  const inv = 1 / tileSize;
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
   const project = (i, nx, ny, nz) => {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
@@ -407,7 +408,10 @@ export function prepareSkinGltf(gltf) {
   if (!CFG.enabled) return;
   gltf.scene.traverse((o) => {
     if (!o.isMesh) return;
-    ensureSkinUv(o.geometry);
+    // [round 3] weapon / shield meshes (no `_partNN` node above them) are small: denser pattern, so seams show
+    let body = false;
+    for (let p = o; p && !body; p = p.parent) body = PART_NODE.test(p.name);
+    ensureSkinUv(o.geometry, body ? CFG.tileSize : CFG.weaponTileSize ?? CFG.tileSize);
     if (Array.isArray(o.material)) o.material.forEach(texturize); else texturize(o.material);
     const share = !Array.isArray(o.material) && teamShare(o.material);
     if (share > 0) ensureTeamMask(o.geometry, share);
@@ -432,8 +436,12 @@ function hashUnit(str) {
 }
 
 /**
- * Per-vertex attribute `skinTeam` (0 / 1), once per geometry: flat facets (normal + plane, mirrored in x) taken in a
- * seeded order until share × area is painted. Undersides stay graphite. Indexed geometry gets no paint (all 0).
+ * Per-vertex attribute `skinTeam` (0 / 1), once per geometry ([round 3]). Facets = edge-connected triangles with the
+ * same normal (real plates, not every coplanar triangle of the part). Facets are bucketed by their dominant direction
+ * (±x, +y, ±z) and each bucket gets its own share, so every view of the robot is ~share painted (not the whole front).
+ * Order inside a bucket: seeded hash of the x-mirrored centroid + normal (left / right stay symmetric); chamfers
+ * (no dominant axis) and tiny facets come last, so they mostly stay graphite (the frame). A facet is taken only while
+ * it brings the bucket closer to its target. Undersides stay graphite. Indexed geometry gets no paint (all 0).
  */
 function ensureTeamMask(geometry, share) {
   if (geometry.attributes.skinTeam) return;
@@ -442,33 +450,80 @@ function ensureTeamMask(geometry, share) {
   const count = pos.count;
   const mask = new Float32Array(count);
   if (!geometry.index && count % 3 === 0) {
+    const tris = count / 3;
     const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
-    const facets = new Map(); // key -> { key, area, nz, tris }
-    let total = 0;
-    for (let i = 0; i < count; i += 3) {
+    const nq = T.normalQuant, vq = T.weldQuant;
+    const nx = new Float32Array(tris), ny = new Float32Array(tris), nz = new Float32Array(tris), area = new Float32Array(tris);
+    const cx = new Float32Array(tris), cy = new Float32Array(tris), cz = new Float32Array(tris);
+    const nkey = new Array(tris);
+    const parent = new Int32Array(tris);
+    const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const vkey = (v) => `${Math.round(v.x * vq)},${Math.round(v.y * vq)},${Math.round(v.z * vq)}`;
+    const edges = new Map(); // welded edge + normal key -> first triangle
+    for (let t = 0; t < tris; t++) {
+      const i = t * 3;
+      parent[t] = t;
       a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2);
       n.subVectors(c, b).cross(_e.subVectors(a, b));
       const len = n.length();
-      if (len < 1e-9) continue;
+      area[t] = len / 2;
+      if (len < 1e-9) { nkey[t] = null; continue; }
       n.multiplyScalar(1 / len);
-      if (n.y < T.downLimit) continue;
-      const d = n.x * (a.x + b.x + c.x) / 3 + n.y * (a.y + b.y + c.y) / 3 + n.z * (a.z + b.z + c.z) / 3; // mirror-invariant
-      const q = T.normalQuant;
-      const key = `${Math.round(Math.abs(n.x) * q)},${Math.round(n.y * q)},${Math.round(n.z * q)},${Math.round(d * T.planeQuant)}`;
-      let f = facets.get(key);
-      if (!f) { f = { key, area: 0, nz: n.z, tris: [] }; facets.set(key, f); }
-      f.area += len / 2;
-      f.tris.push(i);
-      total += len / 2;
+      nx[t] = n.x; ny[t] = n.y; nz[t] = n.z;
+      cx[t] = (a.x + b.x + c.x) / 3; cy[t] = (a.y + b.y + c.y) / 3; cz[t] = (a.z + b.z + c.z) / 3;
+      const k = `${Math.round(n.x * nq)},${Math.round(n.y * nq)},${Math.round(n.z * nq)}`;
+      nkey[t] = k;
+      const ka = vkey(a), kb = vkey(b), kc = vkey(c);
+      for (const [p, q] of [[ka, kb], [kb, kc], [kc, ka]]) {
+        const ek = (p < q ? `${p}|${q}` : `${q}|${p}`) + '#' + k;
+        const o = edges.get(ek);
+        if (o === undefined) edges.set(ek, t);
+        else { const ra = find(o), rb = find(t); if (ra !== rb) parent[rb] = ra; }
+      }
     }
-    const list = [...facets.values()];
-    for (const f of list) f.prio = hashUnit(f.key) * (1 - T.frontBias) + T.frontBias * (0.5 - 0.5 * f.nz);
-    list.sort((p, r) => p.prio - r.prio || (p.key < r.key ? -1 : 1));
-    let acc = 0;
-    for (const f of list) {
-      if (acc >= share * total) break;
-      acc += f.area;
-      for (const i of f.tris) mask[i] = mask[i + 1] = mask[i + 2] = 1;
+    // facets
+    const facets = new Map(); // root -> facet
+    for (let t = 0; t < tris; t++) {
+      if (nkey[t] === null || ny[t] < T.downLimit) continue;
+      const r = find(t);
+      let f = facets.get(r);
+      if (!f) { f = { area: 0, x: 0, y: 0, z: 0, nx: nx[t], ny: ny[t], nz: nz[t], tris: [] }; facets.set(r, f); }
+      const w = area[t];
+      f.area += w; f.x += cx[t] * w; f.y += cy[t] * w; f.z += cz[t] * w;
+      f.tris.push(t * 3);
+    }
+    // buckets by dominant direction (x mirrored: ±x share one bucket)
+    const buckets = new Map(); // name -> { total, list }
+    const pq = T.planeQuant;
+    for (const f of facets.values()) {
+      const ax = Math.abs(f.nx), ay = Math.abs(f.ny), az = Math.abs(f.nz);
+      const name = ax >= ay && ax >= az ? 'x' : az >= ay ? (f.nz > 0 ? 'z+' : 'z-') : 'y';
+      const w = f.area || 1;
+      const key = `${Math.round(Math.abs(f.x / w) * pq)},${Math.round(f.y / w * pq)},${Math.round(f.z / w * pq)}`
+        + `/${Math.round(ax * nq)},${Math.round(f.ny * nq)},${Math.round(f.nz * nq)}`;
+      f.key = key;
+      f.prio = hashUnit(key)
+        + (Math.max(ax, ay, az) < T.chamferLimit ? T.chamferPenalty : 0)
+        + (f.area < T.smallArea ? T.smallPenalty : 0);
+      let bk = buckets.get(name);
+      if (!bk) { bk = { total: 0, groups: new Map() }; buckets.set(name, bk); }
+      bk.total += f.area;
+      // mirror twins (same key) are decided together, so left and right always match
+      let g = bk.groups.get(key);
+      if (!g) { g = { key, prio: f.prio, area: 0, tris: [] }; bk.groups.set(key, g); }
+      g.area += f.area;
+      for (const i of f.tris) g.tris.push(i);
+    }
+    for (const bk of buckets.values()) {
+      const list = [...bk.groups.values()];
+      list.sort((p, r) => p.prio - r.prio || (p.key < r.key ? -1 : p.key > r.key ? 1 : 0));
+      const target = share * bk.total;
+      let acc = 0;
+      for (const g of list) {
+        if (acc + g.area * 0.5 > target) continue; // would overshoot more than it helps
+        acc += g.area;
+        for (const i of g.tris) mask[i] = mask[i + 1] = mask[i + 2] = 1;
+      }
     }
   }
   geometry.setAttribute('skinTeam', new THREE.BufferAttribute(mask, 1));

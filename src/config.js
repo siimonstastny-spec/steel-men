@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v30';
+export const GAME_VERSION = 'v31';
 // Game name (brand, shown in the main menu title; not translated)
 export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
@@ -2667,6 +2667,7 @@ export const GLB_SKIN_TEXTURE = {
   enabled: true,
   seed: 0x3e5c,              // deterministic pattern generator (no Math.random)
   tileSize: 14,              // model units covered by one texture tile (robot ≈ 32 units tall)
+  weaponTileSize: 7,         // [round 3] the same for weapon / shield meshes (nodes without `_partNN`; smaller parts)
   anisotropy: 4,
   normalScale: 0.9,          // material.normalScale of textured skin materials
   kinds: {
@@ -2744,11 +2745,16 @@ export const GLB_SKIN_TEXTURE = {
   // detail (seams, traces, panel tone, brushing) multiplies the team colour, so it shows through.
   team: {
     enabled: true,
-    shares: { graphite: 0.55, brushed: 0.6 }, // share of the material's (non-underside) area in team colour
+    // [round 3] share per view direction: facets are bucketed by dominant direction (±x, +y, +z, −z), each bucket gets it
+    shares: { graphite: 0.5, brushed: 0.4 }, // share of the material's (non-underside) area in team colour
     downLimit: -0.55,        // facets whose normal.y is below stay graphite (undersides = frame)
-    frontBias: 0.35,         // 0 = random facet order, 1 = strictly front (+z) faces first
-    normalQuant: 24,         // facet grouping: normal rounded to 1/normalQuant
-    planeQuant: 3,           // facet grouping: plane distance rounded to 1/planeQuant model units
+    normalQuant: 24,         // facet = edge-connected triangles whose normals round equal at 1/normalQuant
+    weldQuant: 1000,         // vertex positions rounded to 1/weldQuant model units to find shared edges
+    planeQuant: 3,           // facet identity (hash, mirror twins): centroid rounded to 1/planeQuant model units
+    chamferLimit: 0.85,      // facet without an axis component ≥ this = chamfer / bevel: painted last (graphite frame)
+    chamferPenalty: 0.6,
+    smallArea: 0.12,         // facets smaller than this (model units²) are painted last (no confetti on tiny bits)
+    smallPenalty: 0.8,
     paint: 0.9,              // team colour × this (linear) before the texture detail
     minLum: 0.05,            // a very dark team colour is lifted to this linear luminance (black team stays visible)
     maxLum: 0.55,            // a very light one is scaled down to this (white team does not glare)
