@@ -6,8 +6,10 @@
 // In the browser console (game page open, any state):
 //   (await import('./src/net/selftest.js')).runNetSelftest()
 // Returns { ok, results: [...] } and prints a table.
-import { NET, NET_LEAVE } from '../config.js';
+import { NET, NET_LEAVE, SAVE, SIM_VERSION } from '../config.js';
+import { SaveSender, SaveReceiver, encodeSave } from './SaveTransfer.js'; // [A2-net]
 import { Lockstep } from './Lockstep.js';
+import { commandBus, splitCommand, registerCommand, isRegistered } from '../game/commands/CommandBus.js';
 
 const STEP_MS = 1000 / 30;
 const encoder = new TextEncoder();
@@ -49,7 +51,7 @@ class FakeBus {
 }
 
 class FakeWorld {
-  constructor() { this.tick = 0; this.waitForSpawns = false; this.acc = 1; this.corruptFrom = Infinity; this.match = { eliminated: new Set(), disconnected: new Set(), result: null }; }
+  constructor() { this.tick = 0; this.acc = 1; this.corruptFrom = Infinity; this.match = { eliminated: new Set(), disconnected: new Set(), result: null }; }
   stateHash() { return this.tick >= this.corruptFrom ? (this.acc ^ 0xdead) >>> 0 : this.acc; }
 }
 
@@ -115,7 +117,9 @@ class FakeNet {
  * One scenario: two players, random commands, optional burst (forces split messages), optional corrupted hash.
  * @returns {{name, ok, problems: string[], ...}}
  */
-function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks = 600, burstAtTick = -1, slowB = 1, corruptBAt = Infinity }) {
+function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks: span = 600, burstAtTick = -1, slowB = 1, corruptBAt = Infinity, startTick = 0 }) {
+  // [A2-net] startTick: a continued match – both worlds already stand at startTick, the lockstep goes on from there
+  const ticks = startTick + span;
   const net = new FakeNet({ drop, latency, jitter, seed });
   const rng = mulberry32(seed * 7919);
   const players = [{ team: 0, playerId: 'A' }, { team: 1, playerId: 'B' }];
@@ -123,15 +127,16 @@ function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks 
   const clients = ['A', 'B'].map((id, team) => {
     const channel = net.channel(id);
     const world = new FakeWorld();
+    world.tick = startTick;
     const bus = new FakeBus();
-    const ls = new Lockstep({ channel, world, commandBus: bus, players, localTeam: team, hostId: 'A', timers: false, now: () => net.time, config });
+    const ls = new Lockstep({ channel, world, commandBus: bus, players, localTeam: team, hostId: 'A', timers: false, now: () => net.time, config, startTick });
     return { id, team, world, bus, ls, submitted: 0, burstDone: false, stalls: 0 };
   });
   clients[1].world.corruptFrom = corruptBAt;
   for (const c of clients) c.ls.start();
 
   const stopSubmitAt = ticks - 60; // late commands would run after the end
-  const maxSteps = ticks * 20;
+  const maxSteps = span * 20;
   let steps = 0;
   while (clients.some((c) => c.world.tick < ticks) && steps++ < maxSteps) {
     net.time += STEP_MS;
@@ -169,6 +174,7 @@ function runScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, ticks 
     const i = la.findIndex((x, k) => x !== lb[k]);
     problems.push(`command logs differ at #${i}: A ${la[i]} vs B ${lb[i]}`);
   }
+  if (startTick > 0 && A.bus.log.some((e) => e.tick <= startTick)) problems.push(`a command ran at or before the start tick ${startTick}`); // [A2-net]
   const executed = (c, team) => c.bus.log.filter((e) => e.cmd.team === team).length;
   for (const c of clients) {
     for (const other of clients) {
@@ -331,6 +337,52 @@ function fakeDisconnect(match, teams, allTeams, alliances) {
   if (sides.size <= 1) match.result = { winners: alive.sort((a, b) => a - b) };
 }
 
+// [A1-3] big selections: splitCommand parts join back into the original command in CommandBus.executeTick
+const CHUNK_TEST_TYPE = 'selftestChunk';
+const chunkSeen = [];
+
+/** Test of splitCommand + the join in executeTick (fresh bus, own command type, no world needed). */
+function runChunkTest() {
+  const problems = [];
+  if (!isRegistered(CHUNK_TEST_TYPE)) registerCommand(CHUNK_TEST_TYPE, { execute: (world, cmd) => { chunkSeen.push(cmd); } });
+  const BusClass = commandBus.constructor;
+  const units = Array.from({ length: 100 }, (_, i) => 1000 + i);
+  const cmd = { type: CHUNK_TEST_TYPE, team: 0, units, point: { x: 1, z: 2 }, origin: 'A' };
+  const fits = (p) => p.units.length <= 10;
+  const run = (parts) => {
+    chunkSeen.length = 0;
+    const bus = new BusClass();
+    bus.recording = false;
+    for (const p of parts) bus.enqueue(1, p);
+    bus.executeTick({}, 1);
+    return { seen: chunkSeen.slice(), hash: bus.commandHash >>> 0 };
+  };
+  const parts = splitCommand(cmd, fits, 16);
+  if (!parts || parts.length !== 10) problems.push(`split: expected 10 parts, got ${parts?.length}`);
+  else {
+    const flat = parts.flatMap((p) => p.units);
+    if (flat.length !== units.length || flat.some((id, i) => id !== units[i])) problems.push('split: unit order not kept');
+    if (parts.some((p, i) => p.chunk?.[0] !== i || p.chunk?.[1] !== parts.length || p.team !== 0 || p.point.x !== 1)) problems.push('split: chunk index / payload wrong');
+    // complete set: one command, equal to the original (same units, no chunk key)
+    const whole = run(parts);
+    const ref = run([cmd]);
+    if (whole.seen.length !== 1 || 'chunk' in whole.seen[0] || whole.seen[0].units.length !== units.length
+      || whole.seen[0].units.some((id, i) => id !== units[i])) problems.push('join: complete set did not become the original command');
+    if (whole.hash !== ref.hash) problems.push('join: command hash differs from the unsplit command');
+    // incomplete set (last part lost): dropped as a whole; a foreign command behind it still runs
+    const other = { type: CHUNK_TEST_TYPE, team: 0, units: [1], origin: 'A' };
+    const warn = console.warn;
+    console.warn = () => {};
+    let broken;
+    try { broken = run([...parts.slice(0, -1), other]); } finally { console.warn = warn; }
+    if (broken.seen.some((c) => c.units.length > 1)) problems.push('join: incomplete set was executed');
+  }
+  if (splitCommand(cmd, () => false, 16) !== null) problems.push('split: too big for the chunk limit must return null');
+  if (splitCommand({ type: 'x', team: 0 }, fits) !== null) problems.push('split: command without units must return null');
+  chunkSeen.length = 0;
+  return { name: 'splitCommand / chunk join', ok: problems.length === 0, problems };
+}
+
 export function runNetSelftest() {
   const scenarios = [
     { name: 'perfect network', seed: 1 },
@@ -339,6 +391,9 @@ export function runNetSelftest() {
     { name: 'burst 14×700 B (split), 30 % loss', drop: 0.3, latency: 50, jitter: 40, seed: 4, burstAtTick: 120 },
     { name: 'slow client B (skips 40 % frames)', drop: 0.1, latency: 60, jitter: 30, seed: 5, slowB: 0.6 },
     { name: 'corrupted hash detected', latency: 40, seed: 6, corruptBAt: 300 },
+    // [A2-net] continued match (saved game): the lockstep starts after a saved tick
+    { name: 'continue from tick 900 (turn boundary), 20 % loss', startTick: 900, drop: 0.2, latency: 80, jitter: 60, seed: 31 },
+    { name: 'continue from tick 1001 (mid-turn), burst', startTick: 1001, latency: 50, jitter: 30, seed: 32, burstAtTick: 1100 },
     // [MP-LEAVE]
     { leave: true, name: 'leave: 3 players, C leaves → A+B go on', latency: 40, jitter: 20, seed: 11 },
     { leave: true, name: 'leave: C\'s last turns only reach B (relay to A), 10 % loss', drop: 0.1, latency: 60, jitter: 40, seed: 12, cutTo: 'A' },
@@ -360,8 +415,80 @@ export function runNetSelftest() {
   const results = scenarios.map(({ leave, ...s }) => {
     try { return leave ? runLeaveScenario(s) : runScenario(s); } catch (err) { return { name: s.name, ok: false, problems: [String(err?.stack ?? err)] }; }
   });
+  try { results.push(runChunkTest()); } catch (err) { results.push({ name: 'splitCommand / chunk join', ok: false, problems: [String(err?.stack ?? err)] }); }
   const ok = results.every((r) => r.ok);
   console.table(results.map(({ problems, ...r }) => ({ ...r, problems: problems.join(' | ') })));
   console.log(ok ? '[net selftest] ALL PASSED' : '[net selftest] FAILED', results.filter((r) => !r.ok));
   return { ok, results };
+}
+
+/**
+ * [A2-net] Save transfer host → 2 clients over the fake network (loss, latency, reordering; manual clock).
+ *   (await import('./src/net/selftest.js')).runSaveTransferSelftest()
+ * Scenarios: both clients get an identical save; a client leaves mid-transfer → net.continue.error.peerLeft;
+ * a client never answers → net.continue.error.timeout. Resolves { ok, results }.
+ */
+export async function runSaveTransferSelftest() {
+  const scenarios = [
+    { name: 'transfer: 2 clients, 30 % loss, reordering', drop: 0.3, latency: 60, jitter: 80, seed: 41, expect: 'ok' },
+    { name: 'transfer: client C leaves mid-transfer', drop: 0.1, latency: 40, jitter: 20, seed: 42, leaveAtMs: 600, expect: 'net.continue.error.peerLeft' },
+    { name: 'transfer: client C deaf (no acks) → timeout', latency: 40, seed: 43, deaf: true, expect: 'net.continue.error.timeout' },
+  ];
+  const results = [];
+  for (const s of scenarios) {
+    try { results.push(await runTransferScenario(s)); } catch (err) { results.push({ name: s.name, ok: false, problems: [String(err?.stack ?? err)] }); }
+  }
+  const ok = results.every((r) => r.ok);
+  console.table(results.map(({ problems, ...r }) => ({ ...r, problems: problems.join(' | ') })));
+  console.log(ok ? '[save transfer selftest] ALL PASSED' : '[save transfer selftest] FAILED', results.filter((r) => !r.ok));
+  return { ok, results };
+}
+
+async function runTransferScenario({ name, drop = 0, latency = 0, jitter = 0, seed = 1, leaveAtMs = null, deaf = false, expect }) {
+  const rng = mulberry32(seed);
+  const save = {
+    format: SAVE.format, formatVersion: SAVE.formatVersion,
+    meta: { map: 'selftest', durationTicks: 1, simVersion: SIM_VERSION, fingerprint: 'x-y', multiplayer: true },
+    settings: { multiplayer: true }, commands: [], checkpoints: [], end: { tick: 1 },
+  };
+  for (let i = 0; i < 6000; i++) save.commands.push([i, i % 3, { type: 'move', n: Math.floor(rng() * 1e9) }]); // poorly compressible
+  const payload = await encodeSave(save);
+  const net = new FakeNet({ drop, latency, jitter, seed });
+  const host = net.channel('H');
+  const chB = net.channel('B');
+  const chC = net.channel('C');
+  const got = {};
+  const receiver = (ch) => new SaveReceiver({
+    channel: ch, hostId: () => 'H', timers: false, now: () => net.time,
+    onComplete: (s) => { got[ch.selfId] = s; }, onError: (key) => { got[ch.selfId] = key; },
+  });
+  const rB = receiver(chB);
+  const rC = deaf ? null : receiver(chC);
+  const sender = new SaveSender({ channel: host, id: 'selftest-1', payload, targets: ['B', 'C'], timers: false, now: () => net.time });
+  let outcome = null;
+  sender.run().then(() => { outcome = 'ok'; }, (err) => { outcome = err?.key ?? String(err); });
+  const STEP = 20;
+  for (let step = 0; step < 100000 && outcome === null; step++) {
+    net.time += STEP;
+    if (leaveAtMs !== null && net.time >= leaveAtMs && net.channels.includes(chC)) net.remove(chC);
+    sender.pump(net.time);
+    rB.pump(net.time);
+    rC?.pump(net.time);
+    net.deliver();
+    if (rB.decoding || rC?.decoding || step % 50 === 0) await new Promise((r) => setTimeout(r, 0)); // decompression is async
+  }
+  for (let i = 0; i < 5 && outcome === null; i++) await new Promise((r) => setTimeout(r, 0));
+  rB.dispose();
+  rC?.dispose();
+  const problems = [];
+  if (outcome !== expect) problems.push(`outcome ${outcome}, expected ${expect}`);
+  if (expect === 'ok') {
+    const want = JSON.stringify(save);
+    for (const id of ['B', 'C']) if (JSON.stringify(got[id]) !== want) problems.push(`client ${id} got ${typeof got[id] === 'string' ? got[id] : 'a different save'}`);
+  }
+  if (net.stats.oversize) problems.push(`${net.stats.oversize} oversize messages`);
+  return {
+    name, ok: problems.length === 0, problems, chunks: sender.n, bytes: payload.bytes,
+    simulatedS: +(net.time / 1000).toFixed(1), messages: net.stats.sent, maxBytes: net.stats.maxBytes,
+  };
 }

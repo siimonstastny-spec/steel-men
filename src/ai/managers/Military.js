@@ -9,12 +9,13 @@
 // (joinBay) – a new robot is crewed and walks to the rally point by itself; home units help an ally whose base is
 // attacked (bb.allyHelp); a small squad holds the super node; allied AIs prefer the same enemy team (allyBoard.js);
 // with nothing known the wave explores the start most likely held by an enemy first (map symmetry).
-import { AI, BAY_CREW } from '../../config.js';
+import { AI, AI_RESUME, BAY_CREW } from '../../config.js';
 import { resolve } from '../../game/commands/CommandBus.js';
 import { PRODUCES } from '../../game/Production.js';
 import { canEngage } from '../../game/Combat.js';
 import { PRIORITY, dist, posOf, centroid, add, dirTo, isIdle, strengthOf, nearest, hpOf, alive, weaponDefsOf, roleOfClasses, rangeOf } from '../util.js';
 import { shareIntent, intentOf } from '../allyBoard.js';
+import { techOf } from './Tech.js';
 
 /** Re-issue the same order to a busy unit only after this long (s) */
 const ORDER_REFRESH = 20;
@@ -52,7 +53,8 @@ export class MilitaryManager {
     const bb = this.ai.bb;
     const scout = bb.scoutEid;
     const busy = bb.maintaining ?? new Set();
-    return this.own.army.filter((u) => (u.isMech ? u.active : true) && u.eid !== scout && !busy.has(u.eid));
+    const evac = bb.evacuating; // [A9-F4b] running from a superweapon strike
+    return this.own.army.filter((u) => (u.isMech ? u.active : true) && u.eid !== scout && !busy.has(u.eid) && !evac?.has(u.eid));
   }
 
   /** Units in the attack wave (gathering or going) and in the harass squad */
@@ -85,6 +87,7 @@ export class MilitaryManager {
     const bb = this.ai.bb;
     const p = this.ai.perception;
     bb.rally = add(this.own.anchor, p.frontDir(), AI.rallyDistance);
+    techOf(this.ai).evacuate(now); // [A9-F4b] first: units in a strike circle run (bb.evacuating)
     this.#board(now);
     this.#bays(now);
     this.#configure();
@@ -101,6 +104,46 @@ export class MilitaryManager {
     } else if (bb.allyHelp) this.#helpAlly(now);
     if (bb.state !== 'defend') { this.#harass(now); this.#holdNode(now); }
     this.#rest(now);
+  }
+
+  // ---------- takeover of a game in progress (A2-ai) ----------
+
+  /**
+   * [A2-ai] The AI took over the team (src/ai/Resume.js). Army units far from the base on an attack order (a wave of
+   * the previous owner) become this AI's wave in its 'go' phase when there are at least minWave of them – Strategy
+   * goes to 'attack' and the wave picks its target / retreats as usual. Home units on orders this AI never gives
+   * (AI_RESUME.releaseOrders: patrol, guard) or with an order queue are sent to the rally point; others finish their
+   * current order and #rest brings them home once idle.
+   * @returns {{ wave: number, recalled: number }} units adopted into the wave / sent to the rally point
+   */
+  resume(now) {
+    const ai = this.ai;
+    const bb = ai.bb;
+    const anchor = this.own.anchor;
+    if (!anchor) return { wave: 0, recalled: 0 };
+    const R = AI_RESUME.military;
+    bb.rally = add(anchor, ai.perception.frontDir(), AI.rallyDistance);
+    const away = [];
+    const stray = [];
+    for (const u of this.army) {
+      const type = u.order?.type ?? null;
+      const far = dist(posOf(u), anchor) > AI.baseRadius * R.awayRadiusFactor;
+      if (far && (type === 'attackMove' || type === 'attack')) away.push(u);
+      else if (R.releaseOrders.includes(type) || u.orderQueue?.length) stray.push(u);
+    }
+    let wave = 0;
+    if (away.length >= ai.diff.attack.minWave) {
+      const initial = away.reduce((s, u) => s + strengthOf(u), 0);
+      this.homeGuard = new Set();
+      bb.wave = { units: new Set(away.map((u) => u.eid)), phase: 'go', since: now, initial, target: null, ended: null, reorderAt: 0 };
+      bb.state = 'attack';
+      ai.stats.wavesSent++;
+      ai.stats.firstAttackAt ??= now;
+      ai.note(`wave of ${away.length} taken over on its way (strength ${Math.round(initial)})`);
+      wave = away.length;
+    } else stray.push(...away.filter((u) => R.releaseOrders.includes(u.order?.type) || u.orderQueue?.length));
+    if (stray.length) this.order(stray, 'attackMove', bb.rally, now, PRIORITY.low, true);
+    return { wave, recalled: stray.length };
   }
 
   // ---------- assembly bays (v3) ----------
@@ -338,7 +381,12 @@ export class MilitaryManager {
    * always get it again (an order a unit could not take is retried).
    */
   order(units, type, point, now, priority = PRIORITY.normal, force = false) {
+    // [A9-F4b] never into a circle where a superweapon is about to hit; evacuating units keep their escape move
+    const sw = this.ai.world.superweapons;
+    if (sw?.activeStrikes?.().length && sw.threatAt(point.x, point.z, this.ai.diff.tech?.evacuate?.margin ?? 0)) return;
+    const evac = this.ai.bb.evacuating;
     const send = units.filter((u) => {
+      if (evac?.has(u.eid)) return false;
       if (!force && this.artyBusy.has(u.eid)) return false; // artillery shelling from range keeps its own orders
       const last = this.lastOrder.get(u.eid);
       const same = last && last.type === type && Math.hypot(last.x - point.x, last.z - point.z) < SAME_POINT;
@@ -350,7 +398,9 @@ export class MilitaryManager {
   }
 
   #attackUnit(units, target, now, force = false) {
+    const evac = this.ai.bb.evacuating; // [A9-F4b]
     const send = units.filter((u) => {
+      if (evac?.has(u.eid)) return false;
       if (!force && this.artyBusy.has(u.eid)) return false;
       const last = this.lastOrder.get(u.eid);
       return !(last?.type === 'attack' && last.target === target.eid) || isIdle(u);
@@ -365,12 +415,14 @@ export class MilitaryManager {
   #board(now) {
     for (const [eid, pr] of this.promised) {
       const m = resolve(this.ai.world, eid);
-      if (pr.until <= now || !m || m.crew) this.promised.delete(eid);
+      if (pr.until <= now || !m || m.crew || (!m.isMech && !m.crewless)) this.promised.delete(eid); // [A9-F4b] vehicles: crewed again
     }
     this.#boardStuck(now);
     const promisedCrews = new Set([...this.promised.values()].map((pr) => pr.crew));
     const crews = this.own.freeCrews.filter((c) => c.order?.type !== 'board' && !promisedCrews.has(c.eid));
     const empty = this.own.uncrewedMechs.filter((m) => m.canBoard && !this.promised.has(m.eid) && !this.mechBad?.has(m.eid));
+    // [A9-F4b] vehicles left without a crew (neutron bomb) are boarded like empty robots (board command, field `mech`)
+    for (const v of this.own.crewlessVehicles) if (v.canBoard && !this.promised.has(v.eid) && !this.mechBad?.has(v.eid)) empty.push(v);
     for (const crew of crews) {
       const reachable = empty.filter((m) => !((this.boardBad.get(`${crew.eid}:${m.eid}`) ?? -Infinity) > now));
       const mech = nearest(reachable, crew.position);
@@ -420,7 +472,7 @@ export class MilitaryManager {
     // [E1 QA] robots that got a crew, died or were removed leave both maps (records stay only for empty robots)
     for (const eid of this.mechFails?.keys() ?? []) {
       const m = resolve(this.ai.world, eid);
-      if (!m || !alive(m) || m.crew) { this.mechFails.delete(eid); this.mechBad?.delete(eid); }
+      if (!m || !alive(m) || m.crew || (!m.isMech && !m.crewless)) { this.mechFails.delete(eid); this.mechBad?.delete(eid); }
     }
     // Production reads it: no crews are queued for these robots and they do not hold robot assembly back
     this.mechBad ??= new Map();
@@ -469,8 +521,11 @@ export class MilitaryManager {
       const role = this.#roleOf(m);
       const stance = armies.stance?.[role];
       const mode = armies.behaviour?.[role];
-      if (stance && m.stance !== stance) this.ai.issue({ type: 'stance', units: [m.eid], stance }, { priority: PRIORITY.low });
-      if (mode && m.behaviour !== mode) this.ai.issue({ type: 'behaviour', units: [m.eid], mode }, { priority: PRIORITY.low });
+      // [A2-ai] after a takeover the whole army is configured at once: a command the rate limiter drops is sent again
+      // (at the match start no drop handler – the same commands as before)
+      const onDrop = this.ai.resumed ? () => this.configured.delete(m.eid) : null;
+      if (stance && m.stance !== stance) this.ai.issue({ type: 'stance', units: [m.eid], stance }, { priority: PRIORITY.low, onDrop });
+      if (mode && m.behaviour !== mode) this.ai.issue({ type: 'behaviour', units: [m.eid], mode }, { priority: PRIORITY.low, onDrop });
     }
   }
 

@@ -1,5 +1,5 @@
 {
-  "_doc": "Research plans of the AI (difficulty.research names one; src/ai/managers/Research.js, docs/notes/ai-v2.md). No research or faction names: research is picked by ROLE, derived from its stats.json effects by src/ai/AiData.js researchRolesOf: unlock (unlocks parts / vehicles / structures), weapons (weapon stats; skipped while no own unit uses the weapon class / id it targets), armor (hp / armour of parts), vehicles (vehicle stats), mobility (mobility.* stats), repair (repair.* rules), economy (harvest ability), crew (crew stats / crew.* rules), salvage (salvageResearch.* / salvageDrop.* rules). Research whose effects are all pending is never picked. Plan: facility = structure role built for research (count facilities from buildAt s once the build order is done and the team has more than minOre spare ore); phases = the first whose `until` (s, null = rest) is not over: roles in order of preference (the cheapest available research of the first role that has one); maxActive = research items running at once; minOre / minEnergy = spare resources kept before queueing; reserveAfter = s a chosen research may wait for that spare money, then its cost is reserved (bb.researchReserve: Production spends no normal-priority money below it) and it is queued once the cost alone fits (without it Production spent all ore on parts and research never started, docs/notes/ai-research-fix.md); facilities above the first are built only while every facility is busy; analysis = analyse captured parts (queueAnalysis) as soon as possible; salvage = HoverTrucks fetch legs / torso wrecks (max trucks at once, needs a research facility). budget (AI v3, src/ai/Budget.js, docs/notes/ai-v3.md) = budget buckets by phase: phases[].research = wanted research share of the spending (army + research) until `until` s; spending is counted over the last `window` s once at least minSpend was spent; while research waits for money below share − slack, normal-priority production does not spend the resources research lacks; while production is short of money and research is above share + slack, no new research starts; a wait counts for waitSeconds. AI v4 (docs/notes/ai-v4.md): beforeOpening = the first facility is wanted from buildAt as soon as the team has its minimum trucks (difficulty.econ), not only after the whole build order; firstPriority = priority of that first facility (low / normal / high / urgent; build order steps are high and win ties, so \"urgent\" puts the facility before the rest of the opening – economy builds of the trap guard are urgent too and come first).",
+  "_doc": "Research plans of the AI (difficulty.research names one; src/ai/managers/Research.js, docs/notes/ai-v2.md). No research or faction names: research is picked by ROLE, derived from its stats.json effects by src/ai/AiData.js researchRolesOf: unlock (unlocks parts / vehicles / structures), weapons (weapon stats; skipped while no own unit uses the weapon class / id it targets), armor (hp / armour of parts), vehicles (vehicle stats), mobility (mobility.* stats), repair (repair.* rules), economy (harvest ability), crew (crew stats / crew.* rules), salvage (salvageResearch.* / salvageDrop.* rules). Research whose effects are all pending is never picked. Plan: facility = structure role built for research (count facilities from buildAt s once the build order is done and the team has more than minOre spare ore); phases = the first whose `until` (s, null = rest) is not over: roles in order of preference (the cheapest available research of the first role that has one); maxActive = research items running at once; minOre / minEnergy = spare resources kept before queueing; reserveAfter = s a chosen research may wait for that spare money, then its cost is reserved (bb.researchReserve: Production spends no normal-priority money below it) and it is queued once the cost alone fits (without it Production spent all ore on parts and research never started, docs/notes/ai-research-fix.md); facilities above the first are built only while every facility is busy; analysis = analyse captured parts (queueAnalysis) as soon as possible; salvage = HoverTrucks fetch legs / torso wrecks (max trucks at once, needs a research facility). budget (AI v3, src/ai/Budget.js, docs/notes/ai-v3.md) = budget buckets by phase: phases[].research = wanted research share of the spending (army + research) until `until` s; spending is counted over the last `window` s once at least minSpend was spent; while research waits for money below share − slack, normal-priority production does not spend the resources research lacks; while production is short of money and research is above share + slack, no new research starts; a wait counts for waitSeconds. AI v4 (docs/notes/ai-v4.md): beforeOpening = the first facility is wanted from buildAt as soon as the team has its minimum trucks (difficulty.econ), not only after the whole build order; firstPriority = priority of that first facility (low / normal / high / urgent; build order steps are high and win ties, so \"urgent\" puts the facility before the rest of the opening – economy builds of the trap guard are urgent too and come first). A1-5 r2: firstAfter = structure roles / ids the team must own (placed or finished) before the first facility is wanted (the robot chain first: an urgent facility took the builder, energy and slot of the assembly bay). A9-F4b (docs/notes/a9-f4b-ai.md): tech = research of tier 2+ (src/ai/managers/Research.js #techPick): from tierRushFrom s the completions the next tier lacks come first (tierStatus missing completed → research of that tier; missing program flag → a superweapon program and its prerequisites first), up to maxTier; otherwise every available research of tier ≥ 2 by `order` of categories derived from stats.json (mk = part / weapon effects on one part kind, ranked by mkOrder; faction = own exclusive research; program = superweapon program, only with difficulty tech.superweapon, the match option on and none done yet – one superweapon per team; economy = unlocks a power plant / deep extractor; enhancer = unlocks an aura building; defense = unlocks an armed building; salvage = unlocks an archeology station; vehicles = unlocks a vehicle; network = Data network, only with an ally); goals waiting for another research bring their missing prerequisites in, ranked just after their category; programs = false never picks programs; fallbackAny = when no phase role fits, the cheapest research left is taken (the AI never stalls on a research id a faction lacks).",
   "none": { "enabled": false },
   "normal": {
     "enabled": true,
@@ -8,6 +8,7 @@
     "buildAt": 330,
     "beforeOpening": true,
     "firstPriority": "urgent",
+    "firstAfter": ["@assembly"],
     "minOre": 300,
     "minEnergy": 120,
     "reserveAfter": 15,
@@ -21,7 +22,9 @@
     "phases": [
       { "until": 1080, "roles": ["armor", "weapons", "economy"] },
       { "until": null, "roles": ["unlock", "weapons", "armor", "repair", "mobility", "crew"] }
-    ]
+    ],
+    "tech": { "tierRushFrom": 840, "maxTier": 4, "mkOrder": ["torso", "arm", "legs"], "programs": true, "fallbackAny": true,
+              "order": ["mk", "faction", "economy", "program", "enhancer", "defense", "vehicles", "salvage", "network"] }
   },
   "hard": {
     "enabled": true,
@@ -30,6 +33,7 @@
     "buildAt": 210,
     "beforeOpening": true,
     "firstPriority": "urgent",
+    "firstAfter": ["@assembly"],
     "minOre": 200,
     "minEnergy": 90,
     "reserveAfter": 10,
@@ -43,6 +47,8 @@
     "phases": [
       { "until": 840, "roles": ["unlock", "weapons", "armor", "salvage"] },
       { "until": null, "roles": ["unlock", "weapons", "armor", "repair", "mobility", "vehicles", "crew", "economy"] }
-    ]
+    ],
+    "tech": { "tierRushFrom": 540, "maxTier": 4, "mkOrder": ["arm", "torso", "legs"], "programs": true, "fallbackAny": true,
+              "order": ["mk", "faction", "program", "economy", "enhancer", "defense", "salvage", "vehicles", "network"] }
   }
 }

@@ -352,8 +352,10 @@ export class ProcModel extends THREE.Group {
     // visual state (setPowered / setDamage): powerLevel fades 1 → 0 when unpowered; animScale (= powerLevel) is what
     // subclasses multiply their continuous animation speeds by; damageStep / powerStep are the quantised paint look
     this.powered = true;
+    this.heldActive = false;    // `active` of the last powered tick (see tick(): cycles freeze instead of returning to rest)
     this.powerLevel = 1;
     this.animScale = 1;
+    this.realDelta = 0;         // unscaled delta of the current tick() (0 outside tick); mechanics that run without power use it
     this.damage = 1;
     this.damageStep = 0;
     this.powerStep = PROC_STATE.powerSteps;
@@ -403,6 +405,7 @@ export class ProcModel extends THREE.Group {
   #applyLook() {
     stateLook(this.damageStep, this.powerStep, this.lookScales);
     this.#rebindPaint(this.teamColor);
+    this.#rebindEmblem(this.teamColor);   // neon signs dim with the power step (no-op look change for paint signs: same material)
     if (this.batch) {
       this.batch.state.set(this.lookScales);
       this.batch.batcher?.refreshInst(this);
@@ -451,7 +454,7 @@ export class ProcModel extends THREE.Group {
   /** Emblem decal mesh in the team colour (material shared per style + team colour); null geometry → null */
   emblem(geometry, parent = this) {
     if (!geometry) return null;
-    this.emblemMaterial ??= acquireEmblemMaterial(this.kit, this.teamColor);
+    this.emblemMaterial ??= acquireEmblemMaterial(this.kit, this.teamColor, this.powerStep);
     const mesh = new THREE.Mesh(geometry, this.emblemMaterial);
     noShadow(mesh);
     mesh.raycast = noRaycast;
@@ -485,11 +488,17 @@ export class ProcModel extends THREE.Group {
       this.batch.batcher?.refreshInst(this);
     }
     if (!this.emblemMaterial || !teamEmblem()) return;   // faction mode: the sign keeps the logo colour
-    const nextEmblem = acquireEmblemMaterial(this.kit, color);
-    const prevEmblem = this.emblemMaterial;
-    this.emblemMaterial = nextEmblem;
-    for (const mesh of this.emblemMeshes) mesh.material = nextEmblem;
-    releaseEmblemMaterial(prevEmblem);
+    this.#rebindEmblem(color);
+  }
+
+  // Swap the shared emblem material (new team colour or power step); the old one is released after the new is acquired
+  #rebindEmblem(color) {
+    if (!this.emblemMaterial) return;
+    const next = acquireEmblemMaterial(this.kit, color, this.powerStep);
+    const prev = this.emblemMaterial;
+    this.emblemMaterial = next;
+    for (const mesh of this.emblemMeshes) mesh.material = next;
+    releaseEmblemMaterial(prev);
   }
 
   /** Per-frame animation – override (no allocations) */
@@ -537,6 +546,13 @@ export class ProcModel extends THREE.Group {
       else if (visible !== b.visible) b.batcher.setVisible(this, visible);
     }
     if (!visible || (b?.registered && b.lod > 0)) return;
+    this.realDelta = delta;
+    // Power cut: the owner reports active = false (nothing is produced), which would send every cycling module (TrackMover
+    // crane / gantry / sled, assembly rig, arms, door) back to its rest pose. So while unpowered the LAST active value from
+    // the powered state is held: the modules keep their cycle state, and since delta * animScale fades to 0 they stop where
+    // they are (mid travel / dwell / weld) and, when power returns, carry on from exactly that phase – no return, no jump.
+    if (this.powered) this.heldActive = active;
+    else active = this.heldActive;
     this.update(delta * this.animScale, active, sunClock);   // unpowered: every animation winds down with the power fade
   }
 
@@ -1692,6 +1708,7 @@ function releaseEmblemTexture(styleKey) {
 }
 
 const teamEmblem = () => PROC_EMBLEM.mode === 'team';
+const emblemLook = [1, 1, 1];   // scratch for stateLook (construction time only)
 
 /**
  * Emblem colour of a building (linear colour, a fresh THREE.Color): the faction logo colour (style.emblem.color) in
@@ -1715,18 +1732,30 @@ function emblemOnBeforeCompile(shader) {
   shader.uniforms.uPlateRim = u.uPlateRim;
   shader.uniforms.uPlateAlpha = u.uPlateAlpha;
   shader.uniforms.uBacklight = u.uBacklight;
+  shader.uniforms.uEmblemPower = u.uEmblemPower;
+  // batched neon sign: the power scale comes from the instance attribute aState.z (ProcKit.stateLook)
+  const instState = this.defines?.EMBLEM_STATE_ATTR !== undefined;
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', instTeam ? '#include <common>\nattribute vec4 aInst;\nvarying vec3 vInstTeam;' : '#include <common>')
-    .replace('#include <begin_vertex>', instTeam ? '#include <begin_vertex>\nvInstTeam = aInst.rgb;' : '#include <begin_vertex>');
+    .replace('#include <common>', [
+      '#include <common>',
+      instTeam ? 'attribute vec4 aInst;\nvarying vec3 vInstTeam;' : '',
+      instState ? 'attribute vec3 aState;\nvarying float vInstPower;' : '',
+    ].join('\n'))
+    .replace('#include <begin_vertex>', [
+      '#include <begin_vertex>',
+      instTeam ? 'vInstTeam = aInst.rgb;' : '',
+      instState ? 'vInstPower = aState.z;' : '',
+    ].join('\n'));
   shader.fragmentShader = shader.fragmentShader
     .replace('#include <common>', [
       '#include <common>',
-      'uniform vec3 uEmblemColor;\nuniform vec3 uPlateBase;\nuniform vec3 uPlateRim;\nuniform float uPlateAlpha;\nuniform float uBacklight;',
+      'uniform vec3 uEmblemColor;\nuniform vec3 uPlateBase;\nuniform vec3 uPlateRim;\nuniform float uPlateAlpha;\nuniform float uBacklight;\nuniform float uEmblemPower;',
       instTeam ? 'varying vec3 vInstTeam;' : '',
+      instState ? 'varying float vInstPower;' : '',
     ].join('\n'))
     .replace('#include <map_fragment>', [
       'vec4 emTex = texture2D( map, vMapUv );',
-      `vec3 emSign = ${instTeam ? 'vInstTeam' : 'uEmblemColor'};`,
+      `vec3 emSign = ${instTeam ? 'vInstTeam' : 'uEmblemColor'} * ${instState ? 'vInstPower' : 'uEmblemPower'};`,
       'diffuseColor.rgb = mix( mix( uPlateBase, uPlateRim, emTex.b ), emSign, emTex.r );',
       'diffuseColor.a *= max( emTex.g * uPlateAlpha, emTex.r );',
     ].join('\n'))
@@ -1735,7 +1764,7 @@ function emblemOnBeforeCompile(shader) {
 }
 
 /** Decal material (plain or instanced) of a style: uniforms for the sign colour, the plate colours and the backlight */
-function createEmblemMaterial(kit, signColor, { instanced }) {
+function createEmblemMaterial(kit, signColor, { instanced, powerStep = PROC_STATE.powerSteps }) {
   const E = M.emblem;
   const e = kit.style.emblem;
   const neon = e.render === 'neon';
@@ -1753,12 +1782,14 @@ function createEmblemMaterial(kit, signColor, { instanced }) {
   material.userData.uPlateRim = { value: new THREE.Color(plate.rim) };
   material.userData.uPlateAlpha = { value: PROC_EMBLEM.plate.alpha };
   material.userData.uBacklight = { value: neon ? 0 : (e.backlight ?? 0) };
-  if (instanced && teamEmblem()) {
-    material.defines ??= {};   // MeshBasicMaterial has none
-    material.defines.EMBLEM_INSTANCE_TEAM = '';
-  }
+  // neon sign brightness when unpowered (plain material: per power step, see acquireEmblemMaterial)
+  material.userData.uEmblemPower = { value: neon ? stateLook(0, powerStep, emblemLook)[2] : 1 };
+  const instState = instanced && neon;
+  if ((instanced && teamEmblem()) || instState) material.defines ??= {};   // MeshBasicMaterial has none
+  if (instanced && teamEmblem()) material.defines.EMBLEM_INSTANCE_TEAM = '';
+  if (instState) material.defines.EMBLEM_STATE_ATTR = '';
   material.onBeforeCompile = emblemOnBeforeCompile;
-  material.customProgramCacheKey = () => `steelMenEmblem:${neon ? 'N' : 'P'}:${instanced ? 'I' : 'M'}:${teamEmblem() ? 'T' : 'F'}`;
+  material.customProgramCacheKey = () => `steelMenEmblem:${neon ? 'N' : 'P'}:${instanced ? 'I' : 'M'}:${teamEmblem() ? 'T' : 'F'}:${instState ? 'S' : 'U'}`;
   return material;
 }
 
@@ -1768,12 +1799,13 @@ function createEmblemMaterial(kit, signColor, { instanced }) {
  * for every colour, so acquire-new-then-release-old on a team change is harmless). Mode 'team': one per style + team colour.
  * neon: unlit sign (+ halo); paint: lit sign with an emissive backlight (style.emblem.backlight).
  */
-export function acquireEmblemMaterial(kit, teamColor = M.defaultTeamColor) {
+export function acquireEmblemMaterial(kit, teamColor = M.defaultTeamColor, powerStep = PROC_STATE.powerSteps) {
   const color = new THREE.Color(teamColor);
-  const key = `${kit.key}:${teamEmblem() ? color.getHexString() : 'faction'}`;
+  const step = kit.style.emblem.render === 'neon' ? powerStep : PROC_STATE.powerSteps;   // only neon signs follow the power
+  const key = `${kit.key}:${teamEmblem() ? color.getHexString() : 'faction'}:${step}`;
   let entry = emblemMaterials.get(key);
   if (!entry) {
-    entry = { material: createEmblemMaterial(kit, emblemSignColor(kit, teamColor), { instanced: false }), styleKey: kit.key, users: 0 };
+    entry = { material: createEmblemMaterial(kit, emblemSignColor(kit, teamColor), { instanced: false, powerStep: step }), styleKey: kit.key, users: 0 };
     emblemMaterials.set(key, entry);
   }
   entry.users++;

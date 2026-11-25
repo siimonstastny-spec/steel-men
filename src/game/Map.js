@@ -14,10 +14,13 @@
 // rifts, ore fields and the super node come from the grid. Map ids go through MAPS.list / MAPS.aliases
 // (old id 'basic' = 'gen_01AI').
 import * as THREE from 'three';
-import { MAP, MAPS, MAP_PLANETS } from '../config.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { MAP, MAPS, MAP_PLANETS, MAP_TERRAIN, MAP_STYLE } from '../config.js';
 import { applyPlanetLook } from '../core/SceneSetup.js';
 import { parseAsciiMap, cellAt, CELL } from './AsciiMap.js';
 import { applyMapEdgeFade } from './MapEdgeFade.js'; // [W9]
+import { terrainGridForMap, lavaCracksForMap } from './TerrainTypes.js'; // [A8-terrain]
+import { MapFx, createWallGeometry, createLavaRibbonGeometry } from '../procedural/maps/MapMaterials.js'; // [A8-style]
 
 /** Canonical map id for an id or alias (unknown ids are returned unchanged and loaded as data/maps/<id>.json) */
 export function resolveMapId(name) {
@@ -97,9 +100,16 @@ export class GameMap {
     // Ore deposits (src/game/OreDeposit.js): listed ones (mirrored like obstacles) + the super node's ore
     this.#listedDeposits = a ? a.deposits(def.seed ?? 0) : (def.oreDeposits ?? []).flatMap(mirrored);
     this.#collectDeposits();
+    // [A8-terrain] terrain type layer + flat lava cracks (data only; the visuals are built in build / paintGround)
+    this.terrainTypes = terrainGridForMap(this);
+    this.lavaCracks = lavaCracksForMap(this);
     this.group = null;
+    this.fx = null; // [A8-style] MapFx (stone / lava materials), created by build, freed by dispose
     this.materials = []; // map materials the fog of war darkens (FogOfWar.patchMaterial)
   }
+
+  /** [A8-style] Advances the animated lava / rim (visual time, call once per rendered frame; no allocations) */
+  update(dt) { this.fx?.update(dt); }
 
   #listedDeposits = [];
 
@@ -203,22 +213,17 @@ export class GameMap {
     applyPlanetLook(scene, this.planet); // [MAPS] light / fog / background (null = default look)
     const ground = scene.getObjectByName('ground');
     if (this.ascii) this.paintGround(ground?.geometry); // before walls: rifts change heights
+    this.#paintTerrainTypes(ground?.geometry);          // [A8-terrain] type tint (maps without a layer: unchanged)
     applyMapEdgeFade(ground?.material, this.half);      // [W9] per-pixel shader fade at the border (before the fog patch)
     const group = new THREE.Group();
     group.name = 'map';
-    const rockMat = this.#material(new THREE.MeshStandardMaterial({ color: MAP.rock.color, roughness: MAP.rock.roughness, flatShading: true }));
-    const ridgeMat = this.#material(new THREE.MeshStandardMaterial({ color: this.planet?.ridge ?? MAP.ridge.color, roughness: MAP.ridge.roughness, flatShading: true }));
-    applyMapEdgeFade(rockMat, this.half); // [W9] rocks / ridges in the border band fade too (per-material uniforms, freed with the material)
-    applyMapEdgeFade(ridgeMat, this.half);
-
-    this.obstacles.forEach((o, i) => {
-      const mesh = o.type === 'ridge' || o.radius === undefined
-        ? this.#ridge(o, ridgeMat, heightAt)
-        : this.#rock(o, rockMat, heightAt, i);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
-    });
+    this.fx = new MapFx();
+    // [A8-style] one shared stone material (UV in world units) for walls and rock blocks. The edge fade patches it first,
+    // the fog of war (World.loadMap → patchMaterial on map.materials) is assigned later and chains behind it.
+    const stoneMat = this.#material(this.fx.getStoneMaterial());
+    applyMapEdgeFade(stoneMat, this.half);
+    this.#buildStone(group, stoneMat, heightAt);
+    this.#buildLava(group, heightAt);
     if (this.superNode) group.add(this.#superNode(this.superNode, heightAt));
     for (const p of this.startPositions) group.add(this.#startMarker(p, heightAt));
 
@@ -233,7 +238,160 @@ export class GameMap {
     this.group.traverse((o) => o.geometry?.dispose());
     for (const m of this.materials) m.dispose();
     this.materials = [];
+    this.fx?.dispose(); // [A8-style] textures + stone / lava / rim materials
+    this.fx = null;
     this.group = null;
+  }
+
+  /**
+   * [A8-terrain] Mixes MAP_TERRAIN.colors[type] into the terrain vertex colours (strength MAP_TERRAIN.tintStrength).
+   * Each vertex averages 5 samples (centre + 4 offsets of a quarter cell), so the 7-unit cells blend over the 5-unit
+   * vertex grid instead of showing hard steps. `solid` / colourless types leave the colour as it is.
+   */
+  #paintTerrainTypes(geometry) {
+    const grid = this.terrainTypes;
+    const col = geometry?.attributes.color;
+    if (!grid || !col) return;
+    const def = MAP_TERRAIN.types.indexOf(MAP_TERRAIN.defaultType);
+    if (!grid.data.some((v) => v !== def)) return; // no layer: look as before
+    const tints = MAP_TERRAIN.types.map((n) => (MAP_TERRAIN.colors[n] == null ? null : new THREE.Color(MAP_TERRAIN.colors[n])));
+    const pos = geometry.attributes.position;
+    const base = new THREE.Color();
+    const sum = new THREE.Color();
+    const s = grid.cellSize * 0.25;
+    const idx = (t) => (typeof t === 'number' ? t : MAP_TERRAIN.types.indexOf(t));
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      base.fromBufferAttribute(col, i);
+      sum.setRGB(0, 0, 0);
+      for (let k = 0; k < 5; k++) {
+        const tint = tints[idx(grid.typeAt(k === 1 ? x - s : k === 2 ? x + s : x, k === 3 ? z - s : k === 4 ? z + s : z))];
+        const c = tint ?? base;
+        sum.r += c.r; sum.g += c.g; sum.b += c.b;
+      }
+      sum.multiplyScalar(1 / 5);
+      base.lerp(sum, MAP_TERRAIN.tintStrength);
+      col.setXYZ(i, base.r, base.g, base.b);
+    }
+    col.needsUpdate = true;
+  }
+
+  /** [A8-style] Lowest terrain point under a footprint (walls stand on it, so no gap shows on a slope) */
+  #baseHeight(x, z, hx, hz, heightAt) {
+    return Math.min(heightAt(x, z), heightAt(x - hx, z - hz), heightAt(x + hx, z - hz), heightAt(x - hx, z + hz), heightAt(x + hx, z + hz));
+  }
+
+  /**
+   * [A8-style] Walls (ridge boxes) and rocks (stone blocks) as merged geometry: one mesh per MAP_STYLE.wallChunk square.
+   * Heights are the obstacle's `height` from the data (the simulation's LOS uses it); nothing here feeds back into it.
+   */
+  #buildStone(group, material, heightAt) {
+    const chunks = new Map(); // key -> geometries (insertion order = obstacle order: deterministic)
+    this.obstacles.forEach((o, i) => {
+      const isRidge = o.type === 'ridge' || o.radius === undefined;
+      let geo;
+      if (isRidge) {
+        geo = createWallGeometry({ length: o.halfX * 2, thickness: o.halfZ * 2, height: o.height, seed: MAP_STYLE.wallSeed + i });
+        geo.translate(o.x, this.#baseHeight(o.x, o.z, o.halfX, o.halfZ, heightAt) - MAP_STYLE.wallSink, o.z);
+      } else {
+        const rand = seededRandom(i + 1);
+        const w = o.radius * MAP_STYLE.rockWidthFactor * (1 + (rand() * 2 - 1) * MAP.rock.jitter);
+        const d = o.radius * MAP_STYLE.rockWidthFactor * (1 + (rand() * 2 - 1) * MAP.rock.jitter);
+        geo = createWallGeometry({ length: w, thickness: d, height: o.height, seed: MAP_STYLE.wallSeed + i });
+        geo.rotateY(rand() * Math.PI * 2);
+        geo.translate(o.x, this.#baseHeight(o.x, o.z, w / 2, d / 2, heightAt) - o.height * MAP.rock.sink, o.z);
+      }
+      const key = `${Math.floor((o.x + this.half) / MAP_STYLE.wallChunk)},${Math.floor((o.z + this.half) / MAP_STYLE.wallChunk)}`;
+      let list = chunks.get(key);
+      if (!list) chunks.set(key, list = []);
+      list.push(geo);
+    });
+    for (const list of chunks.values()) {
+      const merged = list.length === 1 ? list[0] : mergeGeometries(list, false);
+      if (list.length > 1) for (const g of list) g.dispose();
+      const mesh = new THREE.Mesh(merged, material);
+      mesh.name = 'stone';
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+  }
+
+  /**
+   * [A8-style] Flat lava in the cracks (no digging): all cracks in one lava + one rim geometry. The ribbons are resampled
+   * to MAP_STYLE.lavaStep and every vertex gets y = terrain + lift, so they follow the ground.
+   */
+  #buildLava(group, heightAt) {
+    if (!this.lavaCracks?.length) return;
+    const lava = [], rim = [];
+    for (const crack of this.lavaCracks) {
+      const pts = this.#resample(crack.points, MAP_STYLE.lavaStep);
+      if (pts.length < 2) continue;
+      lava.push(this.#ribbon(pts, crack.width, MAP_STYLE.lavaLift, heightAt));
+      rim.push(this.#ribbon(pts, crack.width * MAP_STYLE.rimWidthFactor, MAP_STYLE.rimLift, heightAt));
+    }
+    if (!lava.length) return;
+    const add = (geos, material, order, name) => {
+      const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+      if (geos.length > 1) for (const g of geos) g.dispose();
+      const mesh = new THREE.Mesh(merged, material);
+      mesh.name = name;
+      mesh.renderOrder = order;
+      group.add(mesh);
+    };
+    const lavaMat = this.#fogAware(this.fx.getLavaMaterial());
+    const rimMat = this.#fogAware(this.fx.getRimMaterial());
+    add(lava, lavaMat, MAP_STYLE.lavaRenderOrder, 'lava');
+    add(rim, rimMat, MAP_STYLE.rimRenderOrder, 'lavaRim');
+  }
+
+  /** Polyline resampled to (about) equal steps */
+  #resample(points, step) {
+    const out = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], b = points[i + 1];
+      const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / step));
+      for (let k = 0; k < n; k++) out.push({ x: a.x + (b.x - a.x) * k / n, z: a.z + (b.z - a.z) * k / n });
+    }
+    if (points.length) out.push({ x: points[points.length - 1].x, z: points[points.length - 1].z });
+    return out;
+  }
+
+  #ribbon(points, width, lift, heightAt) {
+    const geo = createLavaRibbonGeometry(points, width, 0);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)) + lift);
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    return geo;
+  }
+
+  /**
+   * [A8-style] The fog of war (FogOfWar.patchMaterial) patches stock-material shader chunks, which the lava / rim shaders do
+   * not have. This registers the material in `materials` (World patches those) and applies the same darkening in a hook:
+   * the fog's own function is only called on a probe to take its uniforms (fogMap, fogMapSize).
+   */
+  #fogAware(material) {
+    let fogFn = null;
+    const patch = (shader) => {
+      if (!fogFn) return;
+      const probe = { uniforms: {}, vertexShader: '', fragmentShader: '' };
+      fogFn(probe);
+      shader.uniforms.fogMap = probe.uniforms.fogMap;
+      shader.uniforms.fogMapSize = probe.uniforms.fogMapSize;
+      shader.vertexShader = shader.vertexShader
+        .replace('varying vec2 vXZ;', 'varying vec2 vXZ;\nuniform float fogMapSize;\nvarying vec2 vFogMapUv;')
+        .replace('vXZ = wp.xz;', 'vXZ = wp.xz;\nvFogMapUv = wp.xz / fogMapSize + 0.5;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('varying vec2 vXZ;', 'varying vec2 vXZ;\nuniform sampler2D fogMap;\nvarying vec2 vFogMapUv;')
+        .replace('#include <fog_fragment>', '#include <fog_fragment>\ngl_FragColor.rgb *= texture2D(fogMap, vFogMapUv).r;');
+    };
+    Object.defineProperty(material, 'onBeforeCompile', { configurable: true, get: () => patch, set: (fn) => { fogFn = fn; } });
+    Object.defineProperty(material, 'customProgramCacheKey', { configurable: true, get: () => () => 'mapFxFog', set: () => {} });
+    this.materials.push(material);
+    return material;
   }
 
   /**
@@ -272,36 +430,6 @@ export class GameMap {
   // ---------- visuals ----------
 
   #material(mat) { this.materials.push(mat); return mat; }
-
-  #rock(o, material, heightAt, index) {
-    const cfg = MAP.rock;
-    const geo = new THREE.IcosahedronGeometry(o.radius, cfg.detail);
-    const rand = seededRandom(index + 1);
-    const pos = geo.attributes.position;
-    // Jitter shared vertices identically (icosahedron vertices are duplicated per face)
-    const offsets = new Map();
-    for (let i = 0; i < pos.count; i++) {
-      const key = `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
-      if (!offsets.has(key)) offsets.set(key, 1 + (rand() * 2 - 1) * cfg.jitter);
-      const f = offsets.get(key);
-      pos.setXYZ(i, pos.getX(i) * f, pos.getY(i) * f, pos.getZ(i) * f);
-    }
-    geo.scale(1, o.height / o.radius, 1);
-    geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, material);
-    mesh.position.set(o.x, heightAt(o.x, o.z) - o.height * cfg.sink, o.z);
-    mesh.rotation.y = rand() * Math.PI * 2;
-    return mesh;
-  }
-
-  #ridge(o, material, heightAt) {
-    // Base at the lowest terrain point under the footprint so no gap shows on a slope
-    const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz]) => heightAt(o.x + sx * o.halfX, o.z + sz * o.halfZ));
-    const base = Math.min(...corners, heightAt(o.x, o.z));
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(o.halfX * 2, o.height, o.halfZ * 2), material);
-    mesh.position.set(o.x, base + o.height / 2, o.z);
-    return mesh;
-  }
 
   #superNode(node, heightAt) {
     const cfg = MAP.superNode;

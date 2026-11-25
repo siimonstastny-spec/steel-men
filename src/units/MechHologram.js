@@ -170,7 +170,10 @@ export class PartHologram {
       const mech = p.mech;
       // [proc-robot] procedurally drawn mech: its GLB meshes stay hidden (ProcMechVisual); an arm slot of the robot hides
       // instead (legs / torso would collapse the parts on them, so the old body stays under the hologram)
-      if (mech?.procModel) {
+      // [W-skin] a GLB skin hides any covered slot on its own (no collapse); a part it does not draw is a plain GLB part
+      if (mech?.procModel?.isGlbSkin) {
+        if (mech.procModel.covers(p)) { mech.procModel.setPartVisible(p.slot, visible); return; }
+      } else if (mech?.procModel) {
         if (p.isArm) mech.procModel.setPartVisible(p.slot, visible);
         return;
       }

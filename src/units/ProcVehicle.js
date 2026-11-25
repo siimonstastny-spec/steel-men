@@ -18,7 +18,6 @@ import { PROC_WORK_FX } from '../config.js';
 export const PROC_VEHICLE = {
   defaultSocket: 'muzzle',
   turretTurnSpeed: 120,  // deg/s – turret turn speed of a procedural vehicle without stats.turret (override: stats.procTurretTurnSpeed)
-  aimSocket: 'aim',
   cargoSocket: 'cargo',  // [proc-trucks] salvage rests here (Vehicle.cargoY) when the model has it
   // [proc-trucks] vehicle.activity → setWork(kind) of a model that has setWork (HoverTruck, DrillTruck); others → 'none'
   workKinds: { building: 'build', repairing: 'repair', harvesting: 'harvest' },
@@ -86,7 +85,7 @@ export class ProcDriver {
 
     const attacking = (v.attackLock ?? 0) > 0;
     if (this.cloaks) {
-      const want = !attacking && (this.cloakWhileMoving || standing) ? 1 : 0;
+      const want = v.cloaked ? 1 : 0; // [A9-F2] cloak state comes from the simulation (src/game/Stealth.js)
       const step = dt / PROC_VEHICLE.cloakTime;
       this.cloakProgress = want > this.cloakProgress ? Math.min(want, this.cloakProgress + step) : Math.max(want, this.cloakProgress - step);
       m.setCloaked(this.cloakProgress);
@@ -108,7 +107,8 @@ export class ProcDriver {
     this.#lamp(m, standing, attacking);
     m.tick(dt);
     // [B1-W3] work particles from the `work` socket while a tool state is shown (level = eased tool deployment)
-    if (m.setWork && PROC_WORK_FX.enabled && !v.dead && PROC_VEHICLE.workKinds[v.activity]) {
+    // (also while the tool state is held after a one-tick gap of the activity: v.activity alone flickers while building)
+    if (m.setWork && PROC_WORK_FX.enabled && !v.dead && this.workKind !== 'none') {
       const level = m.workAmount ?? (m.working ? 1 : 0);
       this.workFx ??= new WorkEmitter();
       this.workFx.update(m, this.workKind, level, dt);

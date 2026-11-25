@@ -19,6 +19,7 @@ export const HEAVY_TANK_SHAPES = {
 
 const CHASSIS = { gauge: 0.88, tw: 0.26, th: 0.14, hullLift: 0.95, hullL: 0.92 };   // shares of L / W
 const BUSTLE = { w: 0.85, h: 0.65, d: 0.65, y: 0.5, z: -0.62 };    // turret rear box: shares of turret w / h / d, centre height share, z share of d
+const BUSTLE_DETAIL = 2;   // far LOD kept down to LOD2 (same as the kit's team panel it carries)
 const SIDE_ARMOR = { w: 0.1, h: 0.5, d: 0.4, x: 0.52, y: 0.5, z: 0.25 };   // turret cheek plates (darker team lacquer): shares of turret w / h / d, z = centre share of d (in front of the side emblems)
 const BUSTLE_PANEL = { w: 0.6, h: 0.6 };   // team panel on the bustle's rear face: shares of the bustle width / height
 const AA_PEDESTAL = { r: 0.22, h: 0.18, flare: 1.2, seg: 8 };   // AA gun base cylinder (model units), bottom radius × flare
@@ -45,7 +46,7 @@ function buildHeavyTank(kit) {
   const t = s.turret;
   const tr = turret(ub, { parent: 'hull', y: hl.top, z: L * t.z, w: t.w, d: t.d, h: t.h, team: true });
   const tb = ub.paint('turret');
-  tb.box(t.w * BUSTLE.w, t.h * BUSTLE.h, t.d * BUSTLE.d, S.teamShade, { y: t.h * BUSTLE.y, z: t.d * BUSTLE.z });
+  tb.box(t.w * BUSTLE.w, t.h * BUSTLE.h, t.d * BUSTLE.d, S.teamShade, { y: t.h * BUSTLE.y, z: t.d * BUSTLE.z, detail: BUSTLE_DETAIL });   // B4 r3: stays with the team panel on its rear face (no floating disc in LOD2)
   teamPanel(ub, 'turret', t.w * BUSTLE.w * BUSTLE_PANEL.w, t.h * BUSTLE.h * BUSTLE_PANEL.h, {
     y: t.h * BUSTLE.y, z: t.d * (BUSTLE.z - BUSTLE.d / 2), ry: Math.PI,
   });

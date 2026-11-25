@@ -12,15 +12,16 @@ import { getSettings, getAvatarImage } from './core/Profile.js';
 import { applySavedKeybindings } from './ui/SettingsKeybindings.js';
 import { t } from './i18n/i18n.js';
 import { RobotProduction } from './ui/RobotProduction.js';
-import { loadPartCatalog } from './game/PartStock.js';
+import { loadPartCatalog, MECH_SLOTS } from './game/PartStock.js';
 import { MainMenu } from './ui/MainMenu.js';
+import { FullscreenOffer } from './ui/FullscreenOffer.js'; // [A5] one-time "turn on full screen" offer in a small window
 import { Minimap } from './ui/Minimap.js';
 import { Hud } from './ui/Hud.js';
 import { EdgeScroll } from './ui/EdgeScroll.js';
-import { MAP, MENU, PLAYER_TEAM, TEAMS, basicLoadout, ECONOMY, START_LAYOUT, TEST_SCENE, SIM, NET, NET_LEAVE, SEATS, AIMENU } from './config.js';
+import { MAP, MENU, PLAYER_TEAM, TEAMS, basicLoadout, ECONOMY, START_LAYOUT, TEST_SCENE, SIM, NET, NET_LEAVE, SEATS, AIMENU, MAP_MODE_ANY } from './config.js';
 import { assignStarts } from './game/MapStarts.js';
 import { validMapId } from './game/MapCatalog.js';
-import { loadStats, raceList, raceName, createUnlocks, getStats, unitStats, crewStats, modelRaceOf } from './data/Stats.js';
+import { loadStats, raceList, raceName, createUnlocks, getStats, unitStats, crewStats, modelRaceOf, partStats } from './data/Stats.js';
 import { commandBus } from './game/commands/CommandBus.js';
 import { localTeam, setLocalTeam, isLocal } from './core/LocalPlayer.js';
 import { randomSeed } from './core/Rng.js';
@@ -30,8 +31,11 @@ import { Economy, validPopulationCap } from './game/Economy.js';
 import { loadVehicle } from './units/Aircraft.js'; // aircraft → Aircraft, other vehicles → CombatVehicle loader
 import { Structure } from './units/Structure.js';
 import { BuildMenu, unitName } from './ui/BuildMenu.js';
-import { disposeIconRenderer, initIconRenderer, onIconReady, prewarmBuildingIcons } from './ui/IconRenderer.js';
+import { disposeIconRenderer, initIconRenderer, onIconReady, prewarmBuildingIcons, prewarmUnitIcons, prewarmPartIcons } from './ui/IconRenderer.js';
 import { Research } from './game/Research.js';
+import { superweaponsFromSettings } from './game/Superweapons.js'; // [A9] match option
+import { SuperweaponFx } from './procedural/fx/SuperweaponFx.js'; // [A9/B3] superweapon flight + impact visuals
+import { SuperweaponWarnings, RangeRings } from './ui/SuperweaponUi.js'; // [A9-F4a] strike warnings, aura / detection rings
 import { ResearchView } from './ui/ResearchView.js';
 import { Match } from './game/Match.js';
 import { validConditionForSet } from './game/Victory.js';
@@ -47,6 +51,10 @@ import { startLoadouts } from './game/StartLoadouts.js';
 import { startSetPlan, validStartSet } from './game/StartSets.js'; // [N15] start sets (units a team starts with)
 import { HqBeams } from './game/HqBeams.js';
 import { DamageSmokeWiring } from './game/DamageSmokeWiring.js'; // damage smoke on hurt units / buildings (visual)
+import { BloodStains } from './game/BloodStains.js'; // [A7] blood stains where crew members die (visual)
+import { play as playSound, disposeAudio, unlockAudio, setListenerPosition, setSoundMuted, stopAllSounds, weaponSoundEvent } from './audio/Sound.js'; // [A6] synthesized sounds
+import { GameSounds } from './audio/GameSounds.js'; // [A6] announcements (unit ready, research, under attack…)
+import { install as installUiSounds } from './audio/UiSounds.js'; // [A6] UI click / hover
 import { RallyMarkers } from './ui/RallyMarkers.js';
 import { createAi, updateAis, clearAis } from './ai/index.js';
 import { setAlliances, normalizeAlliances, startOrder, alliesOf, areAllies, clampPlayerCount } from './game/Alliances.js';
@@ -55,6 +63,8 @@ import { installDeterminismConsole } from './debug/DeterminismHarness.js';
 import { saveGame, noteMatchStart, startAutosave, stopAutosave, autosaveNow, isRestoring, canRestoreHere } from './game/SaveGame.js'; // [J1]
 import { saveStore, scheduleRestore, takeScheduledRestore } from './core/SaveStore.js'; // [J1]
 import { SaveLoadView } from './ui/SaveLoadView.js'; // [J2]
+import { continueMultiplayer } from './net/MpContinue.js'; // [A2-net] continued saved multiplayer match
+import { choiceDialog } from './ui/ChoiceDialog.js'; // [A2-net] host: end a stuck match
 import { setPlayerLabels, playerLabel } from './core/PlayerLabels.js';
 import { setPingNameResolver } from './ui/Pings.js';
 // [N7] ping messages name AI allies by their N6 name, humans "Player N" (lobby nicknames: later)
@@ -73,7 +83,8 @@ import { startMultiplierFromSettings } from './game/StartMultiplier.js'; // [D4]
 import { startResearchFromSettings, applyStartResearch } from './game/StartResearch.js';
 import { EconomyAlerts } from './ui/EconomyAlerts.js'; // [D2]
 import { spawnProceduralPreview } from './procedural/ProcPreview.js'; // [N3] prototype, console only
-import { spawnRobotPreview } from './procedural/robots/RobotPreview.js'; // [proc-robot] experiment, console only
+import { spawnRobotPreview, spawnPartCompare, spawnRobotCompare } from './procedural/robots/RobotPreview.js'; // [proc-robot] experiment, console only
+import { spawnCrewCompare } from './procedural/crew/CrewPreview.js'; // [B6] GLB vs proc crew, console only
 import { loadBuildingStyles } from './procedural/BuildingStyle.js'; // [18A] faction building styles (data/buildingStyles.json)
 
 const { renderer, scene, camera, controls, ground } = createScene(document.getElementById('app'));
@@ -84,6 +95,11 @@ const loading = new LoadingScreen();
 
 const world = new World(scene, ground);
 const hqBeams = new HqBeams(world); // src/game/HqBeams.js – team-coloured beam above each HQ
+// [A9] superweapon visuals: simulation events → SuperweaponFx (visual only; payloads are copied by the fx)
+const superweaponFx = new SuperweaponFx(scene);
+world.superweapons.on('launch', (e) => superweaponFx.launch(e));
+world.superweapons.on('impact', (e) => superweaponFx.impact(e));
+let superweaponFxHeadless = false;
 applySavedKeybindings();            // remapped keys from the player profile
 initGraphics(renderer, scene);      // full / reduced graphics from the profile (live-updates on change)
 initMouseSettings(controls);        // mouse sensitivity / invert from the profile
@@ -91,6 +107,8 @@ installEmbedGuard();                // iframe (itch.io): keyboard focus, no page
 const cameraKeys = new CameraKeys(camera, controls);
 const input = new CommandInput(camera, renderer.domElement, world, { onFocus: (p) => cameraKeys.focus(p), controls }); // right drag = pan
 const minimap = new Minimap(world, camera, { onFocus: (p) => cameraKeys.focus(p) }); // #minimap, bottom right
+const swWarnings = new SuperweaponWarnings({ world, camera, dom: renderer.domElement }); // [A9-F4a] one for all matches (world is one instance)
+let rangeRings = null; // [A9-F4a] aura / detection rings of the local player's selection and placement (per match)
 const rallyMarkers = new RallyMarkers({ world, input }); // rally point lines of production buildings
 const edgeScroll = new EdgeScroll(camera, controls, renderer.domElement); // cursor at the window edge pans (setting)
 // In-game HUD (src/ui/Hud.js); spawnPoint = where the next item of a producer appears (no buildings yet)
@@ -153,7 +171,7 @@ const matchUi = new MatchUi({
   teamName: (i) => (playerLabel(i) || (isLocal(i) ? (getSettings().nickname || t('common.player'))
     : t(areAllies(i, localTeam()) ? 'common.ally' : 'common.enemy'))) + ` (${raceName(raceOf(i))})`,
   openSettings: (returnTo) => game.menu?.openSettingsFrom(returnTo),
-  quit: async () => { try { await autosaveNow(); } catch (err) { console.error(err); } window.location.reload(); }, // [J1] autosave on leaving
+  quit: async () => { try { await autosaveNow(); } catch (err) { console.error(err); } disposeIconRenderer(); disposeAudio(); window.location.reload(); }, // [J1] autosave on leaving, [B2] icon renderer freed
   // [W5c] solo restart = reload + the last settings with a new seed (startGame does not tear down the previous match)
   restart: () => {
     if (!lastSoloSettings || net) return;
@@ -179,12 +197,20 @@ let econAlerts = null; // [D2] no main building / low energy; created at the fir
 // startGame(settings): console tests of N players, e.g. steelMen.startGame({ playerCount: 4, alliances: [0, 0, 1, 1], … })
 window.steelMen = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow, saveGame, saveStore };installAiConsole(); // steelMen.ai.start / fastForward / report / log / stop (AI vs AI test)
 installDeterminismConsole(); // [I1] steelMen.det – determinism runs (docs/notes/i1-determinism.md)
+window.steelMen.modelBudget = (opts) => import('./procedural/debug/ModelBudget.js').then((B) => B.runModelBudget(opts)); // [B4] model triangle / draw call budget
+window.steelMen.sound = { play: playSound, unlock: unlockAudio, stopAll: stopAllSounds, dispose: disposeAudio, weapon: weaponSoundEvent }; // [A6] steelMen.sound.play('shotCannon')
+installUiSounds(); // [A6]
+const listenerRight = new THREE.Vector3(); // [A6] camera right vector for stereo pan (reused every frame)
 // [N3] procedural factory preview: p = await steelMen.spawnProceduralPreview('Y', '#c8302c', {x, y, z}); p.dispose()
 window.steelMen.spawnProceduralPreview = (race = 'X', color = '#3a5ccc', pos = { x: 0, y: 0, z: 0 }, opts) =>
   spawnProceduralPreview(scene, pos, race, color, opts);
 // [proc-robot] p = await steelMen.spawnRobotPreview('W', '#3a5ccc', {x, y, z}, { combos: 'all', original: true }); p.dispose()
 window.steelMen.spawnRobotPreview = (race = 'W', color = '#3a5ccc', pos = { x: 0, y: 0, z: 0 }, opts) =>
   spawnRobotPreview(scene, race, color, pos, opts);
+// [B6] GLB (left) vs proc (right) comparisons: p = await steelMen.spawnPartCompare('X', 'legs', ['Recon']); p.dispose()
+window.steelMen.spawnPartCompare = (race, slot, sets, pos, opts) => spawnPartCompare(scene, race, slot, sets, pos, opts);
+window.steelMen.spawnRobotCompare = (race, combos, pos, opts) => spawnRobotCompare(scene, race, combos, pos, opts);
+window.steelMen.spawnCrewCompare = (pos, opts) => spawnCrewCompare(scene, pos, opts);
 
 // Místa pro nové roboty: řady po 5 vedle sebe
 // Spawn areas = map start positions (world.map.startPositions): player at 0, enemy at the opposite one
@@ -234,7 +260,7 @@ const spawners = {
     const race = raceOf(team);
     const n = ++crewCount;
     return world.spawnDeferred(
-      () => new Crew(race, { name: t('unit.crewName', { n, race: raceName(race) }), team }).load(),
+      () => new Crew(race, { name: t('unit.crewName', { n, race: raceName(race) }), nameIndex: n, team }).load(),
       (crew) => { const { x, z, yaw = Math.PI } = structure.nextSpawnPoint(); return world.addCrew(crew, x, z, yaw); },
     );
   },
@@ -261,7 +287,7 @@ const productionSpawners = {
   crew: (team, race, at) => {
     const n = ++crewCount;
     return world.spawnDeferred(
-      () => new Crew(race, { name: t('unit.crewName', { n, race: raceName(race) }), team }).load(),
+      () => new Crew(race, { name: t('unit.crewName', { n, race: raceName(race) }), nameIndex: n, team }).load(),
       (crew) => world.addCrew(crew, at.x, at.z, at.yaw ?? Math.PI),
     );
   },
@@ -288,7 +314,7 @@ async function loadThenAdd(jobs) {
 function matchModelPaths(races) {
   const s = getStats();
   const paths = [];
-  for (const race of new Set(races)) {
+  for (const race of new Set(races.filter(Boolean))) { // [A8] seats without a race load nothing
     const crew = crewStats(race);
     paths.push(crew.model, crew.animationSource, ...Object.values(basicLoadout(modelRaceOf(race) ?? race))); // [N17] stand-in models of W
     for (const group of ['vehicles', 'structures']) {
@@ -353,7 +379,7 @@ function startingBaseJobs(team, race, base, catalog) {
     });
   }
   plan.crews.forEach(({ spot, boardMech }, i) => jobs.push({
-    load: () => new Crew(race, { team, name: t('unit.crewName', { n: i + 1, race: raceName(race) }) }).load(),
+    load: () => new Crew(race, { team, name: t('unit.crewName', { n: i + 1, race: raceName(race) }), nameIndex: i + 1 }).load(),
     add: (crew) => {
       const { x, z } = startOffset(base, spot);
       world.addCrew(crew, x, z, base.yaw);
@@ -433,6 +459,9 @@ async function startGame(settings) {
   world.settings.alliances = [...game.alliances]; // UI (read only); the simulation asks src/game/Alliances.js
   world.settings.friendlyFire = { ...MENU.friendlyFire, ...settings.friendlyFire };
   world.settings.fogOfWar = settings.fogOfWar ?? MENU.defaultFogMode; // 'unexplored' | 'explored' | 'off'
+  world.settings.superweapons = superweaponsFromSettings(settings); // [A9] lobby option, missing = on
+  world.superweapons.reset(); // [A9] no strike of a previous match survives, strike ids start over
+  superweaponFx.setHeadless(true); superweaponFx.setHeadless(superweaponFxHeadless); // [A9] drop visuals still running from the last match
   world.settings.ui = { ...world.settings.ui, ...getSettings().ui }; // alwaysShowHealthBars, alwaysShowBuildProgress
   // Team colours are set before any unit loads, so every model is painted once in the chosen colour
   (settings.colors ?? []).slice(0, playerCount).forEach((color, team) => { if (color) world.setTeamColor(team, color); });
@@ -440,7 +469,10 @@ async function startGame(settings) {
   const urlSeed = new URLSearchParams(window.location.search).get('seed');
   const seed = settings.seed ?? (urlSeed !== null ? Number(urlSeed) : randomSeed());
   loading.step('map');
-  const map = await world.loadMap(validMapId(settings.map)); // terrain, obstacles, super node, fog of war
+  // [MAP-MODES] debug: ?map=<id> starts any listed map (incl. campaign-only) in a single-player game
+  const urlMap = new URLSearchParams(window.location.search).get('map');
+  const mapId = !settings.multiplayer && urlMap ? urlMap : settings.map;
+  const map = await world.loadMap(validMapId(mapId, MAP_MODE_ANY)); // terrain, obstacles, super node, fog of war
   // Start positions: picks from the menu / host first; 2 players on their own = start 0 and the opposite one (as before)
   const order = assignStarts({ map, count: playerCount, alliances: game.alliances, picks: settings.startPicks, seed });
   game.bases = order.map((i) => map.startPositions[i]);
@@ -462,6 +494,7 @@ async function startGame(settings) {
   map.placeDeposits?.(seed); // ASCII maps: deposits on random field cells from the match seed
   world.economy.setupDeposits(map);
   // Research per team (src/game/Research.js): no sharing with allies, unlocks go into game.unlocks[team]
+  world.research?.dispose?.(); // [A9] frees the previous match's research context in Stats
   world.research = new Research(world, { races: game.races, unlocks: game.unlocks });
   applyStartResearch(world.research, startResearchFromSettings(settings));
   // Production of every team inside the simulation (Production.js); units appear through the deterministic spawners
@@ -536,7 +569,7 @@ async function startTestScene() {
 
     // Crews: robots 1 and 2 are manned, the third crew waits at the training area
     const crews = await loadThenAdd([0, 1, 2].map((i) => ({
-      load: () => new Crew(RACE, { name: t('unit.crewName', { n: i + 1, race: raceName(RACE) }), team: PLAYER_TEAM }).load(),
+      load: () => new Crew(RACE, { name: t('unit.crewName', { n: i + 1, race: raceName(RACE) }), nameIndex: i + 1, team: PLAYER_TEAM }).load(),
       add: (crew) => { const { x, z, yaw = Math.PI } = nextCrewSpawn(); return world.addCrew(crew, x, z, yaw); },
     })));
     mechs[0].boardCrew(crews[0]);
@@ -549,6 +582,36 @@ async function startTestScene() {
   }
 }
 window.steelMen.startTestScene = startTestScene;
+
+// [B2] HUD refresh when icons finish: coalesced to one call per animation frame
+let hudRefreshQueued = false;
+function scheduleHudRefresh() {
+  if (hudRefreshQueued) return;
+  hudRefreshQueued = true;
+  requestAnimationFrame(() => { hudRefreshQueued = false; hud.refresh(); });
+}
+
+/** [B2] Unit icons worth prewarming for a faction: crew + vehicles / aircraft it may ever make (research not checked) */
+function factionUnitIcons(race) {
+  const stats = getStats();
+  const races = stats.races ?? {};
+  const owned = (id) => {
+    const owners = Object.keys(races).filter((key) => races[key].exclusive?.vehicles?.includes(id));
+    return owners.length === 0 || owners.includes(race);
+  };
+  return ['crew', ...Object.keys(stats.vehicles ?? {}).filter((id) => stats.vehicles[id].buildable !== false && owned(id))];
+}
+
+/** [B2] Part icons worth prewarming: [{ slot, model }] of the faction's catalog parts (and race-less buildable ones) */
+function factionPartIcons(catalog, race) {
+  const out = [];
+  for (const slot of MECH_SLOTS) {
+    for (const p of catalog?.[slot] ?? []) {
+      if (p.race === race || (p.race === null && partStats(p.path, slot, race).buildable)) out.push({ slot, model: p.path });
+    }
+  }
+  return out;
+}
 
 /** In-game UI of a match: build / production / research menus, HUD, match end (the units exist already) */
 async function initUi() {
@@ -564,6 +627,8 @@ async function initUi() {
       world, input, hud, race: raceOf(me), unlocks: game.unlocks[me],
       placementYaw: () => (game.bases[me] ?? spawnBase).yaw,
     });
+    rangeRings?.dispose();
+    rangeRings = new RangeRings({ scene, world, input, buildMenu: game.buildMenu }); // [A9-F4a]
     game.robotProduction = new RobotProduction({ buildMenu: game.buildMenu, catalog });
     game.buildMenu.robotProduction = game.robotProduction;
     game.robotProduction.onOpenStock = () => stockWindow.open(); // [F1] button in the part factory / assembly bay panels
@@ -572,8 +637,10 @@ async function initUi() {
     hud.start({ race: raceOf(me), buildMenu: game.buildMenu });
     // Building icons (IconRenderer): started only now (world ready); the previous match's cache / renderer is freed first
     initIconRenderer();
-    onIconReady(() => hud.refresh());
+    onIconReady(scheduleHudRefresh); // [B2] many icons finish per frame: one HUD refresh per frame
     prewarmBuildingIcons(game.buildMenu.buildableStructures(),raceOf(me), TEAMS[me].color);
+    prewarmUnitIcons(factionUnitIcons(raceOf(me)), raceOf(me), TEAMS[me].color); // [B2] crew + the faction's vehicles / aircraft
+    prewarmPartIcons(factionPartIcons(catalog, raceOf(me)), raceOf(me), TEAMS[me].color); // [B2] robot parts of the faction
     // Match end: victory condition from the menu; checking starts now that the starting units exist
     game.match = new Match(world, { conditionId: game.victory, teamCount: game.playerCount, prebuild: game.prebuild }); // [N5] seats, [N8] pre-build
     world.match = game.match; // the surrender command reaches it (matchCommands.js)
@@ -610,6 +677,8 @@ async function showMenu() {
       loading,
       saveLoad: saveView, // [J2] "Load game"
     });
+    game.fullscreenOffer ??= new FullscreenOffer({ parent: document.body, canShow: () => !document.getElementById('menu').hidden }); // never over a running game // [A5] lives for the page; checks on resize until shown once
+    game.fullscreenOffer.check();
   } catch (err) {
     console.error(err);
     loading.hide();
@@ -662,6 +731,70 @@ function submitAutoAssist() {
   commandBus.submit({ type: 'setAutoAssist', team: localTeam(), on: getSettings().ui?.autoAssist ?? true });
 }
 
+/**
+ * [A2-net] Continued saved match: replay to tick T (no live AI), compare hashes with everybody, then the host runs the
+ * AI of every seat that is AI now (original AI and seats taken over from a human continue the base they find, A2-ai).
+ * Returns false when the match must not go on (error dialog → reload, or the host ended it).
+ */
+async function continueSavedMatch(info) {
+  const lock0 = net;
+  const abort = new AbortController();
+  const offEnded = lock0.onEnded(() => abort.abort());
+  loading.show(); loading.setTitle(t('save.restoring.title')); loading.setRestore({ ratio: 0 });
+  try {
+    await continueMultiplayer({
+      info, signal: abort.signal,
+      onProgress: (ev) => {
+        loading.setRestore({ ratio: ev.ratio });
+        loading.setStatus(t(`lobby.continue.phase.${ev.phase}`));
+        if (ev.stalled && lock0.canEndMatch) offerEndMatch();
+      },
+    });
+  } catch (err) {
+    offEnded();
+    if (net !== lock0 || lock0.status.ended) return false; // onMatchEndedByHost already shows the notice
+    console.error(err);
+    await choiceDialog({ messageKey: err.key ?? 'net.continue.error.generic', choices: [{ id: 'ok', labelKey: 'save.ok' }], cancelId: 'ok' });
+    window.location.reload(); // half-replayed page: back to the menu
+    return false;
+  }
+  offEnded();
+  info.continue.save = null; // [A2-net] the replayed save is not needed any more (memory)
+  loading.setRestore(null);
+  loading.setStatus('');
+  if (info.selfId === info.hostId) {
+    for (const seat of info.aiSeats ?? []) {
+      createAi({
+        world, commandBus, team: seat.team, race: game.races[seat.team],
+        difficulty: seat.difficulty ?? AIMENU.defaultDifficulty,
+        unlocks: game.unlocks[seat.team], allies: alliesOf(seat.team), resumed: true,
+      });
+    }
+  }
+  return true;
+}
+
+/** [A2-net] Host: the match / continue replay is stuck – end it for everybody? (no automatic end) */
+let endOfferOpen = false;
+async function offerEndMatch() {
+  if (endOfferOpen || !net?.canEndMatch) return;
+  endOfferOpen = true;
+  const lock = net;
+  const id = await choiceDialog({
+    messageKey: 'net.stall.offer',
+    choices: [{ id: 'wait', labelKey: 'net.stall.wait' }, { id: 'end', labelKey: 'net.stall.end', danger: true }],
+    cancelId: 'wait', defaultId: 'wait',
+  });
+  endOfferOpen = false;
+  if (id === 'end' && net === lock) lock.endMatch();
+}
+
+/** [A2-net] The host ended the match (or we did): notice, then back to the menu */
+async function onMatchEndedByHost(e) {
+  await choiceDialog({ messageKey: e?.self ? 'net.ended.self' : 'net.ended.byHost', choices: [{ id: 'ok', labelKey: 'save.ok' }], cancelId: 'ok' });
+  window.location.reload();
+}
+
 function stopNet() {
   chatBox?.dispose(); chat?.dispose(); chatBox = null; chat = null; // [N11]
   net?.stop();
@@ -688,14 +821,19 @@ async function startMultiplayer(info) {
   net = new mp.Lockstep({
     channel: info.channel, world, commandBus, players: info.players, localTeam: info.localTeam, hostId: info.hostId,
     aiTeams: byTeam.map((seat, team) => (seat.controller === 'ai' ? team : -1)).filter((team) => team >= 0), // [MP-LEAVE] they idle with the host when it leaves
+    startTick: info.continue ? info.continue.tick : 0, // [A2-net] continued match: the lockstep goes on after the saved tick
   });
   netChannel = info.channel;
   window.steelMen.net = net;
+  net.onStallLong(() => { if (net?.canEndMatch) offerEndMatch(); }); // [A2-net] stuck for NET_CONTINUE.stallOfferMs: ask the host
+  net.onEnded((e) => onMatchEndedByHost(e)); // [A2-net] everybody leaves to the menu
   // [N11] text chat next to the lockstep (same channel, topic 'chat', outside the simulation)
   chat = new Chat({ channel: info.channel, players: info.players, localTeam: info.localTeam, isAlly: areAllies });
   chatBox = new ChatBox({ chat, t, getColor: (team) => TEAMS[team]?.color });
   world.paused = false; // [I1] no frozen game after a console test
-  await startGame({
+  if (info.continue) {
+    if (!(await continueSavedMatch(info))) return; // [A2-net] replayed to tick T (or failed / ended: the page reloads)
+  } else await startGame({
     multiplayer: true,
     map: s.map, startPicks: s.startPicks, // [MAPS] from the host's start message (startPicks keyed by packed team)
     playerCount, alliances, // [N5] the same on every client (from the host's start message)
@@ -703,7 +841,7 @@ async function startMultiplayer(info) {
     colors: byTeam.map((seat, team) => seat.color ?? TEAMS[team].color),
     seats: byTeam.map((seat) => (seat.playerId === info.selfId ? 'human' : seat.controller === 'human' ? 'remote' : seat.controller ?? 'ai')),
     friendlyFire: s.friendlyFire, fogOfWar: s.fogOfWar, victory: s.victory,
-    energyCap: s.energyCap, populationCap: s.populationCap, oreMultiplier: s.oreMultiplier, startMultiplier: s.startMultiplier, startResearch: s.startResearch, speed: s.speed, prebuild: s.prebuild,
+    superweapons: s.superweapons, energyCap: s.energyCap, populationCap: s.populationCap, oreMultiplier: s.oreMultiplier, startMultiplier: s.startMultiplier, startResearch: s.startResearch, speed: s.speed, prebuild: s.prebuild,
     startSet: s.startSet, // [N15] the host's start set (validated in startGame)
     aiDifficulty: byTeam.map((seat) => (seat.controller === 'ai' ? seat.difficulty ?? null : null)),
     aiNames: byTeam.map((seat) => seat.aiName ?? null), avatars: byTeam.map((seat) => seat.avatar ?? null), // [N6] from the host
@@ -746,6 +884,9 @@ function updateNetOverlay() {
   if (st.desync) {
     el.hidden = false;
     el.textContent = t('net.desync', { tick: st.desync.tick });
+  } else if (st.loadStall) {
+    el.hidden = false; // [A1-3] a load hangs / failed on this client: the match is held (going on would desync)
+    el.textContent = t('net.loadStalled');
   } else if (st.waitingFor.length && st.stalledMs > NET.waitOverlayMs) {
     el.hidden = false;
     const left = st.waitingFor.filter((team) => st.left.includes(team));
@@ -775,9 +916,14 @@ let simAccumulator = 0;   // real time not simulated yet (s)
 
 /** New match: seeds world.rng, restarts the tick counter and the command queue, starts ticking */
 const damageSmoke = new DamageSmokeWiring(world);
+let bloodStains = null; // [A7] created per match in startSimulation (needs world.fog from loadMap)
+let gameSounds = null; // [A6] created per match in startSimulation
 
 function startSimulation(seed) {
   damageSmoke.clear();
+  bloodStains?.dispose(); bloodStains = new BloodStains(world); window.steelMen.bloodStains = bloodStains; // [A7]
+  gameSounds?.dispose(); gameSounds = new GameSounds({ world }); window.steelMen.gameSounds = gameSounds; // [A6]
+  setListenerPosition(controls.target, listenerRight); // [A6] distance falloff measured from the camera target
   world.startSimulation(seed);
   commandBus.reset();
   simAccumulator = 0;
@@ -794,6 +940,7 @@ function simTick() {
   world.update(SIM_DT);
   hqBeams.update(); // light beam above every main building (visual only)
   damageSmoke.update(); // smoke on hurt units / buildings (visual only)
+  bloodStains?.update(SIM_DT); // [A7] blood stains fade (visual only)
   game.match?.update(SIM_DT);
   updateAis(world.tick / SIM.tickRate);
 }
@@ -909,7 +1056,10 @@ function advanceSimulation(maxFrameTime, maxSteps) {
 let lastFrameTime = performance.now();
 setInterval(() => {
   if (net && performance.now() - lastFrameTime > NET.hiddenPumpMs * 2) {
-    advanceSimulation(NET.hiddenMaxFrameTime, NET.hiddenMaxSteps);
+    const restoring = isRestoring();
+    if (!restoring) setSoundMuted(true); // [A6] hidden tab: ticks without sound bursts
+    try { advanceSimulation(NET.hiddenMaxFrameTime, NET.hiddenMaxSteps); }
+    finally { if (!restoring) setSoundMuted(false); }
   }
 }, NET.hiddenPumpMs);
 
@@ -917,20 +1067,27 @@ renderer.setAnimationLoop(() => {
   lastFrameTime = performance.now();
   const dt = Math.min(clock.getDelta(), SIM.maxFrameTime);
   const alpha = advanceSimulation(SIM.maxFrameTime, SIM.maxStepsPerFrame);
+  const swHeadless = isRestoring(); // [A9] a replaying save draws no superweapon visuals
+  if (swHeadless !== superweaponFxHeadless) superweaponFx.setHeadless(superweaponFxHeadless = swHeadless);
+  superweaponFx.update(dt);
   minimap.update(dt);
   statsBar.update(dt);
   input.cleanSelection();
   cameraKeys.update(dt);
   edgeScroll.update(dt);
   controls.update();
+  listenerRight.setFromMatrixColumn(camera.matrixWorld, 0); // [A6] stereo pan follows the camera
   if (worldVisible && !isRestoring()) { // [W6] nothing behind the main menu; [J1] no drawing while a save replays
+    world.map?.update(dt); // [A8] lava animation (visual time)
     applyInterpolation(alpha);
     renderer.render(scene, camera);
     restoreInterpolation();
   }
   hud.update(dt);
+  gameSounds?.update(dt); // [A6]
   updatePrebuildBanner(); // [N8] pre-build countdown
   econAlerts?.update();   // [D2] below the pre-build banner
+  swWarnings.update(); rangeRings?.update(); // [A9-F4a]
   updateNetOverlay();
   matchUi.update();     // multiplayer pause banner
   rallyMarkers.update(); // rally lines of the selected own building

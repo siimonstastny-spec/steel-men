@@ -15,6 +15,7 @@ import { armModel, stockKey } from '../../game/PartStock.js';
 import { PRODUCES } from '../../game/Production.js';
 import { resolve } from '../../game/commands/CommandBus.js';
 import { Perception } from '../Perception.js';
+import { tierStructures } from '../AiData.js';
 import { PRIORITY, dist, posOf, isIdle, alive, nearest, missingArmSlots, affordsAbove } from '../util.js';
 
 /** Seconds between two service commands for the same bay (the previous one runs at the next tick) */
@@ -288,10 +289,16 @@ export class MaintenanceManager {
         if (v.hp / Math.max(1, v.maxHp) < (cfg.fieldBelow ?? 0)) targets.push({ u: v, need: v.hp / v.maxHp });
       }
     }
+    // [A9-F4b] the HQ and the research tier / Data network buildings (DataRelay) are kept up like the HQ: repaired from
+    // tech.protect.repairBelow and before every other target
+    const keyBelow = ai.diff.tech?.enabled ? (ai.diff.tech.protect?.repairBelow ?? 0) : 0;
+    const keys = keyBelow > 0 ? tierStructures() : null;
     for (const s of own.complete) {
       if (taken.has(s.eid) || !(s.hp < s.maxHp)) continue;
       const r = s.hp / Math.max(1, s.maxHp);
-      if (r < (cfg.buildingBelow ?? 0)) targets.push({ u: s, need: r });
+      const key = keys && (s.stats?.hq || keys.has(s.unitId));
+      if (key && r < keyBelow) targets.push({ u: s, need: r - 1 });
+      else if (r < (cfg.buildingBelow ?? 0)) targets.push({ u: s, need: r });
     }
     targets.sort((a, b) => a.need - b.need);
     for (const { u } of targets.slice(0, spare)) {

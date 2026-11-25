@@ -137,7 +137,45 @@ export const STRUCTURE_ROLES = {
   hq: (s) => Boolean(s.hq),
   // [H5] building that produces ore endlessly (oreDeepExtractor, stats.deepExtraction); placed like other buildings
   deepMining: (s) => Boolean(s.deepExtraction),
+  // [A9-F4b] advanced buildings (src/ai/managers/Tech.js), by their stats blocks
+  airDefense: (s) => !s.placement && weaponsOf(s).length > 0 && weaponsOf(s).every(airOnly), // AA tower (not the dual flak)
+  attackAura: (s) => s.aura?.type === AURA.attack,
+  defenseAura: (s) => s.aura?.type === AURA.defense,
+  reconAura: (s) => s.aura?.type === AURA.recon,
+  buildAura: (s) => s.aura?.type === AURA.build,
+  detector: (s) => abilityOf(s, 'detection') && !s.aura, // detection tower (the recon enhancer is reconAura)
+  watchPost: (s, id) => isWatchPost(s, id),
+  archeology: (s) => Boolean(s.archeology),
+  superweapon: (s) => Boolean(s.superweapon),
 };
+
+/** [A9-F4b] aura types of the enhancers (stats.json structures[*].aura.type, src/game/Auras.js) */
+const AURA = { attack: 'damageDealt', defense: 'damageTaken', recon: 'sightRange', build: 'construction' };
+/** [A9-F4b] a weapon that shoots aircraft only */
+const airOnly = (w) => hitsAir(w) && !(w.targets ?? []).includes('ground');
+
+/** [A9-F4b] Buildings the research tiers need (rules.research.tiers[*].requiresStructures): advanced research facility… */
+export function tierStructures() {
+  const tiers = getStats().rules?.research?.tiers ?? null;
+  if (tierCache.tiers === tiers && tierCache.ids) return tierCache.ids; // stats do not change within a match
+  const out = new Set();
+  for (const rule of Object.values(tiers ?? {})) for (const id of rule.requiresStructures ?? []) out.add(id);
+  tierCache.tiers = tiers;
+  tierCache.ids = out;
+  return out;
+}
+const tierCache = { tiers: null, ids: null };
+
+/**
+ * [A9-F4b] Unarmed watch post (imaging pole): it only sees (sightRange) – no weapons, production, income, energy use,
+ * aura, abilities, storage, supply, placement… and it is no research tier building.
+ */
+function isWatchPost(s, id) {
+  if (!((s.sightRange ?? 0) > 0) || weaponsOf(s).length || (s.produces ?? []).length || s.income || s.energyUse) return false;
+  if (s.aura || (s.abilities ?? []).length || s.storage || s.supplyProvided || s.hq || s.deepExtraction) return false;
+  if (s.superweapon || s.archeology || s.placement || s.wallSegment || s.mountOn) return false;
+  return !tierStructures().has(id);
+}
 
 /** Predicates of vehicle roles */
 export const VEHICLE_ROLES = {

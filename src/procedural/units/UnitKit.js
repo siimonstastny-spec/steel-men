@@ -24,6 +24,7 @@ import {
 } from '../ProcKit.js';
 import { styleKit, noRaycast, acquireEmblemMaterial, releaseEmblemMaterial, emblemDecalGeometry } from '../ProcModules.js';
 import { HIGHLIGHT, BUILDING_LOD } from '../../config.js';
+import { muzzleFitTarget, muzzleDataReady } from './MuzzleFit.js';
 import { getBuildingQuality, onBuildingQualityChange } from '../../core/Graphics.js';
 
 const TAU = Math.PI * 2;
@@ -93,7 +94,12 @@ export const UNIT_LOD = {
   // part kept in LOD n when its largest side ≥ share × largest side of the whole unit (explicit `detail` wins);
   // coarser than buildings (BUILDING_LOD.partMinShare) – far units are small on screen and many
   partMinShare: [0, 0.05, 0.18],
-  hysteresis: 0.12,          // a unit leaves its LOD only after passing the limit by this share
+  // Far LOD triangle budget of VEHICLES (UnitBuilder.vehicleLod, set by the hull / fuselage / tracks / wheels / hover modules;
+  // crew and robots are not affected): after partMinShare the smallest parts without an explicit `detail` are dropped from
+  // LOD n until the paint triangles fit min(maxTris[n], share[n] x LOD0 paint triangles). Parts of at least keepShare of the
+  // unit extent (hull, turret, tracks, wings) are never dropped by it.
+  budget: { maxTris: [0, 1000, 500], share: [0, 0.6, 0.28], keepShare: 0.3 },   // r2: LOD1 share 0.55 -> 0.6 (main weapon, hubs stay)
+  hysteresis: 0.12,         // a unit leaves its LOD only after passing the limit by this share
   maxFull: 48,               // at most this many units at LOD0 (the nearest; cloaked ones always)
   fullRankSlack: 4,
   updateFrames: 6,           // LOD decision every N rendered frames (matrices are written every frame)
@@ -220,6 +226,9 @@ const _one = new THREE.Vector3(1, 1, 1);
 const IDENTITY = new THREE.Matrix4();
 const POSITION_PROPS = { x: 'x', y: 'y', z: 'z' };
 const ROTATION_PROPS = { rx: 'x', ry: 'y', rz: 'z' };
+// [B5-muzzles] unit type being built by createUnitCache (UnitBuilder reads it for the muzzle fit target); build time only
+let buildContext = null;
+const PRE_STATS_KEY = '|preStats';   // cache key suffix of a unit built before stats.json loaded (no muzzle fit)
 
 // Every vertex belongs fully to one bone (rigid skinning)
 function skinTo(geo, boneIndex) {
@@ -256,6 +265,7 @@ export class UnitBuilder {
     this.decals = [];          // { bone, placements } emblem decals (ProcModules.emblemDecalGeometry placements)
     this.socketDefs = [];      // { name, bone, position, rotation }
     this.channelDefs = [];     // deploy channels { bone, prop, from, to }
+    this.vehicleLod = false;   // true = UNIT_LOD.budget applies to the far LODs (set by the vehicle modules)
     // animation meta read by the ProcUnit drivers (bone names, numbers – plain data)
     this.meta = {
       tracks: [], wheels: [], exhausts: [], flashes: [], recoils: [], spinners: [], lenses: [], arcs: [],
@@ -263,7 +273,24 @@ export class UnitBuilder {
       fire: {},                // socket name -> { flashes, recoils, spinners, lenses, arcs } (indices into the lists above)
       refSpeed: UNIT_KIT.motion.refSpeed,
     };
+    // [B5-muzzles] where the main muzzle should sit (stats simBody, model units) or null – used by turret() / weapon()
+    this.unitType = buildContext?.type ?? null;
+    this.muzzleFit = this.unitType ? muzzleFitTarget(this.unitType, kit.key) : null;
     this.bone('root', null);
+  }
+
+  /**
+   * [B5-muzzles] Rest-pose model-space position of a point given in a bone's space ([x, y, z]); null when a bone of the
+   * chain is rotated (the fit then leaves the weapon as it is). Build time only.
+   */
+  rootPoint(bone, local = [0, 0, 0]) {
+    const out = local.slice();
+    for (let i = this.boneIndex(bone); i >= 0; i = this.boneDefs[i].parent) {
+      const d = this.boneDefs[i];
+      if (d.rotation[0] || d.rotation[1] || d.rotation[2]) return null;
+      out[0] += d.position[0]; out[1] += d.position[1]; out[2] += d.position[2];
+    }
+    return out;
   }
 
   /**
@@ -331,6 +358,42 @@ export class UnitBuilder {
     f.flashes.push(...flashes); f.recoils.push(...recoils); f.spinners.push(...spinners); f.lenses.push(...lenses); f.arcs.push(...arcs);
   }
 
+  /**
+   * Vehicle far-LOD budget (UNIT_LOD.budget): raises minSize[l] (size below which a part without explicit `detail` leaves
+   * LOD l) until the paint triangles of LOD l fit the budget; parts of at least keepShare x extent stay. Build time only.
+   */
+  #applyLodBudget(minSize, extent) {
+    const levels = BUILDING_LOD.levels;
+    const B = UNIT_LOD.budget;
+    const parts = [];
+    for (const b of this.paints.values()) for (const p of b.parts) parts.push(p);
+    // triangles of a part in LOD l (rounded boxes are rebuilt per level by PartBuilder: chamfer / plain box)
+    const tris = (p, l) => {
+      if (l > 0 && p.round) {
+        const seg = BUILDING_LOD.roundedSegments[l];
+        return seg > 0 ? 12 * (2 * seg + 1) ** 2 : 12;
+      }
+      return (p.geo.index ? p.geo.index.count : p.geo.attributes.position.count) / 3;
+    };
+    let total0 = 0;
+    for (const p of parts) total0 += tris(p, 0);
+    const implicit = parts.filter((p) => p.detail === null).sort((a, b) => a.size - b.size);
+    const keep = extent * B.keepShare;
+    for (let l = 1; l < levels; l++) {
+      const cap = Math.min(B.maxTris[l], total0 * B.share[l]);
+      let kept = 0;
+      for (const p of parts) if (p.detail !== null ? p.detail >= l : p.size >= minSize[l]) kept += tris(p, l);
+      let i = 0;
+      while (kept > cap && i < implicit.length) {
+        const s = implicit[i].size;
+        if (s >= keep) break;
+        for (; i < implicit.length && implicit[i].size <= s; i++) if (s >= minSize[l]) kept -= tris(implicit[i], l);
+        minSize[l] = Math.max(minSize[l], s * (1 + 1e-6) + 1e-9);
+      }
+      if (l + 1 < levels) minSize[l + 1] = Math.max(minSize[l + 1], minSize[l]);
+    }
+  }
+
   build() {
     const defs = this.boneDefs;
     const n = defs.length;
@@ -356,11 +419,14 @@ export class UnitBuilder {
     for (const [i, b] of this.paints) for (const p of b.parts) ext.union(tmp.copy(p.geo.boundingBox).applyMatrix4(rest[i]));
     const extSize = ext.getSize(new THREE.Vector3());
     const extent = Math.max(extSize.x, extSize.y, extSize.z);
+    const minSize = [0];   // implicit parts: size below which a part leaves LOD l (monotonic in l)
+    for (let l = 1; l < levels; l++) minSize.push(Math.max(minSize[l - 1], extent * UNIT_LOD.partMinShare[l]));
+    if (this.vehicleLod) this.#applyLodBudget(minSize, extent);
     for (const b of this.paints.values()) {
       for (const p of b.parts) {
         if (p.detail !== null) continue;
         let level = 0;
-        for (let l = 1; l < levels; l++) if (p.size >= extent * UNIT_LOD.partMinShare[l]) level = l;
+        for (let l = 1; l < levels; l++) if (p.size >= minSize[l]) level = l;
         p.detail = level;
       }
     }
@@ -450,15 +516,21 @@ function disposeShared(sh) {
 export function createUnitCache(build) {
   const entries = new Map();   // "style|variant" -> { users, data }
   return {
-    acquire(kit, variant = '') {
-      const key = `${kit.key}|${variant}`;
+    acquire(kit, variant = '', type = null) {
+      // [B5-muzzles] built before stats.json loaded = without the muzzle fit: own key, so a later build (stats ready) is fitted
+      const key = `${kit.key}|${variant}${type && !muzzleDataReady() ? PRE_STATS_KEY : ''}`;
       let e = entries.get(key);
-      if (!e) { e = { users: 0, data: build(kit, variant) }; entries.set(key, e); }
+      if (!e) {
+        buildContext = type ? { type } : null;   // [B5-muzzles] the builder looks up the muzzle fit of this unit type
+        try { e = { users: 0, data: build(kit, variant) }; } finally { buildContext = null; }
+        entries.set(key, e);
+      }
       e.users++;
       return e.data;
     },
-    release(kit, variant = '') {
-      const key = `${kit.key}|${variant}`;
+    release(kit, variant = '', data = null) {
+      let key = `${kit.key}|${variant}`;
+      if (data && entries.get(key)?.data !== data && entries.get(key + PRE_STATS_KEY)?.data === data) key += PRE_STATS_KEY;
       const e = entries.get(key);
       if (!e || --e.users > 0) return;
       disposeShared(e.data);
@@ -600,7 +672,7 @@ export class ProcUnit extends THREE.Group {
     this.cache = cache;
     this.variant = variant;
     this.teamColor = teamColor;
-    this.shared = cache.acquire(this.kit, variant);
+    this.shared = cache.acquire(this.kit, variant, type ?? name);
     this.paint = acquirePaintMaterial(teamColor, this.kit.style.texture);
     this.privatePaint = null;
     this.glowMaterial = null;
@@ -917,7 +989,10 @@ export class ProcUnit extends THREE.Group {
     }
     if (!visible) return;
     this.time += dt;
-    if (b?.registered && b.lod > 0) { this.#decay(dt); return; }
+    if (b?.registered && b.lod > 0) {
+      this.#decay(dt);
+      return;
+    }
     this.#animate(dt);
     this.update(dt);
   }
@@ -1060,6 +1135,7 @@ export class ProcUnit extends THREE.Group {
     if (!this.paintMesh) return;
     const near = lod <= 0;
     this.paintMesh.visible = near;
+    // [B4] the glow mesh is per unit (not instanced): far LODs never draw it, so draw calls do not grow with the unit count
     if (this.glowMesh) this.glowMesh.visible = near && this.cloak < 1 && this.darkness < 1;
     if (this.emblemMesh) this.emblemMesh.visible = near && this.cloak < UNIT_KIT.cloak.emblemCutoff;
   }
@@ -1090,7 +1166,7 @@ export class ProcUnit extends THREE.Group {
     releasePaintMaterial(this.paint);
     if (this.emblemMaterial) releaseEmblemMaterial(this.emblemMaterial);
     this.clear();
-    this.cache.release(this.kit, this.variant);
+    this.cache.release(this.kit, this.variant, this.shared);
     this.shared = null;
     this.sockets?.clear();
     this.boneByName?.clear();

@@ -17,6 +17,7 @@ import { localTeam } from '../core/LocalPlayer.js';
 import { modelFootprint } from '../units/Structure.js';
 import { commandBus } from './commands/CommandBus.js';
 import { newTicket, eidsOf, quantizeYaw } from './commands/buildCommands.js'; // also registers the build commands
+import { buildFactor } from './Auras.js'; // [A9-buildings]
 
 /**
  * Ground box (world axes) of a footprint turned to ANY yaw: the bounding box of the turned rectangle (pathfinding
@@ -67,9 +68,10 @@ export function markConstructionStarted(structure) {
 
 /** [N1] Current construction speed of a building (Structure.buildRate): its builders and whether it was started */
 export function structureBuildRate(structure) {
-  if (structure.stats?.selfBuild) return SELF_BUILD_RATE; // [H1] builds itself (wall gate), any race, no builder
+  if (structure.stats?.selfBuild) return SELF_BUILD_RATE * buildFactor(structure); // [H1] builds itself (wall gate), any race, no builder
   if (structure.constructionDue) return 0; // [W5b] waits for the deferred part of its cost
-  return buildRate(structure.race, structure.builders.size, structure.constructionStarted === true);
+  // [A9-buildings] × construction enhancer aura (Auras.js; 1 outside any aura)
+  return buildRate(structure.race, structure.builders.size, structure.constructionStarted === true) * buildFactor(structure);
 }
 
 /**

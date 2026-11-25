@@ -623,23 +623,24 @@ export class OreDeepExtractorProc extends ProcModel {
     if (!this.shared) return;
     const an = this.kit.style.anim;
     const A = EXTRACTOR_ANIM;
-    this.time += delta;
+    const dt = delta;   // already scaled by animScale in tick(); no power:everything stands still (the string keeps its pose)
+    this.time += dt;
     this.power += ((active ? 1 : 0) - this.power) * Math.min(1, delta * A.powerEase);
 
-    if (active) this.cycle = (this.cycle + delta / A.feedPeriod) % 1;
+    if (active) this.cycle = (this.cycle + dt / A.feedPeriod) % 1;
     const tri = this.cycle < 0.5 ? this.cycle * 2 : 2 - this.cycle * 2;
     const wave = this.feedSteps > 0 ? steppedEase(tri, this.feedSteps) : smootherstep(tri);
     this.depth += ((active ? wave : 0) - this.depth) * Math.min(1, delta * A.feedFollow);
     const jolt = an.jerk > 0 ? Math.sin(this.time * TAU * A.hammerHz) * A.hammerAmp * an.jerk * this.power : 0;
     const y = this.restY - this.depth * A.feedDepth + jolt;
     this.stringMesh.position.y = y;
-    this.angle += delta * this.spinSpeed * this.power;
+    this.angle += dt * this.spinSpeed * this.power;
     this.stringMesh.rotation.y = this.angle;
     this.tetherMesh.scale.y = Math.max(this.tetherY - y, 0.01);
 
-    for (let i = 0; i < this.sliders.length; i++) this.sliders[i].update(delta, this.power);
-    for (let i = 0; i < this.turners.length; i++) this.turners[i].update(delta, this.power);
-    for (let i = 0; i < this.levitators.length; i++) this.levitators[i].update(delta, active);
+    for (let i = 0; i < this.sliders.length; i++) this.sliders[i].update(dt, this.power);
+    for (let i = 0; i < this.turners.length; i++) this.turners[i].update(dt, this.power);
+    for (let i = 0; i < this.levitators.length; i++) this.levitators[i].update(dt, active);
 
     const glow = pulseWave(this.time, an.pulse) * (A.idleGlow + (1 - A.idleGlow) * this.power);
     this.pulseGlow?.setIntensity(glow);
@@ -647,7 +648,7 @@ export class OreDeepExtractorProc extends ProcModel {
     this.tetherLayer?.setIntensity(this.power * pulseWave(this.time, an.pulse));
     this.heat += ((active ? 1 : 0) - this.heat) * Math.min(1, delta * an.glowRamp);
     this.heatGlow?.setIntensity(this.heat);
-    this.blink.update(delta, active);
+    this.blink.update(dt, active);
     this.beacons?.setIntensity(active ? (this.blink.on ? 1 : 0) : A.idleBeacon);
   }
 }

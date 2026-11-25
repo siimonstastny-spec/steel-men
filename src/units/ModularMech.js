@@ -6,6 +6,7 @@ import { MechAnimator } from '../anim/MechAnimator.js';
 import { MechPart } from './MechPart.js';
 import { ProcRobotAnimator } from '../procedural/robots/ProcRobotAnimator.js'; // [proc-robot]
 import { ProcMechVisual, procRobotCandidate, prepareProcRobots } from './ProcMechVisual.js'; // [proc-robot]
+import { GlbAttackFx } from '../procedural/robots/GlbAttackFx.js'; // [B5 glb-fx] visual only
 import {
   SOCKETS, MECH, MOVEMENT, TEAMS, PLAYER_TEAM, VFX, ORDERS, RINGS, ARRIVE_DISTANCE, BEHAVIOUR, basicLoadout, PING,
   JUMP_JET, MECH_COLLISION,
@@ -63,7 +64,9 @@ export class ModularMech extends THREE.Group {
     this.hitReactTimer = 0;
     this.crew = null;     // Crew operating the mech; without crew the mech is inactive
     this.boardTimer = 0;  // seconds until a boarding crew takes control
-    this.parts = {};      // slot -> MechPart (chybějící ruka = slot není)
+    this.reboardBlock = 0; // seconds a crew bailed out of this mech: nobody may board yet (canBoard)
+    this.bailFloor = 0;   // torso / legs HP share below which the current crew bails out (0 = never), set on boarding
+    this.parts = {};     // slot -> MechPart (chybějící ruka = slot není)
     this.sockets = {};    // slot ruky -> Object3D kotevního bodu
     this.world = null;    // nastaví World.addMech
     this.order = null;    // { type: 'move', target } | { type: 'collect', wreck } | { type: 'attack', target, auto? }
@@ -88,6 +91,7 @@ export class ModularMech extends THREE.Group {
     // [proc-robot] display only (ProcMechVisual.js): procedural robot drawn over the hidden GLB parts, or null
     this.procVisual = null;
     this.procModel = null;     // current ProcRobot (Highlight.js, World disposes it with procVisual)
+    this.attackFx = null;      // [B5 glb-fx] muzzle flash + recoil for GLB weapons without an own clip (World disposes it)
   }
 
   /** [R2] Current jet flight (reused, no allocation per flight) */
@@ -111,7 +115,7 @@ export class ModularMech extends THREE.Group {
       ...keys.map((k) => loadModel(this.loadout[k])),
     ]);
     this.animLib = lib;
-    await prepareProcRobots(this.race); // [proc-robot] style kits for the robot builder (null for other races)
+    await prepareProcRobots(this.race, this.loadout); // [A9/B3] loadout: data-only parts draw procedurally; [proc-robot] style kits for the robot builder (null for other races)
     this.stance ??= getStats().rules.combat.defaultStance;
     this.behaviour ??= getStats().rules.combat.defaultBehaviour;
 
@@ -138,13 +142,16 @@ export class ModularMech extends THREE.Group {
 
     this.animator = new MechAnimator(this, lib);
     // [proc-robot] the procedural display wraps the GLB animator (its clips keep driving the hidden simulation body)
-    if (procRobotCandidate(this.race)) {
+    if (procRobotCandidate(this.race, this.loadout)) {
       this.procVisual = new ProcMechVisual(this);
       this.animator = new ProcRobotAnimator(this, null, this.animator);
     }
     this.animator.setWalkClip(this.parts.legs.stats.anim?.move ?? null); // [R2] legs' own move loop (JumpJet hop run)
     this.animator.rebuild();
     this.procVisual?.sync(); // [proc-robot]
+    // [B5 glb-fx] display only: never moves GLB nodes (MechPart.muzzlePoint = simulation shot origin), flashes live in
+    // their own scene group, so the mech's hierarchy and matrices stay as the simulation sees them
+    this.attackFx = new GlbAttackFx(this);
     this.#updateCrewLook();
     return this;
   }
@@ -172,7 +179,26 @@ export class ModularMech extends THREE.Group {
   get repairRate() {
     return teamRule(this.team, 'repair.fieldRate') * (1 + (this.crew?.bonuses.repairSpeed ?? 0)) * this.repairFactor;
   }
-  get canBoard() { return !this.destroyed && this.crew === null && !this.bay; }
+  /** A crew may board; not for reboardDelay seconds after a crew bailed out (it must not run straight back in) */
+  get canBoard() { return !this.destroyed && this.crew === null && !this.bay && this.reboardBlock <= 0; }
+
+  /** HP share of the part closest to destroying the mech (torso or legs at 0 HP = destroyed; arms do not count) */
+  get criticalHpFraction() {
+    const torso = this.parts.torso;
+    const legs = this.parts.legs;
+    const a = torso && torso.maxHp > 0 ? torso.hp / torso.maxHp : 1;
+    const b = legs && legs.maxHp > 0 ? legs.hp / legs.maxHp : 1;
+    return Math.min(a, b);
+  }
+
+  /**
+   * Morale: HP share of torso / legs below which this crew bails out (rules.crew.morale): bailHpFraction lowered by
+   * the rank's `morale` bonus × moraleScale; 0 = this crew stays until the mech is destroyed.
+   */
+  #bailThreshold(crew) {
+    const m = getStats().rules.crew.morale;
+    return m ? Math.max(0, m.bailHpFraction - (crew.bonuses.morale ?? 0) * m.moraleScale) : 0;
+  }
   /** Serviced in an assembly bay: hidden, cannot be selected, targeted or collided with */
   get inside() { return this.bay !== null; }
 
@@ -206,6 +232,10 @@ export class ModularMech extends THREE.Group {
     if (!this.canBoard) return false;
     this.crew = crew;
     this.boardTimer = teamRule(this.team, 'crew.boardTime') / (1 + (crew.bonuses.boardSpeed ?? 0));
+    // A crew boarding an already damaged mech tolerates only further damage: it does not bail out at once
+    const threshold = this.#bailThreshold(crew);
+    this.bailFloor = threshold > 0
+      ? Math.max(0, Math.min(threshold, this.criticalHpFraction - getStats().rules.crew.morale.rearmMargin)) : 0;
     crew.enter(this);
     this.#refreshStats();
     this.#updateCrewLook();
@@ -228,6 +258,24 @@ export class ModularMech extends THREE.Group {
     this.#refreshStats();
     this.#updateCrewLook();
     return crew;
+  }
+
+  /** Per tick: a repair raises the floor back up (never lowers it); below the floor the crew bails out */
+  #checkMorale() {
+    const threshold = this.#bailThreshold(this.crew);
+    if (threshold <= 0) return; // brave enough to stay until the mech is destroyed
+    const critical = this.criticalHpFraction;
+    const margin = getStats().rules.crew.morale.rearmMargin;
+    this.bailFloor = Math.min(threshold, Math.max(this.bailFloor, critical - margin)); // a rank-up lowers the threshold
+    if (critical < this.bailFloor) this.#bailOut();
+  }
+
+  /** Morale broke: the crew leaves the heavily damaged mech and runs like after a destruction; the mech stays empty */
+  #bailOut() {
+    const killer = this.lastAttacker;
+    const crew = this.ejectCrew();
+    this.reboardBlock = getStats().rules.crew.morale.reboardDelay;
+    crew?.flee(isTargetable(killer) ? [killer] : [], this.position, { evacuate: true });
   }
 
   /** Drops a mounted arm on the ground as a wreck (it keeps its HP and can be picked up again) */
@@ -546,8 +594,11 @@ export class ModularMech extends THREE.Group {
 
   update(dt) {
     this.animator?.update(dt);
+    this.attackFx?.update(dt); // [B5 glb-fx] after the mixer (additive recoil)
+    this.procModel?.setCloaked?.(this.cloaked && !this.destroyed ? 1 : 0); // [A9] Camo torso look (visual only, idempotent; enemies: FogOfWar hides)
     if (this.inFlight) this.#updateFlight(dt); // [R2] a flight always ends with a landing (even a wreck lands first)
     this.flightCooldown = Math.max(0, this.flightCooldown - dt);
+    this.reboardBlock = Math.max(0, this.reboardBlock - dt);
     if (this.destroyed) { if (!this.inFlight) this.#sink(dt); return; }
     if (this.bay) { this.#paintInBay(); this.speed = 0; this.animator?.setMoving(false); updateService(this, dt); return; } // in an assembly bay (Repair.js)
     this.#bayPainted = false;
@@ -557,6 +608,7 @@ export class ModularMech extends THREE.Group {
     this.hitReactTimer = Math.max(0, this.hitReactTimer - dt);
     for (const part of Object.values(this.parts)) part.updateWeapons(dt);
     if (this.repairing) this.#repair(dt);
+    else if (this.crew) this.#checkMorale();
     if (this.inFlight) return; // [R2] in the air: new orders wait for the landing
     if (!this.active) { this.speed = 0; this.#endHop(); this.animator?.setMoving(false); return; }
     // Stunned or being thrown back (StatusEffects): no moving, turning or new attacks
@@ -729,6 +781,7 @@ export class ModularMech extends THREE.Group {
     const hit = clip ? clipHitType(clip) : 'single';
     // [proc-robot] robot attack animation (visual only): the turret fires on the move too, arms only when standing
     if (weapon.part.slot === 'torso' || s.stopsToFire || !moving) this.animator.visualAttack?.(weapon.part.slot, s.attackTime, s.burst);
+    this.attackFx?.attack(weapon.part, s, clip, s.attackTime, s.burst); // [B5 glb-fx] display only
     this.world.schedule(s.attackTime * s.hitAt, () => {
       if (weapon.part.mech === this) releaseAttack(this.world, this, weapon, target, { hit }); // arm may be gone by now
     });

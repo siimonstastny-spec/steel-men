@@ -2,7 +2,7 @@
 // Explosion models (models/explosion/*.glb) are static meshes – all their animation happens here.
 import * as THREE from 'three';
 import { loadModel } from '../core/AssetLoader.js';
-import { VFX, R2 } from '../config.js';
+import { VFX, R2, SOUND_HOOKS } from '../config.js';
 import { play } from '../audio/Sound.js';
 import { loadExplosionData, explosionData, explosionPlan, damagePlan, ParticleField } from './ExplosionStyles.js';
 
@@ -116,6 +116,7 @@ class ProjectileBatch {
         const rec = arrived[i];
         const cb = rec.onArrive;
         const point = rec.timeout ? null : rec.hit.clone();
+        if (point && !this.headless) play('impact', { position: point }); // [A6] read only, before the callback may keep the point
         rec.aim = null; rec.onArrive = null;
         this.pool.push(rec);
         if (point) { try { cb(point); } catch (e) { error ??= e; } }
@@ -192,8 +193,8 @@ export class Effects {
     if (this.headless) return; // [J1]
     const plan = explosionData() ? explosionPlan(unit) : null;
     const aim = unit.aimHeight ?? 1;
-    if (!plan) { this.burst(VFX.mechExplosion, position.clone(), { size: fallbackSize, heightUnit: aim }); return; }
-    this.burst(plan.layers, position.clone(), { size: plan.size * size, heightUnit: plan.heightByAim ? aim : 1 });
+    if (!plan) { this.burst(VFX.mechExplosion, position.clone(), { size: fallbackSize, heightUnit: aim, sound: 'explosionLarge' }); return; }
+    this.burst(plan.layers, position.clone(), { size: plan.size * size, heightUnit: plan.heightByAim ? aim : 1, sound: 'explosionLarge' });
     const field = this.#field();
     const gy = position.y;
     const y = position.y + (plan.heightByAim ? aim * 0.8 : 1);
@@ -283,6 +284,7 @@ export class Effects {
   /** Instant shot line (lasers, guns without projectile speed) */
   tracer(from, to, color) {
     if (this.headless) return; // [J1]
+    play('impact', { position: to }); // [A6] the shot line ends where it hits
     const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);
     const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 1 });
     const line = new THREE.Line(geo, mat);
@@ -311,11 +313,12 @@ export class Effects {
    * One-shot layered effect (see VFX in config.js), e.g. VFX.mechExplosion.
    * @param {object[]} layers
    * @param {THREE.Vector3} position  ground point of the effect
-   * @param {object} [opts]  { size = 1 (scale multiplier), heightUnit = 1 (layer.height × this) }
+   * @param {object} [opts]  { size = 1 (scale multiplier), heightUnit = 1 (layer.height × this), sound ([A6] Sound.js
+   *   event; default explosionLarge / explosionSmall by size, SOUND_HOOKS.burstLargeSize) }
    */
-  burst(layers, position, { size = 1, heightUnit = 1 } = {}) {
+  burst(layers, position, { size = 1, heightUnit = 1, sound = null } = {}) {
     if (this.headless) return; // [J1] no models, no sound
-    play('explosion', { position });
+    play(sound ?? (size >= SOUND_HOOKS.burstLargeSize ? 'explosionLarge' : 'explosionSmall'), { position });
     for (const layer of layers) {
       const obj = this.#instance(layer.model, layer.color, layer.textured ?? true);
       if (!obj) continue;

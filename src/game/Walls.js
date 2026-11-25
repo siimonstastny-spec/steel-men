@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import { getStats, unitStats } from '../data/Stats.js';
 import { PlacementHologram, createPreviewSource } from './PlacementHologram.js'; // [hologram]
-import { PLACEMENT, WALL, WALL_DRAG, STRUCTURE, CMD_WALL, UI_SMALL, LOS } from '../config.js';
+import { PLACEMENT, WALL, WALL_DRAG, GATE, STRUCTURE, CMD_WALL, UI_SMALL, LOS } from '../config.js';
 import { Structure, modelFootprint, cachedFootprint, footprintAt, snapYaw, structureScale } from '../units/Structure.js';
 import { DefenseStructure } from '../units/DefenseStructure.js';
 import { registerStructureClass } from '../units/structureClasses.js';
@@ -41,13 +41,8 @@ export class WallPost extends Structure {
     this.turret = null;
   }
 
-  /** World height of the turret socket (top of the post) above the post's base */
-  get turretHeight() {
-    const socket = this.model?.getObjectByName(this.stats.turretSocket);
-    if (!socket) return this.bodyHeight;
-    this.updateMatrixWorld(true);
-    return socket.getWorldPosition(new THREE.Vector3()).y - this.position.y;
-  }
+  /** Height of the turret seat (top of the post) above the post's base – [A1-6] from data (stats simBody.turretHeight), never the model */
+  get turretHeight() { return this.simBody?.turretHeight ?? this.bodyHeight; }
 
   get hasTurret() { return live(this.turret); }
 
@@ -109,8 +104,8 @@ const segmentModelLength = (fp) => Math.max((fp.halfX - STRUCTURE.footprintPaddi
 
 /**
  * Wall gate (stats.gate): a segment whose procedural model opens while an own or allied ground unit is near
- * (stats.gateOpenRange from the gate's ends). The open state is derived from the simulation state every tick and only
- * drives the model (visual); nothing reads it back.
+ * (stats.gateOpenRange from the gate's ends). The open state is derived from the simulation state only every
+ * GATE.openCheckTicks-th tick (throttled) and only drives the model (visual); nothing reads it back.
  * [H1] Navigation: an unfinished / dead gate blocks everybody like a segment. A finished one is passable for its team and
  * its allies (pathfinding shapes carry `passTeam`, see Pathfinding.js): they plan their paths through it and it opens
  * when they come near; enemies always see a wall. Built by rebuilding a full segment (command upgradeGate).
@@ -139,9 +134,13 @@ export class WallGate extends WallSegment {
   }
 
   #refreshOpen() {
-    let open = false;
     const world = this.world;
-    if (world && this.complete && !this.dead && this.stats) {
+    // [A1] The open state only drives the model, so it is re-evaluated every GATE.openCheckTicks ticks, shifted per gate
+    // (eid) – the cost of O(gates × units) drops by that factor; a gate that cannot open is cleared at once
+    const live = world && this.complete && !this.dead && this.stats;
+    if (live && (world.tick + this.eid) % GATE.openCheckTicks !== 0) return;
+    let open = false;
+    if (live) {
       const reach = this.length / 2 + (this.stats.gateOpenRange ?? 0);
       const reach2 = reach * reach;
       // (the unit arrays directly: world.units would build a filtered copy for every gate every tick)

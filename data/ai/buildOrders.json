@@ -1,5 +1,5 @@
 {
-  "_doc": "Opening build orders. Steps run in order; a step is done when the team OWNS (finished or under construction / queued) at least `count` of it. `build` = structure, `unit` = vehicle. A value starting with @ is a role resolved from stats.json for the AI's race (src/ai/AiData.js ROLES: @power @supply @crew @parts @assembly @vehicles @research @storage @tower @wallPost @turret @harvester @builder @combatVehicle), otherwise a stats.json id. AI v4 (docs/notes/ai-v4.md): normal and hard build the vehicle factory second and want their trucks right after it – trucks are the only income that grows, everything later waited for them. A step whose role has no buildable candidate for the race (e.g. @supply for a race with population.fullFromStart) is skipped. `races` may override a whole list per race key: { \"X\": { \"normal\": [...] } } – none needed today. D3 (docs/notes/d3-ai-economy.md): the match starts with 10 % energy (the vehicle factory alone costs more), so every order opens with 2 power plants and adds a 3rd after the trucks; further plants come from the energy plan (difficulty.power: a consumer the plants do not cover gets a power plant first), the @power steps are only a floor.",
+  "_doc": "Opening build orders. Steps run in order; a step is done when the team OWNS (finished or under construction / queued) at least `count` of it. `build` = structure, `unit` = vehicle. A value starting with @ is a role resolved from stats.json for the AI's race (src/ai/AiData.js ROLES: @power @supply @crew @parts @assembly @vehicles @research @storage @tower @wallPost @turret @harvester @builder @combatVehicle), otherwise a stats.json id. AI v4 (docs/notes/ai-v4.md): normal and hard build the vehicle factory second and want their trucks right after it – trucks are the only income that grows, everything later waited for them. A step whose role has no buildable candidate for the race (e.g. @supply for a race with population.fullFromStart) is skipped. `races` may override a whole list per race key: { \"X\": { \"normal\": [...] } } – none needed today. D3 (docs/notes/d3-ai-economy.md): the match starts with 10 % energy (the vehicle factory alone costs more), so every order opens with 2 power plants and adds a 3rd after the trucks; further plants come from the energy plan (difficulty.power: a consumer the plants do not cover gets a power plant first), the @power steps are only a floor. A1-5 r2: normal / hard want their 2nd builder right after the trucks – races whose buildings need a builder the whole time (construction.continuesWithoutBuilder false) built the crew building, part factory and assembly bay one after another with one truck (X hard: first robot at 548 s).",
   "default": {
     "easy": [
       { "build": "@power", "count": 2 },
@@ -15,12 +15,12 @@
       { "build": "@power", "count": 2 },
       { "build": "@vehicles", "count": 1 },
       { "unit": "@harvester", "count": 3 },
+      { "unit": "@builder", "count": 2 },
       { "build": "@power", "count": 3 },
       { "build": "@crew", "count": 1 },
       { "build": "@parts", "count": 1 },
       { "build": "@assembly", "count": 1 },
       { "build": "@power", "count": 5 },
-      { "unit": "@builder", "count": 2 },
       { "build": "@supply", "count": 2 },
       { "build": "@parts", "count": 2 }
     ],
@@ -28,11 +28,11 @@
       { "build": "@power", "count": 2 },
       { "build": "@vehicles", "count": 1 },
       { "unit": "@harvester", "count": 4 },
+      { "unit": "@builder", "count": 2 },
       { "build": "@power", "count": 3 },
       { "build": "@crew", "count": 1 },
       { "build": "@parts", "count": 1 },
       { "build": "@assembly", "count": 1 },
-      { "unit": "@builder", "count": 2 },
       { "build": "@power", "count": 5 },
       { "build": "@supply", "count": 2 },
       { "build": "@parts", "count": 2 },

@@ -24,9 +24,11 @@ import { issueOrder } from '../units/OrderQueue.js';
 import { MECH_SLOTS, PART_SLOTS, partOptions, catalogEntry, catalogSlot, stockKey } from './PartStock.js';
 import { startBayRepair, startSwap, cancelTask, releaseMech, canRelease } from './Repair.js';
 import { isCrewBay, bayCrewCount, takeCrew, releaseAll, releaseCrew } from './BayCrew.js';
+import { productionFactor } from './Auras.js'; // [A9-buildings]
 
 // [R1] item kinds that spawn a unit next to the producer
 const SPAWNS_UNIT = ['vehicle', 'crew', 'mech'];
+const AURA_EXEMPT_KINDS = ['research', 'analysis']; // [A9-buildings] queue kinds the production aura does not speed up
 
 /** What a building can make (Structure.produces) */
 export const PRODUCES = { vehicle: 'vehicle', crew: 'crew', part: 'part', mech: 'mech', research: 'research' };
@@ -642,7 +644,10 @@ export class Production {
       // [W5b] the real start: the deferred part of the cost (energy); without it the item waits, drawing nothing
       if (item.due && this.economy?.hasDue(item.due) && !this.economy.payDue(item.team, item.due, item.paid)) continue;
       // [D1] a working producer draws its energy; low energy slows it (Economy.drawPower → work rate)
-      if (item.elapsed < item.total) item.elapsed += dt * (this.economy?.drawPower(structure, dt) ?? 1);
+      // [A9-buildings] × construction enhancer production aura (Auras.js) – not for research / analysis
+      if (item.elapsed < item.total) {
+        item.elapsed += dt * (this.economy?.drawPower(structure, dt) ?? 1) * (AURA_EXEMPT_KINDS.includes(item.kind) ? 1 : productionFactor(structure));
+      }
       else item.elapsed += dt;
       if (item.elapsed < item.total) continue;
       // [R1] a produced unit needs a free spot around its building: hold the finished item until one frees up

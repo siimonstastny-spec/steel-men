@@ -2,12 +2,15 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MODELS_BASE, MODEL_ENCODING, BASE64_MODEL_SUFFIX, MODEL_TEXTURE_FIX, MODEL_GEOMETRY_FIX } from '../config.js';
+import { partModelPath } from '../data/Stats.js';
 
 const loader = new GLTFLoader();
 const cache = new Map(); // url -> Promise<gltf>
 
 /** Načte GLB (jednou) a označí uzly glTF + jejich klidovou pózu */
 export function loadGltf(path) {
+  if (!path) return Promise.reject(new Error('[AssetLoader] empty model path'));
+  path = partModelPath(path); // [A9] data-only robot parts (stats.parts.*.standInSet) map to their stand-in GLB
   const url = MODELS_BASE + path;
   if (!cache.has(url)) {
     const job = fetchGltf(url).then(markNodes).then((gltf) => fixTextures(fixGeometry(gltf, path), path));

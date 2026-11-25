@@ -26,6 +26,7 @@ import { STRUCTURE, ROBOT_PRODUCTION, HOLOGRAM, ALLY_REPAIR, N1B, BAY_CREW } fro
 import { admitCrew, takeThisCrew } from './BayCrew.js'; // [W7] the serviced mech's crew waits inside the bay
 import { distanceToBox } from '../units/Vehicle.js';
 import { areAllies } from './Alliances.js'; // [N5FIX] allies repair each other's finished buildings
+import { buildFactor } from './Auras.js'; // [A9-buildings]
 
 const UP = new THREE.Vector3(0, 1, 0);
 const GATE_LOCAL = new THREE.Vector3();
@@ -326,7 +327,8 @@ export function vehicleRepairStep(vehicle, dt) {
   target.repairers ??= new Set();
   target.repairers.add(vehicle);
   const index = activeRepairers(target).indexOf(vehicle);
-  const share = ability.rate * rules().extraRepairerFactor ** Math.max(0, index) * dt;
+  // [A9-buildings] a building inside a construction enhancer aura is repaired faster (Auras.js)
+  const share = ability.rate * rules().extraRepairerFactor ** Math.max(0, index) * dt * (target.isStructure ? buildFactor(target) : 1);
   if (!heal(target, share, ability.costPerHp, vehicle.world?.economy, vehicle.team)) return endRepair(o, vehicle); // [N5FIX] repairer pays
   vehicle.activity = 'repairing';
   return null;

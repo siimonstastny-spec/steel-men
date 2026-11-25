@@ -19,6 +19,8 @@ import {
   DefenseProcModel, DEFENSE_DETAIL, DEFENSE_ANIM, turretHead, barrelCluster, nextDefenseInstance,
 } from './PointDefenseProc.js';
 import { TAU, HALF_PI, QUARTER_PI, WALL_LAYOUT, WALL_TEAM } from './MobileWallProc.js';
+import { getStats } from '../data/Stats.js';
+import { STRUCTURE, PROC_MUZZLE } from '../config.js';
 
 /**
  * Team paint of the turret (S.teamPaint / S.teamShade, see WALL_TEAM): the whole pedestal and the slew ring, a cap on the head
@@ -189,16 +191,71 @@ function laserBarrel(b, glow, flash, kit, spec) {
 
 // ---------------------------------------------------------------- shared record per turret type and style
 
-const GUN_DEF = { shapes: GUN_SHAPES, barrels: barrelCluster, muzzle: MUZZLE.gun, mantlets: true };
-const LASER_DEF = { shapes: LASER_SHAPES, barrels: laserBarrel, muzzle: MUZZLE.laser, mantlets: false };
+const GUN_DEF = {
+  shapes: GUN_SHAPES, barrels: barrelCluster, muzzle: MUZZLE.gun, mantlets: true, statsId: 'mobileWallGunTurret', sockets: GUN_SOCKETS.length,
+};
+const LASER_DEF = {
+  shapes: LASER_SHAPES, barrels: laserBarrel, muzzle: MUZZLE.laser, mantlets: false, statsId: 'mobileWallLaserTurret', sockets: LASER_SOCKETS.length,
+};
+
+const clampAbs = (v, max) => Math.max(-max, Math.min(max, v));
+
+/**
+ * [B5-muzzles] Simulation shot points of a turret (stats simBody.muzzles at aim 0, byRace of the style / its modelRace) in
+ * model units (÷ STRUCTURE.modelScale × stats modelScale), or null (stats not loaded, no data, fit off). Read-only.
+ */
+function dataMuzzles(statsId, race) {
+  if (!PROC_MUZZLE.fit.enabled) return null;
+  try {
+    const st = getStats();
+    const s = st.structures?.[statsId];
+    const body = s?.simBody;
+    if (!body) return null;
+    const over = body.byRace?.[race] ?? body.byRace?.[st.races?.[race]?.modelRace];
+    const list = over?.muzzles ?? body.muzzles;
+    if (!list?.length) return null;
+    const k = STRUCTURE.modelScale * (s.modelScale ?? 1);
+    return list.map(([x, y, z]) => [x / k, y / k, z / k]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * [B5-muzzles] Barrel layout fitted to the data muzzles within PROC_MUZZLE.wall: { offsets, len, lift, pedestalH }.
+ * Without data: the shape as designed.
+ */
+function fitBarrels(def, kit, shape, head, start) {
+  const P = shape.pedestal;
+  const hd = shape.head;
+  const bs = shape.barrels;
+  let offsets = bs.offsets ?? [[0, 0]];
+  const len0 = def.muzzle - start;
+  const data = dataMuzzles(def.statsId, kit.key);
+  if (!data) return { offsets, len: len0, lift: 0, pedestalH: P.h };
+  const W = PROC_MUZZLE.wall;
+  const oy = offsets.reduce((a, o) => a + o[1], 0) / offsets.length;
+  offsets = data.length < offsets.length
+    ? data.map(([x]) => [x, oy])                                               // one barrel per data muzzle
+    : offsets.map(([ox, y], i) => [ox + clampAbs(data[i % data.length][0] - ox, W.xShift), y]);
+  let ty = 0;
+  let tz = 0;
+  for (const m of data) { ty += m[1]; tz += m[2]; }
+  ty /= data.length;
+  tz /= data.length;
+  const need = ty - (P.h + head.mid + oy);
+  const headH = hd.kind === 'dome' ? hd.r * hd.flat : hd.h;
+  const lift = clampAbs(need, Math.max(0, headH / 2 - bs.r));
+  const pedestalH = P.h + clampAbs(need - lift, P.h * W.pedestalShare);
+  const len = Math.min(len0 * W.stretch[1], Math.max(len0 * W.stretch[0], tz - start));
+  return { offsets, len, lift, pedestalH };
+}
 
 /** Shared record: { static (LODs), turret, emblem, barrels, barrelGlow, barrelAt, pivotY, tips } */
 function buildShared(kit, def) {
   const S = kit.S;
   const key = Object.hasOwn(def.shapes, kit.style.silhouette) ? kit.style.silhouette : 'rounded';
   const shape = def.shapes[key];
-  const base = new PartBuilder();
-  pedestal(base, kit, shape.pedestal);
 
   const tb = new PartBuilder();
   const hd = shape.head;
@@ -206,30 +263,39 @@ function buildShared(kit, def) {
   teamHead(tb, kit, hd, head);
   const bz = hd.d / 2;
   const bs = shape.barrels;
-  const offsets = bs.offsets ?? [[0, 0]];
+  const start = bz - BARREL_BACK;
+  const fit = fitBarrels(def, kit, shape, head, start);   // [B5-muzzles] muzzles on the simulation shot points
+  const offsets = fit.offsets;
   if (def.mantlets) {   // barrels leave through mantlets in the front face
     const M = DEFENSE_DETAIL.mantlet;
-    for (const [ox, oy] of offsets) tb.box(bs.r * M.w, bs.r * M.w, M.d, S.hullDark, { x: ox, y: head.mid + oy, z: bz });
+    for (const [ox, oy] of offsets) tb.box(bs.r * M.w, bs.r * M.w, M.d, S.hullDark, { x: ox, y: head.mid + fit.lift + oy, z: bz });
   }
+  const base = new PartBuilder();
+  pedestal(base, kit, { ...shape.pedestal, h: fit.pedestalH });
 
   const barrelB = new PartBuilder();
   const barrelGlow = new GlowSet();
-  const start = bz - BARREL_BACK;
-  const tips = def.barrels(barrelB, barrelGlow.get('pulse'), barrelGlow.get('flash'), kit, { ...bs, offsets, start, len: def.muzzle - start });
+  const tips = def.barrels(barrelB, barrelGlow.get('pulse'), barrelGlow.get('flash'), kit, { ...bs, offsets, start, len: fit.len });
+  // every named launch socket gets a tip (fewer barrels than sockets: socket i uses barrel i % n)
+  for (let i = tips.length, n = tips.length; i < def.sockets; i++) tips.push(tips[i % n]);
   return {
     static: base.buildLods(),
     turret: tb.build(),
     emblem: emblemDecalGeometry(head.placements),
     barrels: barrelB.build(),
     barrelGlow: barrelGlow.build(),
-    barrelAt: [0, head.mid, 0],
-    pivotY: shape.pedestal.h,
+    barrelAt: [0, head.mid + fit.lift, 0],
+    pivotY: fit.pedestalH,
     tips,
   };
 }
 
+// [B5-muzzles] models built before stats.json loaded (no muzzle fit) use their own cache, so later ones are fitted
 const GUN_CACHE = createSharedCache((kit) => buildShared(kit, GUN_DEF));
 const LASER_CACHE = createSharedCache((kit) => buildShared(kit, LASER_DEF));
+const GUN_CACHE_PRE = createSharedCache((kit) => buildShared(kit, GUN_DEF));
+const LASER_CACHE_PRE = createSharedCache((kit) => buildShared(kit, LASER_DEF));
+const statsReady = () => { try { return Boolean(getStats()); } catch { return false; } };
 
 // ---------------------------------------------------------------- the models
 
@@ -273,9 +339,9 @@ class WallTurretModel extends DefenseProcModel {
   /** Per-frame animation (numbers only, no allocations); `active` is unused – a turret has no production */
   update(delta) {
     if (!this.shared) return;
-    this.time += delta;
+    this.time += delta;   // already scaled by animScale in tick(): unpowered, the barrel pulse freezes (recoil below keeps real time so it settles)
     this.barrelPulse?.setIntensity(pulseWave(this.time, this.kit.style.anim.pulse));
-    this.stepFire(delta);
+    this.stepFire(this.realDelta || delta);
   }
 }
 
@@ -286,13 +352,13 @@ export class MobileWallGunTurretProc extends WallTurretModel {
    * @param {THREE.ColorRepresentation} [opts.teamColor]
    */
   constructor({ race, teamColor } = {}) {
-    super({ race, teamColor }, GUN_CACHE, 'MobileWallGunTurretProc', GUN_SOCKETS);
+    super({ race, teamColor }, statsReady() ? GUN_CACHE : GUN_CACHE_PRE, 'MobileWallGunTurretProc', GUN_SOCKETS);
   }
 }
 
 export class MobileWallLaserTurretProc extends WallTurretModel {
   /** Same options as MobileWallGunTurretProc */
   constructor({ race, teamColor } = {}) {
-    super({ race, teamColor }, LASER_CACHE, 'MobileWallLaserTurretProc', LASER_SOCKETS);
+    super({ race, teamColor }, statsReady() ? LASER_CACHE : LASER_CACHE_PRE, 'MobileWallLaserTurretProc', LASER_SOCKETS);
   }
 }

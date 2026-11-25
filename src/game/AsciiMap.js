@@ -32,7 +32,7 @@ export function hashSeed(...parts) {
 
 /**
  * Parses an ASCII map definition.
- * @param {object} def  map file: { rows: string[], cellSize?, superNode?: 'auto'|'none'|{col,row}, deposit?, superNodeOptions?, seed? }
+ * @param {object} def  map file: { rows: string[], cellSize?, superNode?: 'auto'|'none'|{col,row}, deposit?, superNodeOptions?, seed?, starts?: [col,row][] }
  * @param {string} id   map id (part of the deposit seed)
  */
 export function parseAsciiMap(def, id) {
@@ -70,11 +70,19 @@ export function parseAsciiMap(def, id) {
   }));
   map.rifts = rectangles(grid, n, CELL.rift).map((b) => ({ ...box(b, cellSize, half), rift: true }));
 
-  // Starts: 8-connected groups of S cells, in reading order, pushed away from walls
-  map.startPositions = components(startCells, n, 1, true).map((cells) => {
-    const p = centroid(cells, n, centreX, centreZ);
-    return pushFromWalls(p, map);
-  });
+  // Starts: explicit "starts" [[col, row], …] (full-grid cells, shifted like the rows were padded; S groups are then
+  // ignored), else 8-connected groups of S cells in reading order. Both pushed away from walls
+  if (Array.isArray(def.starts) && def.starts.length) {
+    map.startPositions = def.starts.map(([col, row]) => {
+      const c = col + Math.floor((n - (raw[row]?.length ?? n)) / 2); // same padding as the row got
+      return pushFromWalls({ x: centreX(c), z: centreZ(row + padTop) }, map);
+    });
+  } else {
+    map.startPositions = components(startCells, n, 1, true).map((cells) => {
+      const p = centroid(cells, n, centreX, centreZ);
+      return pushFromWalls(p, map);
+    });
+  }
 
   // Ore fields: 4-connected areas of 'o' / '+'
   const fieldMask = new Uint8Array(n * n);

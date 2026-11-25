@@ -10,7 +10,8 @@
 // Open: CommandInput → input.onStockWindow (KEYBINDINGS.stockWindow) or the button in the factory / assembly bay panel.
 // Click a row to select it, "Sell" sells one piece, Shift+click on Sell sells every piece of the type. Esc closes.
 // Styles: stock.css (loaded here).
-import { KEYBINDINGS, PART_SALE } from '../config.js';
+import { KEYBINDINGS, PART_SALE, TEAMS, ARMS } from '../config.js';
+import { partIconUrl, iconVersion } from './IconRenderer.js';
 import { commandBus } from '../game/commands/CommandBus.js';
 import { sellQuote, sellValue, canSellParts, sellFactor, slotOfPath } from '../game/commands/stockCommands.js'; // also registers the command
 import { PART_SLOTS, catalogSlot, catalogEntry } from '../game/PartStock.js';
@@ -126,12 +127,12 @@ export class StockWindow {
     const can = canSellParts(w, team);
     const allKeys = groups.flatMap((g) => g.rows.map((r) => r.key));
     if (this.selected && !allKeys.includes(this.selected)) this.selected = null;
-    const sig = JSON.stringify([groups, can, this.selected]);
+    const sig = JSON.stringify([groups, can, this.selected, iconVersion()]);
     if (!force && sig === this.signature) return;
     this.signature = sig;
 
     const body = groups.length
-      ? groups.map((g) => `<h3>${esc(t(`part.${g.slot}`))}</h3>${g.rows.map((r) => this.#rowHtml(r)).join('')}`).join('')
+      ? groups.map((g) => `<h3>${esc(t(`part.${g.slot}`))}</h3>${g.rows.map((r) => this.#rowHtml(r, g.slot, team)).join('')}`).join('')
       : `<p class="stk-empty">${esc(t('stock.empty'))}</p>`;
     const sel = this.selected ? groups.flatMap((g) => g.rows).find((r) => r.key === this.selected) : null;
     const quote = sel ? sellQuote(w, { team, path: sel.key, count: 1 }) : null;
@@ -152,11 +153,18 @@ export class StockWindow {
     </div>`);
   }
 
-  #rowHtml(r) {
+  /** `<img class="ico-img">` of a stocked part (arms: the canonical side), '' until the icon is rendered */
+  #iconHtml(slot, key, team) {
+    const mechSlot = slot === ARMS.slot ? ARMS.canonicalSlot : slot;
+    const url = partIconUrl(mechSlot, key, this.world.production.raceOf(team), TEAMS[team]?.color);
+    return url ? `<img class="ico-img" src="${esc(url)}" alt="">` : '';
+  }
+
+  #rowHtml(r, slot, team) {
     const faction = r.race ? ` <small>${esc(raceName(r.race))}</small>` : '';
     const value = r.value ? t('stock.gain', { ore: r.value.ore, energy: r.value.energy }) : '';
     return `<div class="stk-row${r.key === this.selected ? ' on' : ''}" data-key="${esc(r.key)}">
-      <span class="stk-name">${esc(r.set)}${faction}</span>
+      <span class="stk-name">${this.#iconHtml(slot, r.key, team)}${esc(r.set)}${faction}</span>
       <span class="stk-hp">HP ${esc(r.hp)}</span>
       <span class="stk-value">${esc(value)}</span>
       <b class="stk-count">×${r.count}</b></div>`;

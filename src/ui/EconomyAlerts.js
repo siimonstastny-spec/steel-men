@@ -2,9 +2,10 @@
 //   - no HQ (main building): mining and energy income only 10 %
 //   - low energy: towers off, production slowed
 // Local player only; hidden for spectators and after the match ended. Refreshes on an interval (no per-frame DOM work).
-import { ECONOMY_ALERTS, ECONOMY_POWER } from '../config.js';
+import { ECONOMY_ALERTS, ECONOMY_POWER, SOUND_HOOKS } from '../config.js';
 import { getStats } from '../data/Stats.js';
 import { t } from '../i18n/i18n.js';
+import { play } from '../audio/Sound.js';
 
 const PERCENT = 100;
 
@@ -15,6 +16,7 @@ export class EconomyAlerts {
     this.getTeam = getTeam;
     this.match = null;
     this.lastRefresh = 0;
+    this.lastLowPowerSound = -Infinity; // [A6] ms of the last lowPower sound (a flickering energy level does not repeat it)
     this.shown = { hq: null, energy: null }; // last rendered state, avoids touching the DOM when unchanged
     this.root = document.createElement('div');
     this.root.className = 'hud-econ-alerts';
@@ -62,7 +64,13 @@ export class EconomyAlerts {
     const noHq = !!active && this.economy.hasHq?.(team) === false;
     const low = !!active && !!this.economy.isLowEnergy?.(team);
     if (noHq !== this.shown.hq) { this.noHq.hidden = !noHq; this.shown.hq = noHq; }
-    if (low !== this.shown.energy) { this.lowEnergy.hidden = !low; this.shown.energy = low; }
+    if (low !== this.shown.energy) {
+      if (low && this.shown.energy === false && nowMs - this.lastLowPowerSound >= SOUND_HOOKS.lowPowerCooldownMs) { // [A6] once per episode
+        this.lastLowPowerSound = nowMs; // not right after reset (load / new match: shown is null)
+        play('lowPower');
+      }
+      this.lowEnergy.hidden = !low; this.shown.energy = low;
+    }
     this.root.hidden = !(noHq || low);
   }
 

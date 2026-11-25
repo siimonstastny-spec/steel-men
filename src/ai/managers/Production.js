@@ -51,7 +51,7 @@ export class ProductionManager {
     this.#vehicles(now);
     this.#releasePopulation(now);
     // v4: economy hold (Economy #econ: too few trucks) – no crews, parts or robots until the trucks are ordered
-    if (this.ai.bb.econ?.hold) { this.econHeld = (this.econHeld ?? 0) + 1; return; }
+    if (this.ai.bb.econ?.hold) { this.econHeld = (this.econHeld ?? 0) + 1; this.mechWhy = 'econ hold'; return; }
     this.#crews(now);
     this.#mechs(now);
   }
@@ -153,6 +153,7 @@ export class ProductionManager {
   #try(cmd, priority, what, { popReserve = false } = {}) {
     const res = this.prod.check({ ...cmd, team: this.team });
     this.lastFail = '';
+    this.lastCost = res.cost ?? null; // [A1-5] #parts: was it a part with an energy cost?
     if (!res.ok) {
       this.lastFail = res.reason;
       if (res.reason === REASON.resources) this.#starve(res.cost);
@@ -299,11 +300,12 @@ export class ProductionManager {
     return this.statCache.get(key);
   }
 
-  /** Empty robots outside bays a crew can reach (Military bb.unreachableMechs are left out) */
+  /** Empty robots outside bays (and crewless vehicles) a crew can reach (Military bb.unreachableMechs are left out) */
   #mechsWaitingForCrew() {
     const bad = this.ai.bb.unreachableMechs;
     let n = 0;
     for (const m of this.ai.perception.own.uncrewedMechs) if (!m.inside && !bad?.has(m.eid)) n++;
+    for (const v of this.ai.perception.own.crewlessVehicles) if (v.canBoard && !bad?.has(v.eid)) n++; // [A9-F4b] after a neutron bomb
     return n;
   }
 
@@ -410,14 +412,51 @@ export class ProductionManager {
 
   #mechs(now) {
     const bays = this.prod.producersOf(this.team, PRODUCES.mech);
-    if (!bays.length) return;
+    // [A1-5 r2] no bay yet but a finished part factory: the parts of the first robot are made meanwhile (one plan) –
+    // before, parts started only once the bay was placed and the first robot came long after the bay
+    const early = !bays.length && this.prod.producersOf(this.team, PRODUCES.part).some((s) => s.complete);
+    if (!bays.length && !early) { this.mechWhy = 'no bay'; return; }
+    this.#dropStalePlans(now);
     while (this.plans.length < bays.length + 1) {
       const plan = this.#planFromStock() ?? (this.#antiAirWanted() ? this.#makeAntiAirPlan() : null) ?? this.#makePlan(now);
       if (!plan) break;
+      plan.since = now;
       this.plans.push(plan);
     }
+    // [A1-5] status().mechWhy: what keeps the next robot back (assembly / parts)
+    this.assembleWhy = early ? 'no bay' : this.plans.length ? 'bays busy' : 'no plan';
+    this.partsWhy = '';
     this.#assemble(bays);
     this.#parts();
+    this.mechWhy = this.partsWhy ? `${this.assembleWhy} / parts ${this.partsWhy}` : this.assembleWhy;
+  }
+
+  /** [A1-5] Was a part with an energy cost held back (resources / budget) within AI.mechEnergy.energyTightSeconds? */
+  #energyTight(now) { return now - (this.energyHeldAt ?? -Infinity) < AI.mechEnergy.energyTightSeconds; }
+
+  /** [A1-5] Energy cost of a plan's parts (stock keys; both arms count) */
+  #planEnergy(plan) {
+    let energy = 0;
+    for (const slot of MECH_SLOTS) {
+      const path = plan.loadout[slot];
+      if (path) energy += this.#stat(path, slot)?.cost?.energy ?? 0;
+    }
+    return energy;
+  }
+
+  /**
+   * [A1-5] Plans that need energy and waited longer than AI.mechEnergy.planStaleSeconds while energy is tight are
+   * dropped (parts already made stay in stock – #planFromStock uses them); the next plan is picked ore-only.
+   */
+  #dropStalePlans(now) {
+    if (!this.plans.length || !this.#energyTight(now)) return;
+    const before = this.plans.length;
+    this.plans = this.plans.filter((plan) => plan.role === 'stock' || now - (plan.since ?? now) < AI.mechEnergy.planStaleSeconds
+      || this.#planEnergy(plan) <= 0);
+    if (this.plans.length < before) {
+      this.droppedPlans = (this.droppedPlans ?? 0) + before - this.plans.length;
+      this.ai.note('robot plan dropped – energy tight');
+    }
   }
 
   /** Stock counts as a Map path -> count (copy) */
@@ -436,19 +475,25 @@ export class ProductionManager {
     const serviceBays = this.ai.bb.serviceBays ?? new Set(); // Maintenance sends a robot there (v2)
     // v5: difficulty.production.mechInterval = s at least between two robots (easy: a slower army, not a stuck one)
     const gap = this.ai.diff.production?.mechInterval ?? 0;
-    if (gap > 0 && this.ai.now - (this.lastAssembleAt ?? -Infinity) < gap) return;
+    if (gap > 0 && this.ai.now - (this.lastAssembleAt ?? -Infinity) < gap) { this.assembleWhy = 'interval'; return; }
     let crews = this.#crewSlots(); // [E1] no robot without a crew for it (replaces the v20 hold on aircraft)
     for (const bay of bays) {
-      if (this.prod.itemsOf(bay.eid).length || bay.service || bay.assemblyDraft || serviceBays.has(bay.eid)) continue;
+      if (this.prod.itemsOf(bay.eid).length || bay.service || bay.assemblyDraft || serviceBays.has(bay.eid)) {
+        if (bay.service || serviceBays.has(bay.eid)) this.assembleWhy = 'bay in service';
+        continue;
+      }
       if (this.#inflightCount(`mech:${bay.eid}`)) continue;
       const index = this.plans.findIndex((plan) => {
         const need = ProductionManager.#pathsOf(plan);
         return need.every((p) => (stock.get(p) ?? 0) >= need.filter((o) => o === p).length);
       });
-      if (index < 0) return;
-      if (crews < 1) { this.crewHeld = (this.crewHeld ?? 0) + 1; return; }
+      if (index < 0) { this.assembleWhy = 'waits for parts'; return; }
+      if (crews < 1) { this.crewHeld = (this.crewHeld ?? 0) + 1; this.assembleWhy = 'no crew slot'; return; }
       const plan = this.plans[index];
-      if (this.#try({ type: 'queueMech', producer: bay.eid, loadout: { ...plan.loadout } }, PRIORITY.high, `mech:${bay.eid}`)) {
+      this.assembleWhy = 'assembling';
+      if (!this.#try({ type: 'queueMech', producer: bay.eid, loadout: { ...plan.loadout } }, PRIORITY.high, `mech:${bay.eid}`)) {
+        this.assembleWhy = `assembly ${this.lastFail}`;
+      } else {
         for (const p of ProductionManager.#pathsOf(plan)) stock.set(p, (stock.get(p) ?? 0) - 1);
         this.plans.splice(index, 1);
         crews--;
@@ -490,8 +535,14 @@ export class ProductionManager {
       const have = (stock?.count(this.team, path) ?? 0) + queued.filter((i) => i.path === path).length + this.#inflightCount(path);
       if (have >= count) continue;
       const factory = this.#producers(PRODUCES.part, ai.diff.partFactoriesUsed ?? Infinity)[0];
-      if (!factory) return;
-      if (!this.#try({ type: 'queuePart', producer: factory.eid, slot, path }, PRIORITY.normal, path)) return;
+      if (!factory) { this.partsWhy = 'factories full'; return; }
+      if (!this.#try({ type: 'queuePart', producer: factory.eid, slot, path }, PRIORITY.normal, path)) {
+        this.partsWhy = this.lastFail;
+        if ((this.lastCost?.energy ?? 0) > 0 && (this.lastFail === REASON.resources || this.lastFail === 'budget')) this.energyHeldAt = ai.now;
+        // [A1-5] the next part may still fit: before, one part that could not be paid (energy) stopped the parts of
+        // every other plan – X hard kept 3000 ore and never got a robot
+        continue;
+      }
     }
   }
 
@@ -658,9 +709,18 @@ export class ProductionManager {
       });
     }
     const fits = (a, r) => a.classes.some((c) => (armies.roleClasses[r] ?? []).includes(c));
-    let fitting = arms.filter((a) => fits(a, role));
-    if (!fitting.length) { role = armies.fallbackRole; fitting = arms.filter((a) => fits(a, role)); }
-    if (!fitting.length) fitting = arms;
+    // [A1-5] energy tight: only arms without an energy cost (when the team has any); the role becomes one they fit
+    let pickable = arms;
+    if (this.#energyTight(now)) {
+      const oreArms = arms.filter((a) => a.parts.every((p) => (p.cost?.energy ?? 0) <= 0));
+      if (oreArms.length) {
+        pickable = oreArms;
+        if (!oreArms.some((a) => fits(a, role))) role = Object.keys(phase.roles).find((r) => oreArms.some((a) => fits(a, r))) ?? role;
+      }
+    }
+    let fitting = pickable.filter((a) => fits(a, role));
+    if (!fitting.length) { role = armies.fallbackRole; fitting = pickable.filter((a) => fits(a, role)); }
+    if (!fitting.length) fitting = pickable;
     const partCost = (st) => (st.cost?.ore ?? 0) + w.energyWeight * (st.cost?.energy ?? 0);
     fitting = fitting.sort((a, b) => b.dps / Math.max(1, partCost(a.parts[0]) * 2) - a.dps / Math.max(1, partCost(b.parts[0]) * 2)).slice(0, TOP_ARMS);
     const torsos = opts.torso.map((e) => ({ path: e.path, st: this.#stat(e.path, 'torso') }))
@@ -691,6 +751,11 @@ export class ProductionManager {
     if (!combos.length) return null;
     let pool = combos.filter((c) => c.ore <= phase.maxMechOre && c.energy <= phase.maxMechEnergy);
     if (!pool.length) pool = [combos.sort((a, b) => a.ore + a.energy - b.ore - b.energy)[0]];
+    // [A1-5] energy tight: an ore-only loadout (torso / legs too) when there is one
+    if (this.#energyTight(now)) {
+      const oreOnly = combos.filter((c) => c.energy <= 0 && c.ore <= phase.maxMechOre);
+      if (oreOnly.length) pool = oreOnly;
+    }
     pool.sort((a, b) => b.value - a.value);
     // Quality 1 = always the best; lower = a random one of the best (1 - quality) share
     const top = Math.max(1, Math.round(pool.length * (1 - (ai.diff.loadoutQuality ?? 1))));

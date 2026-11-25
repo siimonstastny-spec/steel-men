@@ -53,6 +53,11 @@
   position: fixed; top: calc((17 - var(--hud-mt, 0)) * var(--hud-u, 1px)); left: calc(50% + (var(--hud-mr, 0) - var(--hud-ml, 0)) / 2 * var(--hud-u, 1px) - 60 * var(--hud-u, 1px)); z-index: 20; width: calc(37 * var(--hud-u, 1px)); height: calc(35 * var(--hud-u, 1px)); padding: 0;
   color: var(--menu-text); background: transparent; border: 1px solid transparent; border-radius: 0; cursor: pointer; font-size: max(11px, calc(18 * var(--hud-u, 1px)));
 }
+/* [A5] invisible hit layer: real clickable size >= UI_SCALE.hitTarget (--ui-hit-px, hud.css) while the visible size stays 37 × 35 base px */
+#match-menu-btn::after {
+  content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: max(100%, var(--ui-hit-px, 32px)); height: max(100%, var(--ui-hit-px, 32px));
+}
 #match-menu-btn:hover { border-color: var(--menu-accent); box-shadow: var(--menu-edge), var(--menu-neon-glow); }
 #match-menu-btn:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: 2px; }
 #match-menu-btn[hidden] { display: none; }
@@ -72,6 +77,24 @@
   background: rgba(0, 0, 0, 0.45); border: 1px solid var(--menu-border); white-space: nowrap;
 }
 #match-observer[hidden] { display: none; }
+
+/* [A5] hit targets and the same breakpoints as the HUD (UI_SCALE): compact = height < 800 or width < 1100, tiny = height < 650 */
+.match-card button { min-height: var(--ui-hit-target); }
+.match-card { max-width: calc(100vw - 24px); box-sizing: border-box; }
+@media (max-height: 799px), (max-width: 1099px) { /* = UI_SCALE.breakpoints.compact, UI_SCALE.narrowWidth */
+  .match-card { gap: 6px; max-height: 94vh; padding: 12px 18px; }
+  .match-card h1 { font-size: 24px; }
+  .match-card h2 { font-size: 18px; }
+  .match-card button { padding-top: 4px; padding-bottom: 4px; }
+  .match-actions { margin-top: 4px; }
+  .match-stats th, .match-stats td { padding-top: 0; padding-bottom: 0; }
+  .match-stats tr.section th { padding-top: 6px; }
+}
+@media (max-height: 649px) { /* = UI_SCALE.breakpoints.tiny */
+  .match-card { max-height: 96vh; padding: 8px 14px; }
+  .match-card h1 { font-size: 20px; }
+  .match-stats { font-size: 12px; } /* = UI_SCALE.fontMain */
+}
 
 /* [N6] avatar in the stats header */
 .match-stats th .ai-avatar { margin-right: 6px; }

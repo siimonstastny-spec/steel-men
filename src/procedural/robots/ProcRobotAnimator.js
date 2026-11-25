@@ -105,7 +105,7 @@ export class ProcRobotAnimator {
     const d = wrapAngle(m.rotation.y - this.lastYaw);
     this.lastYaw = m.rotation.y;
     const r = this.robot;
-    if (!r) return;
+    if (!r) { m.procVisual?.tickSkin(); return; } // [W-skin] hand-made GLB skin follows the GLB rig just animated by inner
     const turn = dt > 0 ? d / dt : 0;
     r.setGait(this.moving && !this.isDead ? m.speed : 0, this.isDead ? 0 : turn);
     if (r.turret) this.#aim(r, m);

@@ -1,5 +1,5 @@
 // Steel Men – game stats: loading data/stats.json, resolving stats per model, composing mechs
-import { setFromPath, ACCURACY } from '../config.js';
+import { setFromPath, ACCURACY, RESEARCH_A9 } from '../config.js';
 
 const STATS_URL = './data/stats.json';
 const DAMAGE_TYPES = ['physical', 'energy'];
@@ -87,6 +87,7 @@ export function researchNeeded(kind, id, sub = null) {
  * @param {string} [sub]     part kind ('legs' | 'torso' | 'arm') for part sets: unlocks may cover one kind only
  */
 export function canProduce(race, kind, id, unlocked, sub = null) {
+  if (!contextAllows(kind, id, unlocked, sub)) return false;
   const extra = unlocked?.[kind];
   const has = (key) => Boolean(extra && (extra instanceof Set ? extra.has(key) : extra.includes(key)));
   const isUnlocked = has(id) || (sub !== null && has(unlockId(id, sub)));
@@ -94,6 +95,87 @@ export function canProduce(race, kind, id, unlocked, sub = null) {
   const races = getStats().races ?? {};
   const owners = Object.keys(races).filter((key) => races[key].exclusive?.[kind]?.includes(id));
   return owners.length === 0 || owners.includes(race) || isUnlocked;
+}
+
+// ---------- [A9] research context: open tier per team, match option "superweapons" ----------
+
+/**
+ * Set by the running match's Research (src/game/Research.js): { tierOf(unlocked) -> open tier of the team owning that
+ * unlock record (Infinity = unknown), superweaponsEnabled() -> bool }. null (menus, no match) = no extra checks.
+ */
+let researchContext = null;
+
+export function setResearchContext(ctx) { researchContext = ctx ?? null; }
+
+/** Raw stats entry of an item of an exclusive group ('research' reads stats.research) */
+function rawItem(kind, id, sub) {
+  return kind === 'research' ? getStats().research?.[id] : itemData(kind, id, sub);
+}
+
+/** Is the item a superweapon / superweapon program (RESEARCH_A9.superweaponFlags)? */
+export function isSuperweaponItem(raw) {
+  return Boolean(raw) && RESEARCH_A9.superweaponFlags.some((f) => raw[f]);
+}
+
+/** [A9-F3] Superweapon buildings one team may have in total, of any id (stats.json rules.superweapons.maxPerTeam) */
+export function superweaponLimit() {
+  return getStats().rules?.superweapons?.maxPerTeam ?? 1;
+}
+
+/**
+ * [A9] Checks of the running match: superweapon items are not available while the option is off; groups in
+ * RESEARCH_A9.tierCheckedGroups also need their stats requiresTier open (structures check it in buildCommands /
+ * BuildMenu, which show the reason instead of hiding the building).
+ */
+function contextAllows(kind, id, unlocked, sub) {
+  if (!researchContext) return true;
+  const raw = rawItem(kind, id, sub);
+  if (!raw) return true;
+  if (isSuperweaponItem(raw) && !researchContext.superweaponsEnabled()) return false;
+  const tier = raw.requiresTier;
+  return !(tier && unlocked && RESEARCH_A9.tierCheckedGroups.includes(kind) && researchContext.tierOf(unlocked) < tier);
+}
+
+// ---------- [A9] part sets without own GLB models (stand-in models until a procedural part is registered) ----------
+
+/** Virtual catalog path -> stand-in GLB path (filled by withDataParts) */
+const modelAliases = new Map();
+
+/**
+ * Adds catalog entries for part sets that exist only in stats.json (parts[set][kind].standInSet): one entry per
+ * catalog entry of the stand-in set in that slot, with a virtual path of the new set
+ * ('RobotPartsKatanaSword/LeftKatanaSwordArmX_Skel.glb' -> 'RobotPartsIonKatana/LeftIonKatanaArmX_Skel.glb'), so
+ * setFromPath / raceFromPath / stockKey work unchanged. A set that has its own models in the catalog is left alone.
+ * Call before withModelRaceParts. Returns a new catalog; the input is untouched.
+ */
+export function withDataParts(catalog) {
+  const parts = getStats().parts ?? {};
+  const out = {};
+  for (const [slot, list] of Object.entries(catalog ?? {})) {
+    if (!Array.isArray(list)) { out[slot] = list; continue; }
+    const kind = SLOT_KIND[slot];
+    const extra = [];
+    for (const [set, kinds] of Object.entries(parts)) {
+      const standIn = kinds?.[kind]?.standInSet;
+      if (!standIn || list.some((p) => p.set === set)) continue;
+      const dir = `${PART_DIR_PREFIX}${standIn}`;
+      for (const p of list) {
+        const [pathDir, file] = p.path.split('/');
+        if (p.set !== standIn || pathDir !== dir || !file) continue;
+        const path = `${PART_DIR_PREFIX}${set}/${file.replace(standIn, set)}`;
+        modelAliases.set(path, p.path);
+        extra.push({ ...p, path, set });
+      }
+    }
+    out[slot] = [...list, ...extra];
+  }
+  return out;
+}
+const PART_DIR_PREFIX = 'RobotParts';
+
+/** GLB to load for a part model path: the stand-in model of a stats-only set, else the path itself */
+export function partModelPath(path) {
+  return modelAliases.get(path) ?? path;
 }
 
 // ---------- research effects (per team) ----------
@@ -351,6 +433,9 @@ export function applyExperience({ mobility, weapons = [], abilities = [] }, b = 
 function resolveUnit(raw, id, race) {
   const s = getStats();
   const unit = structuredClone(raw);
+  const variant = raw.byRace?.[race] ?? raw.byRace?.[s.races?.[race]?.modelRace]; // [A9-F2] per-race field overrides (aaTurret weapons)
+  if (variant) Object.assign(unit, structuredClone(variant));
+  delete unit.byRace;
   unit.id = id;
   unit.race = race;
   // Model of the race: its own when the unit lists it, else the race's modelRace (stand-in models), else the first listed one
@@ -358,7 +443,9 @@ function resolveUnit(raw, id, race) {
   const modelRace = raw.races
     ? (raw.races.includes(race) ? race : (raw.races.includes(own) ? own : raw.races[0]))
     : (own ?? race);
-  unit.model = raw.model.replaceAll('{race}', modelRace ?? race);
+  // No race at all (e.g. an empty seat): the model path would contain "null" -> model is null, loaders skip it
+  const raceKey = modelRace ?? race;
+  unit.model = raceKey == null && raw.model.includes('{race}') ? null : raw.model.replaceAll('{race}', raceKey);
   if (unit.mobility) unit.mobility = deepMerge(s.defaults.mobility, unit.mobility);
   unit.weapons = (unit.weapons ?? []).map((w) => deepMerge(s.defaults.weapon, w));
   unit.abilities ??= [];
@@ -461,11 +548,12 @@ function applyDamageBonuses(weapon, abilities) {
  * and its abilities. Fields of the unit (kind, set, id) are inherited by its weapons and abilities.
  */
 function researchTargets(unit, category) {
-  const own = { kind: unit.kind, set: unit.set, id: category === 'part' ? unit.set : unit.id };
+  // [A9] partKind: only robot parts and their weapons / abilities answer it (vehicle / building weapons never match)
+  const own = { kind: unit.kind, set: unit.set, id: category === 'part' ? unit.set : unit.id, partKind: category === 'part' ? unit.kind : undefined };
   const out = [{ obj: unit, ctx: { ...own, category } }];
   for (const w of unit.weapons ?? []) {
     const damageType = Object.keys(w.damage ?? {}).filter((t) => w.damage[t] > 0);
-    const wctx = { ...own, category: 'weapon', weaponClass: w.class, weaponId: w.id, damageType };
+    const wctx = { ...own, category: 'weapon', weaponClass: w.class, weaponId: w.id, damageType, targets: w.targets };
     out.push({ obj: w, ctx: wctx });
     for (const e of w.effects ?? []) out.push({ obj: e, ctx: { ...wctx, effectType: e.type } });
   }

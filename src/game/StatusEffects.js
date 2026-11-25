@@ -24,6 +24,11 @@ export function applyWeaponEffects(world, attacker, weapon, unit, from, factor =
   }
 }
 
+/** [A9-F3] The unit's status, created on first use (superweapons: stun, crewless vehicle, building power-off) */
+export function statusOf(unit, world) {
+  return (unit.status ??= new UnitStatus(unit, world));
+}
+
 /** Ticks the statuses of all units (call once per frame, before collisions) */
 export function updateStatusEffects(world, units, dt) {
   for (const unit of units) unit.status?.update(dt);
@@ -39,6 +44,9 @@ export class UnitStatus {
     this.burns = new Map(); // `${attacker.eid}/${weaponId}` -> { attacker, dps, timeLeft, tick }
     this.stunFx = null;
     this.burnFx = null;
+    // [A9-F3] superweapons
+    this.crewless = false;   // a vehicle whose crew a neutron bomb killed: idle until an own crew boards it (Vehicle.boardCrew)
+    this.powerOffTimer = 0;  // a building hit by a phase charge: s without power left (Superweapons.update ticks it)
   }
 
   /** Cannot move, turn or attack */
@@ -46,16 +54,31 @@ export class UnitStatus {
   /** Being thrown back – own movement is suspended until the push dies out */
   get knockedBack() { return this.vx !== 0 || this.vz !== 0; }
   get burning() { return this.burns.size > 0; }
-  /** Unit may not act this frame (no movement, no new attacks) */
-  get disabled() { return this.stunned; }
+  /** [A9-F3] Building switched off by a phase charge */
+  get poweredOff() { return this.powerOffTimer > 0; }
+  /** Unit may not act this frame (no movement, no new attacks); [A9-F3] also a crewless vehicle */
+  get disabled() { return this.stunned || this.crewless; }
 
   // ---------- applying ----------
 
-  stun(duration) {
-    const rules = getStats().rules.effects;
+  /**
+   * @param {number} duration  s
+   * @param {number} [cap]     longest stun (default rules.effects.stunMaxDuration; superweapons pass their own)
+   */
+  stun(duration, cap = getStats().rules.effects.stunMaxDuration) {
     // Overlapping stuns do not add up: the longer one wins (capped, so EMP chains cannot lock a unit forever)
-    this.stunTimer = Math.min(rules.stunMaxDuration, Math.max(this.stunTimer, duration));
+    this.stunTimer = Math.min(cap, Math.max(this.stunTimer, duration));
     if (!this.stunFx) this.stunFx = this.world.effects.attach(VFX.stunIndicator, this.unit, this.#fxScale());
+  }
+
+  /** [A9-F3] Building without power for `duration` s (the longer of overlapping hits wins) */
+  powerOff(duration) {
+    this.powerOffTimer = Math.max(this.powerOffTimer, duration);
+  }
+
+  /** [A9-F3] Counts the power-off down (buildings are not in updateStatusEffects; Superweapons.update calls this) */
+  tickPowerOff(dt) {
+    if (this.powerOffTimer > 0) this.powerOffTimer = Math.max(0, this.powerOffTimer - dt);
   }
 
   /**

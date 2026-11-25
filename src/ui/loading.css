@@ -25,3 +25,13 @@
 .loading-cancel:hover { border-color: #3ea6ff; color: #f2f6f9; }
 .loading-cancel:disabled { color: #5d6772; border-color: #2b323a; cursor: default; }
 .loading-cancel[hidden] { display: none; }
+/* [A5] hit target and compact spacing (same breakpoints as the HUD: UI_SCALE) */
+.loading-cancel { min-height: var(--ui-hit-target, 32px); }
+@media (max-height: 799px), (max-width: 1099px) { /* = UI_SCALE.breakpoints.compact, UI_SCALE.narrowWidth */
+  .loading-box { padding: 14px 18px; }
+  .loading-title { margin-bottom: 8px; font-size: 20px; }
+}
+@media (max-height: 649px) { /* = UI_SCALE.breakpoints.tiny */
+  .loading-box { padding: 10px 14px; }
+  .loading-bar { margin: 6px 0; }
+}

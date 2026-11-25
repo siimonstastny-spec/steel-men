@@ -16,7 +16,7 @@ export const ARTILLERY_SHAPES = {
     gun: { length: 6.4, caliber: 0.2, pitch: [0, 0.55] },
     liftAngle: 0.6,         // rad – cradle lift at full deploy (added to the barrel pitch)
     legs: { x: 0.585, z: 0.3, y: 0.2 },   // pivot x share of W (beyond the tracks), z share of L, y in hull space
-    mast: { x: -0.3, z: -0.3, h: 1.6, r: 0.05, ball: 0.22, seg: 4, ballSeg: [8, 5] },   // seg: mast sides, ballSeg: lens ball
+    mast: { x: -0.3, z: -0.3, h: 1.6, r: 0.05, ball: 0.22, seg: 4, ballSeg: [6, 4] },   // seg: mast sides, ballSeg: lens ball
     status: [0.3, -0.3],
   },
 };

@@ -5,9 +5,10 @@
 //   • sockets: muzzle, launch_1 (nose of the missile), turret, aim, cargo, smoke; bones: turret, barrel (pitch), recoil
 // Model units (before VEHICLE.modelScale × stats.modelScale): ≈ 8.0 long, 4.2 wide, 3.4 high. Visual only.
 import { UnitBuilder, ProcUnit, createUnitCache, registerProcUnit, UNIT_KIT } from './UnitKit.js';
-import { hull, wheels, turret, statusLamp, roofMark, UNIT_MODULES } from './UnitModules.js';
+import { hull, wheels, turret, statusLamp, roofMark, fitMount, UNIT_MODULES } from './UnitModules.js';
 
 const HALF_PI = Math.PI / 2;
+const MISSILE_REACH = 0.5;   // nose z grows by half the extra missile length (the missile is centred on missileZ)
 
 /** Shapes by style.silhouette (sizes in model units) */
 export const HEAVY_MISSILE_SHAPES = {
@@ -48,13 +49,18 @@ const shapeOf = (kit) => HEAVY_MISSILE_SHAPES[kit.style.silhouette] ?? Object.va
 function launcher(ub, s, tr) {
   const S = ub.kit.S;
   const u = ub.style;
-  const Ln = s.launcher;
-  const barrel = ub.bone('barrel', 'turret', [0, tr.top + Ln.pivotY, 0]);
+  const Ln0 = s.launcher;
+  // [B5-muzzles] launcher moved (lift / slide first) and the missile lengthened towards the stats muzzle (nose socket
+  // z = missileZ + missileLen / 2 + noseLen + muzzleGap on the barrel bone)
+  const fit = fitMount(ub, 'launch_1', 'turret', [0, tr.top + Ln0.pivotY, 0], Ln0.missileLen,
+    [MISSILE_REACH, Ln0.missileZ + Ln0.noseLen + Ln0.muzzleGap], { slideFirst: true });
+  const Ln = fit ? { ...Ln0, pivotY: Ln0.pivotY + fit.lift, missileLen: fit.length } : Ln0;
+  const barrel = ub.bone('barrel', 'turret', fit ? fit.position : [0, tr.top + Ln.pivotY, 0]);
   ub.meta.barrel = barrel;
   ub.meta.pitch = Ln.pitch;
   const recoil = ub.bone('recoil', barrel);
   // pylon and fins in the team lacquers (existing parts recoloured: +0 triangles), the tail band is the widest team part of the missile
-  ub.paint('turret').box(Ln.pylonW, Ln.pivotY, Ln.pylonD, S.teamShade, { y: tr.top + Ln.pivotY / 2 });
+  ub.paint('turret').box(Ln.pylonW, Ln.pivotY, Ln.pylonD, S.teamShade, { y: tr.top + Ln.pivotY / 2, z: fit ? fit.position[2] : 0 });
   const bb = ub.paint(barrel);
   for (const side of [1, -1]) bb.box(Ln.railT, Ln.railH, Ln.railLen, S.hullDark, { x: side * Ln.railX, z: Ln.missileZ });
   bb.box(Ln.railX * 2 + Ln.railT, Ln.railH * Ln.crossH, Ln.pylonD * Ln.crossD, S.frame, {});

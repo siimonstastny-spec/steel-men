@@ -2,13 +2,14 @@
 // one labelled select per option). The screens own the state; this module only draws the controls and decodes changes.
 //
 //   optionsHtml(values, { disabled })         rows "label + select" (pre-build, start set, energy cap, population cap,
-//                                             ore multiplier, game speed, fog of war, victory condition)
+//                                             ore multiplier, start research, superweapons [A9-F3], game speed,
+//                                             fog of war, victory condition)
 //   mapSelectHtml(values, { maps, disabled, random })  the map select (above the map preview; random = "Random" entry)
 //   readOptionChange(target)                  -> { key, value } of a changed `select[data-opt]` (typed value) or null
 //   friendlyFireHtml(ff, { disabled, attr })  the friendly-fire checkboxes (attr = data attribute name of the checkbox)
 //   syncOptions(root, values)                 sets every select[data-opt] in root from values (no re-render)
 // setup.css (layout, selects) is loaded by this module.
-import { MENU, VICTORY, ECONOMY, GAME_SPEED } from '../config.js';
+import { MENU, VICTORY, ECONOMY, GAME_SPEED, SUPERWEAPON } from '../config.js';
 import { speedLabel } from '../game/GameSpeed.js';
 import { PREBUILD, prebuildLabel } from '../game/PreBuild.js';
 import { ORE_MULTIPLIER, oreMultiplierLabel } from '../game/OreMultiplier.js';
@@ -54,6 +55,8 @@ function defs(values) {
     { key: 'oreMultiplier', labelKey: 'setup.oreMultiplier', hintKey: 'setup.oreMultiplier.hint', options: ORE_MULTIPLIER.options.map((v) => ({ value: v, label: oreMultiplierLabel(v) })) },
     { key: 'startMultiplier', labelKey: 'setup.startMultiplier', hintKey: 'setup.startMultiplier.hint', options: START_MULTIPLIER.options.map((v) => ({ value: v, label: startMultiplierLabel(v) })) }, // [D4]
     { key: 'startResearch', labelKey: 'setup.startResearch', hintKey: 'setup.startResearch.hint', options: START_RESEARCH.options.map((v) => ({ value: v, label: startResearchLabel(v) })) },
+    // [A9-F3] superweapons on / off (world.settings.superweapons; missing in values = on)
+    { key: 'superweapons', labelKey: 'setup.superweapons', hintKey: 'setup.superweapons.hint', options: SUPERWEAPON.options.map((v) => ({ value: v, label: t(v ? 'setup.superweapons.on' : 'setup.superweapons.off') })) },
     { key: 'speed', labelKey: 'setup.gameSpeed', hintKey: 'setup.gameSpeed.hint', options: GAME_SPEED.options.map((v) => ({ value: v, label: speedLabel(v) })) },
     { key: 'fogOfWar', labelKey: 'setup.fogOfWar', hintKey: null, options: MENU.fogModes.map((v) => ({ value: v, label: t(`setup.fog.${v}`), hint: t(`setup.fog.${v}.hint`) })) },
     { key: 'victory', labelKey: 'setup.victory', hintKey: null, options: VICTORY.conditions.map((v) => {
@@ -66,7 +69,7 @@ function defs(values) {
 }
 
 function rowHtml(d, values, disabled) {
-  const cur = String(values[d.key]);
+  const cur = String(d.key === 'superweapons' ? values[d.key] ?? SUPERWEAPON.defaultEnabled : values[d.key]); // [A9-F3]
   const hint = d.hintKey ? t(d.hintKey) : (d.options.find((o) => String(o.value) === cur)?.hint ?? '');
   return `<label class="opt-row" title="${escapeHtml(hint)}"><span class="opt-label">${t(d.labelKey)}</span>
     <select class="opt-select" data-opt="${d.key}"${disabled ? ' disabled' : ''}>${d.options.map((o) =>

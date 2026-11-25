@@ -10,6 +10,7 @@
 // sends the home units there (difficulty.squads.helpAllies). It never changes the state.
 import { AI } from '../../config.js';
 import { dist } from '../util.js';
+import { techOf } from './Tech.js';
 
 export class StrategyManager {
   constructor(ai) {
@@ -19,7 +20,22 @@ export class StrategyManager {
 
   get waveSize() {
     const a = this.ai.diff.attack;
-    return Math.min(a.maxWave, a.minWave + a.waveGrowth * this.ai.stats.wavesSent);
+    return Math.min(a.maxWave, a.minWave + a.waveGrowth * (this.ai.stats.wavesSent + (this.wavesBefore ?? 0)));
+  }
+
+  /**
+   * [A2-ai] Takeover of a game in progress (src/ai/Resume.js): the build phase starts now (maxWait counted from the
+   * takeover, not from 0 – that sent a wave at once), and the waves the team would have sent by now on this
+   * difficulty (one per maxWait after firstWaveAt) count for the wave size, so a mid-game wave is not a 1st-wave trickle.
+   * @returns {number} waves assumed before the takeover
+   */
+  resume(now) {
+    const a = this.ai.diff.attack;
+    this.buildSince = now;
+    const maxExtra = a.waveGrowth > 0 ? Math.ceil((a.maxWave - a.minWave) / a.waveGrowth) : 0;
+    const elapsed = Math.max(0, now - a.firstWaveAt);
+    this.wavesBefore = a.maxWait > 0 ? Math.min(maxExtra, Math.floor(elapsed / a.maxWait)) : 0;
+    return this.wavesBefore;
   }
 
   think(now) {
@@ -32,6 +48,7 @@ export class StrategyManager {
       && now - threat.since >= diff.reactionDelay;
 
     this.#allyHelp(now, threatened);
+    techOf(ai).superweapon(now); // [A9-F4b] a ready superweapon fires at the best known enemy cluster
     if (bb.state === 'defend') {
       if (!threat.active) this.#set('build', now, 'threat over');
       return;

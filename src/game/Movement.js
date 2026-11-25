@@ -1,14 +1,17 @@
 // Steel Men – unit collisions, path following and "give up when blocked" for move orders
 import * as THREE from 'three';
-import { MOVEMENT, PATHFINDING, VEHICLE, MAPS, JUMP_JET } from '../config.js';
+import { MOVEMENT, PATHFINDING, VEHICLE, MAPS, JUMP_JET, FORMATION, TERRAIN_COST } from '../config.js';
 import { clampToArea, confineUnits } from './PreBuild.js';
 import { collisionReach } from './Pathfinding.js';
+import { updateGroupOnce, noteLeaderPath, memberSpeedCap, leaderHeld } from './Formation.js';
+import { terrainClassOf, unitTerrainFactor } from './TerrainTypes.js';
 
 const DEG = Math.PI / 180;
 const MOVED = new Set();     // scratch of resolveCollisions (cleared at the start and the end of each call)
 const IGNORE = [];           // scratch of followPath: [unit, ...ignore], read by findPath / shapesFor at once
 const FIND_OPTS = {          // scratch options of followPath's findPath call (findPath only destructures them)
   radius: 0, ignore: IGNORE, crossRift: false, flyRange: 0, flyPenalty: 0, hopRange: 0, hopPenalty: 0, body: null,
+  terrainClass: null, // [A14-terrain] chassis class of the unit (weighted A*)
 };
 
 /**
@@ -122,14 +125,85 @@ function ignoreList(unit, ignore) {
  *   The returned object is reused – read it at once, never keep it.
  */
 export function followPath(unit, order, goal, ignore, dt) {
-  // Formation speed limit (order.maxSpeed, set by unitCommands for shaped formations): the unit's own code
-  // accelerates by acceleration × dt right after this call, so clamp one step below the limit to end exactly on it
-  if (order.maxSpeed !== undefined) {
-    const limit = Math.max(0, order.maxSpeed - (unit.stats?.mobility?.acceleration ?? 0) * dt);
-    if (unit.speed > limit) unit.speed = limit;
+  terrainSpeed(unit, dt);
+  // [A7b] marching formation (Formation.js): the leader plans the one path, members walk to their live spots
+  const fm = order.formation;
+  let group = null;
+  if (fm) {
+    group = fm.group;
+    if (group && !group.done) updateGroupOnce(group, unit.world, dt);
+    if (!group || group.done) group = null;
+    const mode = !group ? 'off' : fm === group.leader ? 'leader' : fm.regroup ? 'regroup' : 'slot';
+    if (fm.mode !== mode) { fm.mode = mode; order.nav = null; order.best = undefined; } // the old plan led elsewhere
+    if (mode === 'slot') return slotPath(unit, order, fm, dt);
+    if (mode === 'regroup') goal = fm.target; // own path to the live spot (planned below like any moving goal)
   }
+  // Formation speed limit (order.maxSpeed, set by unitCommands for shaped formations; [A7b] the leader's limit while
+  // marching, none for a regrouping member): the unit's own code accelerates by acceleration × dt right after this
+  // call, so clamp one step below the limit to end exactly on it
+  const cap = !group ? order.maxSpeed : fm.mode === 'leader' ? group.leaderCap : undefined;
+  if (cap !== undefined && cap !== Infinity) clampSpeed(unit, cap, dt);
+  if (group && (fm.mode === 'regroup' || leaderHeld(group))) order.best = undefined; // no give-up while waiting / regrouping
+  const path = groundPath(unit, order, goal, ignore, dt);
+  if (group) {
+    if (fm.mode === 'leader') {
+      noteLeaderPath(group, unit, path.point, path.remaining);
+      if (group.leaderCap <= 0) holdStill(unit, path); // gathering / fight: stand exactly (no creeping by acceleration)
+    } else { // regroup: the march is not over before the leader's path is
+      path.remaining = Math.max(FORMATION.minRemaining, path.remaining + group.leaderRemaining);
+      path.final = false;
+    }
+  }
+  return path;
+}
+
+// [A14-terrain] Speed limit of a ground unit on its terrain cell: moveSpeed × factor of the type under it for its chassis
+// class (TerrainTypes). Applied to every unit on its own, before (and together with) the formation limits, which stay
+// based on moveSpeed – the marching group's lag handling (Formation.js) keeps a slowed member in. A cell impassable
+// for the class (factor 0, e.g. after the data changed) is left at TERRAIN_COST.escapeFactor. Aircraft and hops: none.
+function terrainSpeed(unit, dt) {
+  if (unit.airborne || unit.hopping) return;
+  const own = unit.stats?.mobility?.moveSpeed;
+  if (!(own > 0)) return;
+  let f = unitTerrainFactor(unit);
+  if (f <= 0) f = TERRAIN_COST.escapeFactor;
+  if (f < 1) clampSpeed(unit, own * f, dt);
+}
+
+function clampSpeed(unit, cap, dt) {
+  const limit = Math.max(0, cap - (unit.stats?.mobility?.acceleration ?? 0) * dt);
+  if (unit.speed > limit) unit.speed = limit;
+}
+
+// [A7b] A member in formation walks straight at its live spot (Formation.js checks the line and switches to regroup
+// when it is blocked); it never reports less than FORMATION.minRemaining left (no early arrival, no give-up)
+function slotPath(unit, order, fm, dt) {
+  const cap = memberSpeedCap(fm);
+  clampSpeed(unit, cap, dt);
+  order.best = undefined;
+  const t = fm.target;
+  const dist = Math.hypot(t.x - unit.position.x, t.z - unit.position.z);
+  GROUND_PATH.point = t;
+  GROUND_PATH.remaining = Math.max(FORMATION.minRemaining, dist + fm.group.leaderRemaining);
+  GROUND_PATH.final = true; // step at most to the spot (no overshoot)
+  GROUND_PATH.fly = false;
+  GROUND_PATH.hop = false;
+  if (cap <= 0) holdStill(unit, GROUND_PATH); // ahead of its spot / holding in a fight
+  return GROUND_PATH;
+}
+
+// [A7b] Speed limit 0: the unit stands. Its own code accelerates by acceleration × dt after followPath, so the point is
+// its own position (leg < MOVEMENT.overlapEpsilon → the unit returns before accelerating); remaining stays as it was
+function holdStill(unit, path) {
+  unit.speed = 0;
+  path.point = unit.position;
+  path.final = true;
+}
+
+function groundPath(unit, order, goal, ignore, dt) {
   if (unit.airborne) return airPath(unit, goal); // [N7] aircraft fly straight
   const nav = unit.world.nav;
+  const cls = terrainClassOf(unit.stats); // [A14-terrain] chassis class (cost grid of the weighted A*)
   // [N8] pre-build phase: a goal outside the unit's start square becomes the nearest point inside it (the copy lives
   // on the order, so a live goal is never changed); outside the phase nothing happens
   const inside = clampToArea(unit.world, unit, goal, order.prebuildGoal ??= new THREE.Vector3());
@@ -146,6 +220,7 @@ export function followPath(unit, order, goal, ignore, dt) {
     opts.flyRange = unit.flightAbility?.range ?? 0; opts.flyPenalty = JUMP_JET.flight.pathPenalty;
     opts.hopRange = unit.hopAbility?.range ?? 0; opts.hopPenalty = JUMP_JET.hop.pathPenalty;
     opts.body = unit; // [W7] obstacles inflated by the unit's circle that touches them (mech: shoulders / legs)
+    opts.terrainClass = cls; // [A14-terrain]
     const res = nav.findPath(unit.position, goal, opts);
     opts.body = null; // (do not keep the unit alive)
     IGNORE.length = 0; // (nor the unit and its targets in the recycled ignore list)
@@ -165,10 +240,12 @@ export function followPath(unit, order, goal, ignore, dt) {
   const end = plan.goal ?? goal;
   const wp = plan.waypoints;
   // Drop reached waypoints, and skip ahead when the next one is already in plain sight
+  // ([A14-terrain] and the straight leg is not dearer over the terrain than the planned one: no cutting through mud)
   while (wp.length) {
     const near = Math.hypot(wp[0].x - unit.position.x, wp[0].z - unit.position.z) <= PATHFINDING.waypointReach;
     const next = wp[1] ?? end;
-    if (near || nav.segmentClear(unit.position, next, nav.shapesFor(unit.radius, ignoreList(unit, ignore), canCrossRift(unit), unit))) wp.shift();
+    if (near || (nav.segmentClear(unit.position, next, nav.shapesFor(unit.radius, ignoreList(unit, ignore), canCrossRift(unit), unit))
+      && nav.shortcutOk(unit.position, wp[0], next, cls))) wp.shift();
     else break;
   }
   IGNORE.length = 0;

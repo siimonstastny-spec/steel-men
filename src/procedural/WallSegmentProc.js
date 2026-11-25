@@ -178,7 +178,7 @@ export class WallSegmentProc extends ProcModel {
   /** Per-frame animation (numbers only, no allocations); `active` is unused */
   update(delta) {
     if (!this.shared || !this.animated) return;
-    this.time += delta;
+    this.time += delta;   // already scaled by animScale in tick(): unpowered, the pulse freezes (glows are dark anyway)
     const glow = pulseWave(this.time, this.pulseHz);
     this.sheetGlow?.setIntensity(glow);
     this.haloGlow?.setIntensity(glow);

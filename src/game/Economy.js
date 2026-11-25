@@ -28,13 +28,21 @@
 import { getStats } from '../data/Stats.js';
 import { OreDeposit } from './OreDeposit.js';
 import { PartStock } from './PartStock.js';
-import { ECONOMY, ECONOMY_POWER } from '../config.js';
+import { ECONOMY, ECONOMY_POWER, AURAS } from '../config.js';
 import { ORE_MULTIPLIER, isInfiniteOre, validOreMultiplier } from './OreMultiplier.js';
 import { validStartMultiplier, isInfiniteStart } from './StartMultiplier.js';
 import { startSetData } from './StartSets.js';
 
 const NO_FLOW = Object.freeze({ income: 0, drain: 0 }); // energyFlow of an unknown team
 const DEFERRED = new Set(ECONOMY.deferredResources ?? []);
+
+/** [A9-buildings] A building that draws its energyUse all the time once finished (AURAS.passiveConsumerFields) */
+function isPassiveConsumer(stats) {
+  if (!stats || !((stats.energyUse ?? 0) > 0)) return false;
+  const fields = AURAS.passiveConsumerFields;
+  for (let i = 0; i < fields.length; i++) if (stats[fields[i]]) return true;
+  return false;
+}
 
 /** [W5b] Settings value → number: a positive number as is, Infinity for ECONOMY.infinite, else `fallback` resolved so */
 function resolveCap(value, fallback) {
@@ -161,6 +169,7 @@ export class Economy {
    * @returns {number} work rate to scale its progress by (1 or ECONOMY_POWER.lowWorkRate)
    */
   drawPower(structure, dt, fullUse = false) {
+    if (structure.status?.poweredOff) return 0; // [A9] phase charge: no power → no work (production, research)
     const team = structure.team;
     const rate = this.workRate(team);
     const use = structure.stats?.energyUse ?? 0;
@@ -430,6 +439,8 @@ export class Economy {
       // touched (infinite) – counted as mined ore in the statistics
       const deep = b.stats?.deepExtraction;
       if (deep) this.add(b.team, 'ore', deep.ratePerSecond * this.drawPower(b, dt) * dt, 'mined');
+      // [A9-buildings] enhancers / archeology station: always-on consumers (low energy switches their effect off)
+      if (isPassiveConsumer(b.stats)) this.drawPower(b, dt, true);
     }
     this.#refreshLow();
     for (const b of this.world.structures) {

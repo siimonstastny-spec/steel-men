@@ -6,13 +6,14 @@
 // Terrain and fog are drawn normally (live). Own units/buildings stay live (the player must see and order them);
 // allies and enemies are refreshed only when the sweep passes over them and fade (afterglow) until the next pass.
 import * as THREE from 'three';
-import { MINIMAP, TEAMS, R2, PLAYERS_UI, MAPS, RADAR, N2_UI, AIR } from '../config.js';
+import { MINIMAP, TEAMS, R2, PLAYERS_UI, MAPS, RADAR, N2_UI, AIR, MAP_TERRAIN, MAP_STYLE } from '../config.js';
 import { CELL } from '../game/AsciiMap.js'; // [MAPS] cell types of ASCII maps
 import { isLocal, localTeam } from '../core/LocalPlayer.js';
 import { areAllies } from '../game/Alliances.js'; // [N5a] alliances API
 import { terrainHeight } from '../core/SceneSetup.js';
 import { getStats } from '../data/Stats.js';
 import { drawMinimapMarks, submitPing, isPingClick } from './Pings.js'; // [N7]
+import { drawStrikeMarks } from './SuperweaponUi.js'; // [A9-F4a] superweapon strikes on the way
 
 const MINIMAP_ORDER_EVENT = 'steelmen:minimapOrder'; // same name in input/CommandInput.js
 const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]]; // screen corners (NDC) for the camera view outline
@@ -457,6 +458,7 @@ export class Minimap {
     }
     ctx.globalAlpha = 1;
     drawMinimapMarks(ctx, this._toMiniFn, this.world); // [N7] pings + lost arms of the own team
+    drawStrikeMarks(ctx, n, this.world, this.time); // [A9-F4a] impact circles of superweapon strikes (all teams see them)
     this.#drawView(ctx);
   }
 
@@ -514,6 +516,7 @@ export function drawMapBackground(ctx, map, n, { starts = true, markScale = 1 } 
         img.data[i] = col.r * 255; img.data[i + 1] = col.g * 255; img.data[i + 2] = col.b * 255; img.data[i + 3] = 255;
       }
     }
+    tintTerrainTypes(img, map, n);
     ctx.putImageData(img, 0, 0);
   } else {
     const low = new THREE.Color(MINIMAP.terrainLow);
@@ -534,6 +537,7 @@ export function drawMapBackground(ctx, map, n, { starts = true, markScale = 1 } 
       c.copy(low).lerp(high, (heights[i] - min) / range);
       img.data[i * 4] = c.r * 255; img.data[i * 4 + 1] = c.g * 255; img.data[i * 4 + 2] = c.b * 255; img.data[i * 4 + 3] = 255;
     }
+    tintTerrainTypes(img, map, n);
     ctx.putImageData(img, 0, 0);
     const scale = n / map.size;
     ctx.fillStyle = MINIMAP.obstacleColor;
@@ -543,6 +547,18 @@ export function drawMapBackground(ctx, map, n, { starts = true, markScale = 1 } 
       if (o.radius !== undefined) ctx.arc(x, y, o.radius * scale, 0, Math.PI * 2);
       else ctx.rect(x - o.halfX * scale, y - o.halfZ * scale, o.halfX * 2 * scale, o.halfZ * 2 * scale);
       ctx.fill();
+    }
+  }
+  if (map.lavaCracks?.length) { // [A8-style] flat lava cracks
+    ctx.strokeStyle = MAP_STYLE.minimapLava.color;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const crack of map.lavaCracks) {
+      if (crack.points.length < 2) continue;
+      ctx.lineWidth = Math.max(MAP_STYLE.minimapLava.minWidth * markScale, crack.width * n / map.size);
+      ctx.beginPath();
+      crack.points.forEach((p, i) => { const [x, y] = toMini(p.x, p.z); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      ctx.stroke();
     }
   }
   if (starts) {
@@ -561,6 +577,28 @@ export function drawMapBackground(ctx, map, n, { starts = true, markScale = 1 } 
     ctx.beginPath();
     ctx.arc(x, y, MINIMAP.superNodeSize * markScale, 0, Math.PI * 2);
     ctx.fill();
+  }
+}
+
+/** [A8-terrain] Mixes the terrain type tint (MAP_TERRAIN.colors, strength tintStrength) into the minimap pixels */
+function tintTerrainTypes(img, map, n) {
+  const grid = map.terrainTypes;
+  if (!grid) return;
+  const def = MAP_TERRAIN.types.indexOf(MAP_TERRAIN.defaultType);
+  if (!grid.data.some((v) => v !== def)) return;
+  const tints = MAP_TERRAIN.types.map((name) => {
+    const hex = MAP_TERRAIN.colors[name];
+    return hex == null ? null : [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
+  });
+  const k = MAP_TERRAIN.tintStrength;
+  for (let py = 0; py < n; py++) {
+    for (let px = 0; px < n; px++) {
+      const t = grid.typeAt(((px + 0.5) / n - 0.5) * map.size, ((py + 0.5) / n - 0.5) * map.size);
+      const tint = tints[typeof t === 'number' ? t : MAP_TERRAIN.types.indexOf(t)];
+      if (!tint) continue;
+      const i = (py * n + px) * 4;
+      for (let c = 0; c < 3; c++) img.data[i + c] += (tint[c] - img.data[i + c]) * k;
+    }
   }
 }
 

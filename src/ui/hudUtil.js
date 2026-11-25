@@ -88,10 +88,18 @@ export function weaponDps(w) {
 /** Longest weapon range of a unit (0 = unarmed) */
 export const maxRange = (weapons = []) => Math.max(0, ...weapons.map((w) => (w.stats ?? w.def)?.range ?? 0));
 
-/** "fist 0.6s" / "fist ✓" for weapons with their cooldown state */
+/** Display name of a weapon id: i18n key `weapon.<id>`, the raw id when there is no translation (t() returns the key then) */
+export function weaponName(id) {
+  if (!id) return '?';
+  const key = `weapon.${id}`;
+  const name = t(key);
+  return name === key ? id : name;
+}
+
+/** "Fist 0.6s" / "Fist ✓" for weapons with their cooldown state */
 export function weaponState(w) {
-  const id = w.def?.id ?? w.stats?.id ?? '?';
-  return w.cooldown > 0 ? `${id} ${w.cooldown.toFixed(1)}s` : `${id} ✓`;
+  const name = weaponName(w.def?.id ?? w.stats?.id);
+  return w.cooldown > 0 ? `${name} ${w.cooldown.toFixed(1)}s` : `${name} ✓`;
 }
 
 /** Current activity of a mech as text */

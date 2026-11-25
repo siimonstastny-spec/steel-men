@@ -8,19 +8,16 @@
 // ankle (narrow under the sunk knee shield, widening into a cuff over the instep), big faceted wedge foot (claws, heel
 // spur), pelvis with team side skirts and a keel
 // wedge; heavy: wide boots, pistons + swept hoses, own skirts; recon: boots widening up to the knee, sensors, lathe dishes.
-import { registerRobotPart, gltfNode, block, prismZ, lightLine, markingStrip } from './RobotKit.js';
+import { registerRobotPart, gltfNode, block, lightLine, markingStrip } from './RobotKit.js';
 import { limbLoft, hullLoft, lengthLoft, armor, hinge, piston, hose, frontFlat, sideFaceMid, edgeHalf } from './RobotSculpt.js';
 import { lathe, tube } from '../ProcShapes.js';
 import { unitStyle } from '../units/UnitKit.js';
 
 const HALF_PI = Math.PI / 2;
 const LINE_OUT = 0.05;       // light lines / markings stand this far off the surface
-const GLOW_T = 0.12;         // thickness of glow accent bars
-const GLOW_DIM = 0.6;        // intensity of small glow accents
 const MAST_T = 0.22;         // square sensor masts (side)
 const SEG_SMALL = 6;         // sides of small tubes (piston rod, scanner base)
-const DISH_SEG = 8;          // radial segments of the sensor dish (lathe)
-const CLAW_SIDES = 3;        // foot claws: triangular pyramids
+const DISH_SEG = 6;         // radial segments of the sensor dish (lathe)
 const KEEL_TIP = 0.6;        // pelvis keel: share of its height taken by the pointed bottom
 const BOOT_MARK_W = 0.35;    // hazard marking on the boot front ≤ this share of the boot width
 const KNEE_SINK = 0.5;       // share of the knee shield thickness sunk into the boot rim
@@ -28,7 +25,6 @@ const LINE_FIT = 0.85;       // a light line covers at most this share of its pr
 const LINE_GLUE = 0.02;      // light lines sit this far off the face (half of the line inside the surface)
 const STRIDE_MATCH = 4;      // stride = this × leg length × sin(swing): stance foot travel ≈ body travel (little sliding)
 const PELVIS_LINE = { share: 0.85, y: 0.15 };                  // front light line (share of the flat front, height share)
-const FOOT_EDGE = { w: 0.55, y: 0.12 };                         // sole glow edge (shares of the foot size)
 
 /**
  * Leg dimensions (raw GLB units). hip = pelvis → hip joint (x for the +x side), knee / ankle = offsets from the previous
@@ -134,10 +130,9 @@ export const pelvisHeight = (D) => -(D.hip[1] + D.knee[1] + D.ankle[1]) + D.sole
  * Common leg rig + body of every leg type. Returns { mount, rig, chains (bone names per side) } and leaves the per-type
  * extras to the caller (pistons, sensors…).
  */
-function buildLegBase(ub, kit, ctx, D) {
+export function buildLegBase(ub, kit, ctx, D) {
   const S = kit.S;
   const L = { ...LEG_SCULPT, ...D.sculpt };
-  const glowColor = kit.glowColors.laser;
   ub.bone(ctx.bone, 'root', [0, pelvisHeight(D), 0], { far: true });   // own far LOD group + pick proxy (RobotKit)
   ub.bone(gltfNode(ctx, 'pelvis'), ctx.bone);
   const pb = ub.paint('pelvis');
@@ -208,12 +203,8 @@ function buildLegBase(ub, kit, ctx, D) {
       x: ankle[0] * lt + sideX, y: ankle[1] * lt - Math.sin(kp.rx) * sideZ, z: ankle[2] * lt + Math.cos(kp.rx) * sideZ, rx: kp.rx, rz: sign * taper,
     });
 
-    // faceted wedge foot under the cuff (the boot hides the ankle): heel → low pointed toe, claws, heel spur, glowing toe edge
-    const fb = ub.paint(foot);
-    footShape(fb, kit, D.foot, S, L);
-    const F = D.foot;
-    // glowing toe edge accent (tiny, LOD0) in the style's laser colour
-    ub.glow(foot).box(F.w * FOOT_EDGE.w, GLOW_T, GLOW_T, glowColor, { y: F.y - F.h / 2 + F.h * FOOT_EDGE.y, z: F.z + F.len / 2 + GLOW_T, intensity: GLOW_DIM });
+    // faceted wedge foot under the cuff (the boot hides the ankle): heel → low pointed toe (no claws / spur / glow edge: B4 triangle trim)
+    footShape(ub.paint(foot), kit, D.foot, S, L);
   }
   return {
     mount: D.mount,
@@ -254,12 +245,9 @@ function solePoints(kit, F, L) {
   const last = L.foot[L.foot.length - 1];
   const heel = F.z + first[0] * F.len;
   const toe = F.z + last[0] * F.len;
-  const clawTip = toe + F.toeLen * (0.5 - L.clawSink) + F.toeLen / 2;
-  const spurTip = heel - F.heelLen * (0.5 - L.clawSink) - F.heelLen / 2;
   // third value = how far the point reaches sideways (bottom edge half width): a rolled pelvis lowers the outer edge
   const bottom = (row) => edgeHalf(kit, F.w * row[1], F.h * row[2], false, { keel: L.footKeel, back: L.footSole });
-  const clawX = F.toes > 1 ? (F.w * last[1] - F.toeW) / 2 : 0;
-  return [[heel, yBot, bottom(first)], [toe, yBot, bottom(last)], [clawTip, yBot + F.toeH / 2, clawX], [spurTip, yBot + F.heelH / 2, 0]];
+  return [[heel, yBot, bottom(first)], [toe, yBot, bottom(last)]];
 }
 
 /**
@@ -277,16 +265,7 @@ function footShape(fb, kit, F, S, L) {
   lengthLoft(fb, kit, L.foot.map(([zs, ws, hs]) => ({
     z: F.z + zs * F.len, w: F.w * ws, h: F.h * hs, y: yBot + (F.h * hs) / 2, keel: L.footKeel, back: L.footSole,
   })), S.hullDark);
-  // claws out of the toe (front width share of the last station), heel spur backwards
-  const lo = L.foot[L.foot.length - 1];
-  const span = F.w * lo[1] - F.toeW;
-  const toeZ = F.z + lo[0] * F.len + F.toeLen * (0.5 - L.clawSink);
-  for (let i = 0; i < F.toes; i++) {
-    const x = F.toes > 1 ? -span / 2 + (span * i) / (F.toes - 1) : 0;
-    prismZ(fb, CLAW_SIDES, F.toeW, F.toeH, F.toeLen, S.frame, { x, y: yBot + F.toeH / 2, z: toeZ }, true);
-  }
-  const heelZ = F.z + L.foot[0][0] * F.len - F.heelLen * (0.5 - L.clawSink);
-  prismZ(fb, CLAW_SIDES, F.heelW, F.heelH, F.heelLen, S.frame, { y: yBot + F.heelH / 2, z: heelZ, rx: -HALF_PI }, true);
+  // claws (toes) and heel spur dropped in B4: ~6 triangles each, not readable from the RTS camera
 }
 
 /** [t0, t1] of the profile segment that contains t */

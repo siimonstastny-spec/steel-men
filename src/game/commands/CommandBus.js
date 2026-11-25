@@ -20,7 +20,7 @@
 // Offline (single player, AI) the bus is local: a command submitted now runs at the next tick. In multiplayer
 // a transport (src/net/, later) replaces `schedule` and delivers everyone's commands for a tick in the same order.
 
-import { NET_LEAVE, SAVE } from '../../config.js';
+import { NET, NET_LEAVE, SAVE } from '../../config.js';
 
 // [J1] save games: running FNV-1a hash of every executed command (all teams, AI included)
 const FNV_OFFSET = 0x811c9dc5;
@@ -34,6 +34,61 @@ export function recordable(cmd) {
   if (cmd.origin === null) out.origin = null; // lockstep-injected command (internalOnly): replayed with origin null
   return out;
 }
+
+// [A1-3] Big selections: a command whose `units` list is too big for one network message is sent as consecutive chunks
+// { ...cmd, units: part, chunk: [i, n] } (same type, team and payload; Lockstep.#schedule). They reach the bus in one
+// turn, one after another in the sender's order, and executeTick joins them back into the ORIGINAL command before it
+// runs – one formation, one SINGLE_TAKER pick, one onExecuted call, one record entry, exactly as if it was one.
+const CHUNK_KEY = 'chunk';
+
+/**
+ * [A1-3] Splits a command into chunks of its `units` list (even slices, order kept) so that every chunk passes `fits`.
+ * @param {object} cmd
+ * @param {(part: object) => boolean} fits  e.g. JSON size ≤ NET.maxCommandBytes
+ * @param {number} [maxChunks]
+ * @returns {object[]|null} 2..maxChunks chunks, or null (no units list / already a chunk / still too big)
+ */
+export function splitCommand(cmd, fits, maxChunks = NET.maxCommandChunks) {
+  const units = cmd?.units;
+  if (!Array.isArray(units) || units.length < 2 || cmd[CHUNK_KEY] !== undefined) return null;
+  const last = Math.min(maxChunks, units.length);
+  for (let n = 2; n <= last; n++) {
+    const parts = [];
+    for (let i = 0; i < n; i++) {
+      const part = { ...cmd, units: units.slice(Math.floor((i * units.length) / n), Math.floor(((i + 1) * units.length) / n)), [CHUNK_KEY]: [i, n] };
+      if (!fits(part)) break;
+      parts.push(part);
+    }
+    if (parts.length === n) return parts;
+  }
+  return null;
+}
+
+/**
+ * [A1-3] due[i] starts a chunk run: the joined original command, or null when the run is broken (garbage / lost part –
+ * the same on every client, so dropping it is deterministic). `count` = due entries used.
+ */
+function joinChunks(due, i, out) {
+  out.cmd = null;
+  out.count = 1;
+  const first = due[i].cmd;
+  const c = first[CHUNK_KEY];
+  const n = Array.isArray(c) && c[0] === 0 ? c[1] : 0;
+  if (!Number.isInteger(n) || n < 2 || n > NET.maxCommandChunks || i + n > due.length) return out;
+  const units = [];
+  for (let j = 0; j < n; j++) {
+    const part = due[i + j].cmd;
+    const pc = part[CHUNK_KEY];
+    if (part.type !== first.type || part.team !== first.team || !Array.isArray(pc) || pc[0] !== j || pc[1] !== n || !Array.isArray(part.units)) return out;
+    for (const id of part.units) units.push(id);
+  }
+  const joined = { ...first, units };
+  delete joined[CHUNK_KEY];
+  out.cmd = joined;
+  out.count = n;
+  return out;
+}
+const joinOut = { cmd: null, count: 1 };
 
 const registry = new Map();
 
@@ -160,7 +215,15 @@ class Bus {
     if (!due.length) return;
     this.pending = this.pending.filter((p) => p.tick > tick);
     due.sort((a, b) => a.cmd.team - b.cmd.team || a.seq - b.seq);
-    for (const { cmd } of due) {
+    for (let i = 0; i < due.length; i++) {
+      let cmd = due[i].cmd;
+      if (cmd[CHUNK_KEY] !== undefined) { // [A1-3] chunks of one big command: run once, as the original command
+        const joined = joinChunks(due, i, joinOut);
+        i += joined.count - 1;
+        cmd = joined.cmd;
+        joined.cmd = null;
+        if (!cmd) { console.warn('CommandBus: broken command chunk dropped', due[i].cmd); continue; }
+      }
       this.#record(tick, cmd); // [J1] every due command, before validation (validate is deterministic too)
       const def = registry.get(cmd.type);
       if (!def) continue; // [MP-SEC] unknown type (remote garbage): silently skipped

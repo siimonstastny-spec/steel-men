@@ -18,6 +18,7 @@ import { isLocal } from '../core/LocalPlayer.js';
 import { applyTeamColor } from '../core/TeamColor.js';
 import { structureBuildRate, markConstructionStarted } from '../game/Construction.js';
 import { useProceduralModel, createProceduralStructure, loadBuildingStyles } from '../procedural/registry.js';
+import { createChargeState } from '../game/Superweapons.js'; // [A9-F3]
 
 const QUARTER_TURNS = 4;
 
@@ -54,9 +55,31 @@ const sideways = (yaw) => {
 /** Model scale of a building: STRUCTURE.modelScale × its own stats.modelScale (data, default 1) */
 export const structureScale = (stats) => STRUCTURE.modelScale * (stats.modelScale ?? 1);
 
+// Race whose model a building shows (same rule as Stats.resolveUnit; W → X) – picks the simBody.byRace entry
+function modelRaceOf(stats, race) {
+  const own = getStats().races?.[race]?.modelRace;
+  const list = stats.races;
+  if (!list) return own ?? race;
+  return list.includes(race) ? race : (list.includes(own) ? own : list[0]);
+}
+
 /**
- * Footprint of a structure model at yaw 0: { halfX, halfZ, offsetX, offsetZ } (offset = model box centre,
- * used to centre the model on the building origin). Loads the model once (cached by AssetLoader).
+ * [A1-6] Simulation body of a building from data (stats.json → structures[id].simBody, measured from the GLB with
+ * procedural models off – docs/notes/a1-structure-dims.md): { halfX, halfZ, bodyHeight, turretHeight?, muzzles? }.
+ * halfX / halfZ = model box half sizes at yaw 0 without STRUCTURE.footprintPadding. byRace[race] overrides fields
+ * (muzzles as a whole). null when the building has no simBody.
+ */
+export function structureSimBody(stats, race) {
+  const base = stats?.simBody;
+  if (!base) return null;
+  const over = base.byRace?.[race] ?? base.byRace?.[modelRaceOf(stats, race)] ?? null;
+  return over ? { ...base, ...over } : base;
+}
+
+/**
+ * Footprint of a structure at yaw 0: { halfX, halfZ, bodyHeight, offsetX, offsetZ }. Sizes come from stats simBody
+ * (simulation – never from the shown model); offset = GLB model box centre, visual only (centres the GLB model on the
+ * building origin). Loads the GLB once (cached by AssetLoader); without simBody the GLB box gives the sizes too.
  */
 export async function modelFootprint(id, race) {
   const cached = footprintCache.get(footprintKey(id, race));
@@ -68,10 +91,14 @@ export async function modelFootprint(id, race) {
   const s = structureScale(stats);
   const size = box.getSize(new THREE.Vector3()).multiplyScalar(s);
   const centre = box.getCenter(new THREE.Vector3()).multiplyScalar(s);
+  const body = structureSimBody(stats, race);
+  if (!body) console.warn(`[Structure] ${id}: no stats.simBody – footprint measured from the GLB model`);
   const fp = {
-    halfX: size.x / 2 + STRUCTURE.footprintPadding,
-    halfZ: size.z / 2 + STRUCTURE.footprintPadding,
-    offsetX: centre.x, offsetZ: centre.z, height: size.y, minY: box.min.y * s,  };
+    halfX: (body ? body.halfX : size.x / 2) + STRUCTURE.footprintPadding,
+    halfZ: (body ? body.halfZ : size.z / 2) + STRUCTURE.footprintPadding,
+    bodyHeight: body ? body.bodyHeight : box.max.y * s, // top of the model (part of it may be sunk into the ground)
+    offsetX: centre.x, offsetZ: centre.z,
+  };
   footprintCache.set(footprintKey(id, race), fp);
   return fp;
 }
@@ -110,6 +137,7 @@ export class Structure extends THREE.Group {
     this.maxHp = 0;
     this.radius = 10;
     this.footprint = null;    // { halfX, halfZ } in world axes
+    this.simBody = null;      // [A1-6] resolved stats simBody (structureSimBody), set by setup()
     this.world = null;
     this.dead = false;
     this.removed = false;
@@ -145,16 +173,22 @@ export class Structure extends THREE.Group {
     const box = footprintAt(fp, 0, 0, this.rotation.y);
     this.footprint = { halfX: box.halfX, halfZ: box.halfZ };
     this.radius = (box.halfX + box.halfZ) / 2;   // targets use a circle (Combat.edgeDistance)
-    this.bodyHeight = fp.height + fp.minY;       // part of the model may be sunk into the ground
+    this.bodyHeight = fp.bodyHeight;             // [A1-6] from data (modelFootprint), not from the shown model
     this.aimHeight = this.bodyHeight * STRUCTURE.aimHeightFactor;
+    this.simBody = structureSimBody(this.stats, this.race); // [A1-6] turretHeight (wall posts), muzzles (towers)
+    // [A9-F3] superweapon charge { charge, ratio, state } – changed only by Superweapons (simulation)
+    if (this.stats.superweapon) this.superweapon = createChargeState();
   }
+
+  /** [A9-F3] Superweapons.launch: the procedural model plays its launch animation (visual only) */
+  onSuperweaponLaunch() { this.procModel?.launch?.(); }
 
   async load() {
     await loadStats();
     const fp = await modelFootprint(this.unitId, this.race);
     this.setup(fp);
     // Procedural model instead of the GLB when the id has one (PROC_BUILDINGS, docs/notes/proc-style-kit.md);
-    // footprint stays from the GLB
+    // footprint and simulation body stay from stats simBody (A1-6)
     const proc = useProceduralModel(this.unitId);
     if (proc) await loadBuildingStyles();
     const model = proc
@@ -282,14 +316,13 @@ export class Structure extends THREE.Group {
     if (this.dead) return;
     this.dead = true;
     this.setSelected(false);
-    if (explode) this.world?.effects.burst(VFX.mechExplosion, this.position.clone(), { size: STRUCTURE.explosionSize });
+    if (explode) this.world?.effects.burst(VFX.mechExplosion, this.position.clone(), { size: STRUCTURE.explosionSize, sound: 'explosionBuilding' }); // [A6]
     this.removed = true; // World removes it (and its pathfinding box)
     // Death blast (stats.explosion, a finished power generator): origin read now, blast after GENERATOR_BLAST.delay
     const ex = this.stats?.explosion;
     if (explode && ex && this.complete && this.world) {
       const origin = this.position.clone();
-      origin.y += this.aimHeight ?? 0;
-      this.procModel?.getExplosionOrigin?.(origin);
+      origin.y += this.aimHeight ?? 0; // [A1-6] simulation point only (no procedural reactor centre: lockstep)
       const world = this.world;
       world.schedule(GENERATOR_BLAST.delay, () => structureBlast(world, this, origin, ex));
     }
@@ -446,6 +479,7 @@ export class Structure extends THREE.Group {
     // (sunClock: the shared real-time sun clock – visual only, same as #trackSun – for a procedural solar panel)
     this.procModel?.setPowered(this.powered);
     this.procModel?.setDamage(this.complete && this.maxHp > 0 ? this.hp / this.maxHp : 1);
+    if (this.superweapon) this.procModel?.setCharge?.(this.superweapon.ratio, this.superweapon.state); // [A9-F3] B3 API
     this.procModel?.tick(dt, this.complete && this.powered && (this.world?.production?.itemsOf(this.eid).length ?? 0) > 0,
       this.stats?.sunTracking && getRenderClock() > 0 ? getRenderClock() * STRUCTURE.sunTrackingSpeed : undefined);
     // Swap the two builder sets instead of allocating a new one every tick

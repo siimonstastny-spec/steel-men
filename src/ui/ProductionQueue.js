@@ -4,13 +4,15 @@
 // click into a 'cancelProduction' command. View items are cached per sim item id, so they stay the same object
 // while the item exists (UnitOverlays keys its bars by item):
 //   { id, producer (structure eid), kind, icon, label, elapsed, total }  (elapsed / total read live)
-import { ROBOT_PRODUCTION, RESEARCH } from '../config.js';
+import { ROBOT_PRODUCTION, RESEARCH, TEAMS, ARMS } from '../config.js';
 import { t } from '../i18n/i18n.js';
 import { localTeam } from '../core/LocalPlayer.js';
 import { commandBus } from '../game/commands/CommandBus.js';
 import '../game/commands/productionCommands.js';
+import { armModel } from '../game/PartStock.js';
 import { unitName } from './BuildMenu.js';
 import { researchName } from './ResearchView.js';
+import { unitIconUrl, robotIconUrl, partIconUrl } from './IconRenderer.js';
 
 /** Grid / queue icon per production item kind */
 export const ITEM_ICONS = {
@@ -31,6 +33,28 @@ export function itemLabel(item, world) {
   }
 }
 
+/**
+ * Rendered icon URL of a production item (sim or view item) in the local team's colour, or null (not ready / no model:
+ * the caller keeps the emoji of ITEM_ICONS). Vehicles, crews, parts and assembled mechs have one.
+ */
+export function itemIconUrl(item, world) {
+  const sim = item.sim ?? item;
+  const team = localTeam();
+  const race = world?.production?.raceOf(team);
+  const color = TEAMS[team]?.color;
+  switch (sim.kind) {
+    case 'vehicle': return unitIconUrl(sim.unitId, race, color);
+    case 'crew': return unitIconUrl('crew', race, color);
+    case 'part': {
+      const arm = sim.slot === ARMS.slot;
+      const slot = arm ? ARMS.canonicalSlot : sim.slot;
+      return partIconUrl(slot, arm ? armModel(sim.path, slot) : sim.path, race, color);
+    }
+    case 'mech': return sim.loadout ? robotIconUrl(sim.loadout, race, color) : null;
+    default: return null;
+  }
+}
+
 export class ProductionQueue {
   /** @param {object} world  reads world.production */
   constructor(world) {
@@ -47,6 +71,7 @@ export class ProductionQueue {
       v = {
         id: item.id, producer: item.producer, kind: item.kind, icon: ITEM_ICONS[item.kind] ?? '',
         label: itemLabel(item, world), sim: item,
+        get iconUrl() { return itemIconUrl(item, world); }, // null until the icon is rendered (then the emoji stays)
         get elapsed() { return item.elapsed; },
         get total() { return item.total; },
       };

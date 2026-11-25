@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { makeRng } from '../ProcKit.js';
 import { marking } from '../ProcModules.js';
-import { PROC_EMBLEM } from '../../config.js';
+import { PROC_EMBLEM, PROC_MUZZLE } from '../../config.js';
 import { UNIT_KIT } from './UnitKit.js';
 
 export { teamPaintShare } from '../ProcModules.js';   // test / tuning: teamPaintShare(unit.shared.paint)
@@ -27,7 +27,7 @@ export const UNIT_MODULES = {
   // maxEdgeSegments 1 = chamfer (108 triangles per box instead of 300 at 2) – at unit size it reads as a rounded edge
   edgeScale: 0.35, edgeMaxShare: 0.3, edgeMinRadius: 0.04, edgeMinSide: 0.45, maxEdgeSegments: 1,
   seg: 8,                    // default radial segments (triangle budget: 8 keeps the silhouette round enough at unit size)
-  ring: { radial: 3, tubular: 16 },   // decorative torus rings (neon / team bands)
+  ring: { radial: 3, tubular: 14 },   // decorative torus rings (neon / team bands); B4 unit-lod: 16 -> 14
   neon: { h: 0.05, d: 0.03, out: 0.01 },
   hull: {
     rounded: { lowerShare: 0.6, deckL: 0.78, deckW: 0.86, deckZ: -0.05, glacisD: 0.16, neonY: 0.45, neonL: 0.7 },
@@ -35,9 +35,9 @@ export const UNIT_MODULES = {
       lowerShare: 0.65, topW: 0.82, topD: 0.9, deckW: 0.8, deckTopW: 0.66, deckL: 0.7, deckTopL: 0.6, deckZ: -0.06, plateT: 0.08,
       plateH: 0.45, plateL: 0.8, rivetStep: 1.3, rivetR: 0.035, rivetSeg: 4, rivetY: 0.75, ramR: 0.09, ramL: 0.45, ramX: 0.3, ramY: 0.4, ramSeg: 4,
     },
-    round: { bodyY: 0.5, bodyH: 0.55, domeW: 0.3, domeH: 0.3, domeL: 0.28, domeY: 0.85, domeZ: -0.05, ringT: 0.035, segW: 14, segH: 8, domeSegW: 10, domeSegH: 5, topShare: 0.95 },
+    round: { bodyY: 0.5, bodyH: 0.55, domeW: 0.3, domeH: 0.3, domeL: 0.28, domeY: 0.85, domeZ: -0.05, ringT: 0.035, segW: 12, segH: 6, domeSegW: 8, domeSegH: 4, topShare: 0.95 },   // B4 unit-lod: 14x8 / 10x5 -> 12x6 / 8x4 (hull ellipsoid 196 -> 120 tri, dome 80 -> 48)
     faceted: { bodyL: 0.7, bodyZ: -0.05, bodyH: 0.8, bodyY: 0.45, noseL: 0.2, rearShare: 0.7, rearL: 0.8, neonL: 0.9, finH: 0.45, finL: 0.16, finT: 0.06, finSink: 0.05, finZ: 0.43, finX: 0.18 },   // twin rear fins (±finX × W): behind the turret, centre free for a lamp
-    lights: { r: 0.09, d: 0.06, xShare: 0.32, yShare: 0.4, halo: 0.22, glow: 0.8, seg: 8 },
+    lights: { r: 0.09, d: 0.06, xShare: 0.32, yShare: 0.4, halo: 0.22, glow: 0.8, seg: 6 },
     front: { round: 0.42, faceted: 0.3, default: 0.5 },   // z of the headlights (× L): pointed noses sit back
     markLen: 0.6, markH: 0.12, markY: 0.35, markOut: 0.02,
   },
@@ -45,17 +45,17 @@ export const UNIT_MODULES = {
     cleatPitch: 0.85, cleatH: 0.08, cleatD: 0.24, cleatOver: 1.08, hubD: 0.08, hubShare: 0.82, spokes: 2, spokeT: 0.1, spokeD: 1.3, spokeL: 1.9,
     skirtH: 0.3, skirtOver: 0.12, bellyShare: 0.7, bellyL: 0.9, bellyY: 0.5,
     plateT: 0.1, plateH: 0.9, plateY: 0.55, plateL: 0.8, topPlateL: 0.84, rivetStep: 1.3, rivetR: 0.035, rivetSeg: 4, rivetY: 0.85, rivetSpan: 0.4,
-    podSeg: [10, 6], podY: 0.8, podH: 0.55, podInset: 0.3, podNeonL: 0.6,
+    podSeg: [8, 4], podY: 0.8, podH: 0.55, podInset: 0.3, podNeonL: 0.6,
     bladeT: 0.06, bladeH: 0.7, bladeY: 0.6, bladeL: 0.9, bladeNeonL: 0.85, markL: 0.25, markH: 0.6, markZ: 0.3, markOut: 0.02,
   },
-  wheel: { hubShare: 0.55, hubOver: 1.05, spokes: 3, spokeT: 0.08, spokeOver: 1.05, bellyShare: 0.8, bellyGap: 0.1, tyreSegExtra: 2 },
+  wheel: { hubShare: 0.55, hubOver: 1.05, spokes: 2, spokeT: 0.08, spokeOver: 1.05, bellyShare: 0.8, bellyGap: 0.1, tyreSegExtra: 0 },   // B4 unit-lod: spokes 3 -> 2, tyre = M.seg sides
   hover: {
     padR: 0.42, padRing: 0.06, padTubular: 6, holeShare: 0.85, holeY: -0.01, ringY: 0.01, coneLen: 0.4, coneSpread: 1.5, coneGlow: 0.45,
-    discGlow: 0.9, discY: 0.03, bobAmp: 0.08, bobFreq: 0.5, taper: 0.85, skirtSeg: 16,
+    discGlow: 0.9, discY: 0.03, bobAmp: 0.08, bobFreq: 0.5, taper: 0.85, skirtSeg: 12,
   },
   turret: {
     hatchShare: 0.18, hatchH: 0.1, bandShare: 0.18, bandY: 0.62, antennaR: 0.02, antennaH: 1.1, binShare: 0.22,
-    domeSegW: 16, domeSegH: 6, ringT: 0.04, ringY: 0.35, domeHatch: 0.84, faceTop: 0.75, emblemShare: 0.7, emblemZ: -0.1, emblemOut: 0.01,
+    domeSegW: 12, domeSegH: 5, ringT: 0.04, ringY: 0.35, domeHatch: 0.84, faceTop: 0.75, emblemShare: 0.7, emblemZ: -0.1, emblemOut: 0.01,
     emblemY: 0.3, emblemSide: 0.42,   // side emblem of the box turret: below the team band
     bandOver: 1.01,                   // team band (box turret, missile pod) slightly proud of the body
     hatchTop: 0.98, hatchX: -0.2, hatchZ: -0.15, antennaX: 0.3, antennaZ: -0.4, antennaSeg: 4, midShare: 0.5,
@@ -72,22 +72,22 @@ export const UNIT_MODULES = {
   // weapons: sizes as multiples of the caliber c (mantlet [w, h, d]) or shares of the barrel length
   barrel: {
     mantletW: 5, mantletH: 4, mantletD: 3, fumeShare: 1.4, fumeLen: 0.15, fumeZ: 0.55, brakeShare: 1.55, brakeLen: 0.1,
-    brakeBox: [3.2, 2.2], brakePrism: 2.8, brakeSeg: [10, 6], recoil: 0.06, angularScale: 1.2, flashScale: 1.4,   // recoil = share of the length
+    brakeBox: [3.2, 2.2], brakePrism: 2.8, brakeSeg: [8, 4], mantletRounded: false, recoil: 0.06, angularScale: 1.2, flashScale: 1.4,   // recoil = share of the length
   },
-  missile: { tubeR: 0.16, tubeGap: 0.08, depth: 0.9, frontShare: 0.7, rim: 0.03, rimRadial: 3, holeD: 0.02, count: 4, bandH: 0.2, bandY: 0.25, bandD: 0.6, launchOut: 0.05 },
+  missile: { tubeR: 0.16, tubeGap: 0.08, depth: 0.9, frontShare: 0.7, rim: 0.03, rimRadial: 3, rimSeg: 6, holeD: 0.02, count: 4, bandH: 0.2, bandY: 0.25, bandD: 0.6, launchOut: 0.05 },
   gun: {
-    barrels: 3, barrelR: 0.035, barrelSeg: 6, ring: 0.09, clampT: 0.8, clampZ: 0.8, clampSeg: [3, 10], receiver: [0.36, 0.3, 0.55],
+    barrels: 3, barrelR: 0.035, barrelSeg: 6, ring: 0.09, clampT: 0.8, clampZ: 0.8, clampSeg: [3, 8], receiver: [0.36, 0.3, 0.55],
     receiverBack: 0.1, ammo: [0.28, 0.26, 0.4], ammoY: -0.03, ammoZ: 0.05, spin: 25, recoil: 0.04, flashScale: 1.5,
   },
   // rings = barrel torus rings (weapon() option `rings` overrides it: secondary lasers use fewer); the lens halo ring only with rings > 0
   laser: { mantlet: [4, 3.5, 4], taper: 0.8, rings: 3, ringR: 1.25, ringT: 0.03, lensR: 0.12, lensD: 0.06, halo: 2.6, haloGlow: 0.7, haloRing: 1.5, haloRingT: 0.02, recoil: 0.06 },
   plasma: {
-    mantlet: [4.5, 4, 4], tubeTop: 1.15, tubeLen: 0.8, coils: 2, coilR: 1.45, coilT: 0.04, core: 1.15, coreZ: 0.6, coreSeg: [8, 5],
+    mantlet: [4.5, 4, 4], tubeTop: 1.15, tubeLen: 0.8, coils: 2, coilR: 1.45, coilT: 0.04, core: 1.15, coreZ: 0.6, coreSeg: [8, 4],
     halo: 2.4, haloSeg: [6, 4], haloGlow: 0.45, pointShare: 1.2, recoil: 0.12,
   },
   lightning: {
     mantlet: [4, 3.5, 4], rodTop: 0.7, rodBottom: 0.9, rodLen: 0.7, ringR: 1.4, ringT: 0.6, ringZ: 0.68, prongs: 3, prongR: 0.06, prongSeg: 6,
-    prongLen: 0.7, tipAt: 0.9, spread: 2.2, arcT: 0.03, arcSegments: 5, arcJitter: 0.07, ball: 0.08, seed: 777, recoil: 0.03,
+    prongLen: 0.7, tipAt: 0.9, spread: 2.2, arcT: 0.03, arcSegments: 4, arcJitter: 0.07, ball: 0.08, seed: 777, recoil: 0.03,
   },
   flash: { size: 2.2, petals: 3, petalT: 0.05, petalLen: 1.6, coreShare: 0.45, coreSeg: [6, 4], beamLen: 4, beamShare: 0.35, beamTip: 0.4, beamSeg: 8, beamGlow: 0.9, ball: 0.6, muzzleOut: 0.05 },
   // exhaust: nozzle + flame by kind (key = unitStyle.exhaust.kind, unknown → ion).
@@ -96,8 +96,8 @@ export const UNIT_MODULES = {
   //   bulb / halo (spheres): [r (× r × width), z (× r, behind the exit), intensity]; ring: [r (× r × width), tube (× r), intensity]
   //   lens: exit disc radius (× r)
   exhaust: {
-    nozzleLen: 0.35, bell: 1.15, front: 0.85, seg: 8, holeShare: 0.95, holeLen: 0.02, holeOut: 0.005, lensOut: 0.01,
-    ballSeg: [6, 4], bulbSeg: [8, 5], ringRadial: 3,
+    nozzleLen: 0.35, bell: 1.15, front: 0.85, seg: 6, holeShare: 0.95, holeLen: 0.02, holeOut: 0.005, lensOut: 0.01,
+    ballSeg: [6, 3], bulbSeg: [6, 4], ringRadial: 3,
     shapes: {
       ion: { layers: [[0.9, 0.45, 1, 0.8, 'outer', true], [0.5, 0.2, 0.5, 0.35, 'core', true]], ring: [0.8, 0.12, 1] },
       rocket: { layers: [[1, 0, 1, 0.85, 'outer', false], [0.6, 0, 0.55, 1, 'core', false]], balls: [[0.3, 0.3, 0.6], [0.22, 0.5, 0.45]] },
@@ -105,16 +105,16 @@ export const UNIT_MODULES = {
       beam: { layers: [[0.35, 0.25, 1, 1, 'core', false], [0.7, 0.45, 0.85, 0.5, 'outer', true]], lens: 0.8 },
     },
   },
-  status: { baseR: 0.08, baseFlare: 1.2, baseH: 0.06, baseSeg: 8, lampR: 0.07, halo: 0.17, haloGlow: 0.45, white: '#ffffff' },   // white × status colour
+  status: { baseR: 0.08, baseFlare: 1.2, baseH: 0.06, baseSeg: 6, lampR: 0.07, halo: 0.17, haloGlow: 0.45, white: '#ffffff' },   // white × status colour
   // aircraft fuselage by silhouette (shares of L / W / H); canopy = [w, h, l] shares, canopyY / canopyZ shares
   fuselage: {
-    rounded: { seg: [16, 10], canopy: [0.25, 0.32, 0.2], canopySeg: [12, 6], canopyY: 0.3, canopyZ: 0.18, bandH: 0.12, bandL: 0.35, bandZ: -0.1, bandOver: 1.02 },
+    rounded: { seg: [14, 8], canopy: [0.25, 0.32, 0.2], canopySeg: [10, 5], canopyY: 0.3, canopyZ: 0.18, bandH: 0.12, bandL: 0.35, bandZ: -0.1, bandOver: 1.02 },
     angular: { topW: 0.7, bodyL: 0.7, bodyZ: -0.08, topL: 0.6, noseL: 0.3, noseH: 0.8, noseW: 0.8, noseZ: 0.35, canopy: [0.3, 0.35, 0.2], canopyZ: 0.12, canopySink: 0.05 },
-    round: { seg: [18, 10], canopy: [0.22, 0.3, 0.18], canopySeg: [12, 6], canopyY: 0.28, canopyZ: 0.12 },
+    round: { seg: [14, 8], canopy: [0.22, 0.3, 0.18], canopySeg: [10, 5], canopyY: 0.28, canopyZ: 0.12 },
     faceted: { bodyL: 0.6, bodyZ: -0.05, noseL: 0.25, noseZ: 0.375, canopyW: 0.5, canopyH: 0.45, canopyL: 0.25, canopyY: 0.22, canopyZ: 0.2, neonL: 0.5 },
   },
   wing: {
-    thick: 0.12, navR: 0.08, emblemShare: 0.6, emblemX: 0.45, emblemZ: -0.1, emblemOut: 0.01, tipCurve: 0.3, curveSegments: 8,
+    thick: 0.12, navR: 0.08, emblemShare: 0.6, emblemX: 0.45, emblemZ: -0.1, emblemOut: 0.01, tipCurve: 0.3, curveSegments: 6,
     rootSpan: 0.92,                                         // rounded: straight edge to this share of the half span
     crescent: { lead: 0.7, trail: 0.6, trailZ: -0.1 },      // round: quadratic control points (× half span, × rc)
     faceted: { kink: 0.6, kinkSweep: 0.4, tipSweep: 2, tipBack: 0.85, rootBack: 0.4, rootTrail: -0.2 },
@@ -390,12 +390,13 @@ export function hull(ub, { bone = 'hull', y = 0, L, W, H, team = false }) {
   const b = ub.paint(bone);
   const sil = kit.style.silhouette;
   const TH = M.team.hull;
+  ub.vehicleLod = true;   // vehicle: UnitBuilder.build() applies UNIT_LOD.budget to the far LODs
   let top = y + H;
   if (sil === 'angular') {
     const A = M.hull.angular;
     const lowH = H * A.lowerShare;
     b.taperedBox(W, W * A.topW, lowH, L, S.hull, { y }, L * A.topD);
-    b.taperedBox(W * A.deckW, W * A.deckTopW, H - lowH, L * A.deckL, S.hullDark, { y: y + lowH, z: L * A.deckZ }, L * A.deckTopL);
+    b.taperedBox(W * A.deckW, W * A.deckTopW, H - lowH, L * A.deckL, S.hullDark, { y: y + lowH, z: L * A.deckZ, detail: 2 }, L * A.deckTopL);   // r2: stays with team plates
     for (const side of [1, -1]) {
       const px = side * (W / 2 + A.plateT / 2);
       b.box(A.plateT, H * A.plateH, L * A.plateL, team ? S.teamPaint : S.lower, { x: px, y: y + (H * A.plateH) / 2, detail: team ? TPU.lod.panel : undefined });
@@ -406,9 +407,10 @@ export function hull(ub, { bone = 'hull', y = 0, L, W, H, team = false }) {
     }
   } else if (sil === 'round') {
     const R = M.hull.round;
-    b.sphere(1, R.segW, R.segH, S.hull, { sx: W / 2, sy: H * R.bodyH, sz: L / 2, y: y + H * R.bodyY });
+    // B4 unit-lod r2: body detail 2 = it stays as long as its team cap (detail roofMark = 2) does (no floating cap in LOD2)
+    b.sphere(1, R.segW, R.segH, S.hull, { sx: W / 2, sy: H * R.bodyH, sz: L / 2, y: y + H * R.bodyY, detail: 2 });
     b.sphere(1, R.domeSegW, R.domeSegH, S.hullDark, { sx: W * R.domeW, sy: H * R.domeH, sz: L * R.domeL, y: y + H * R.domeY, z: L * R.domeZ });
-    b.torus(1, R.ringT, M.ring.radial, M.ring.tubular, TAU, S.neon, { rx: HALF_PI, sx: W / 2 + R.ringT, sy: L / 2 + R.ringT, y: y + H * R.bodyY });
+    b.torus(1, R.ringT, M.ring.radial, M.ring.tubular, TAU, S.neon, { rx: HALF_PI, sx: W / 2 + R.ringT, sy: L / 2 + R.ringT, y: y + H * R.bodyY, detail: 1 });   // B4: no neon ring in LOD2
     if (team) {
       const C = TH.round;
       b.add(new THREE.SphereGeometry(1, R.segW, C.capSegH, 0, TAU, 0, C.cap), S.teamPaint, {
@@ -420,7 +422,7 @@ export function hull(ub, { bone = 'hull', y = 0, L, W, H, team = false }) {
     const F = M.hull.faceted;
     const cy = y + H * F.bodyY;
     const bodyL = L * F.bodyL;
-    prism(b, 4, W, H * F.bodyH, bodyL, S.hull, { y: cy, z: L * F.bodyZ });
+    prism(b, 4, W, H * F.bodyH, bodyL, S.hull, { y: cy, z: L * F.bodyZ, detail: 2 });   // r2: stays with its team strakes (detail 2)
     const frontZ = L * F.bodyZ + bodyL / 2;
     noseCone(b, 4, W, H * F.bodyH, L * F.noseL, S.hull, { y: cy, z: frontZ + (L * F.noseL) / 2 });
     const rearL = L * F.noseL * F.rearL;
@@ -508,7 +510,7 @@ export function tracks(ub, { parent = 'root', L, gauge, tw, th, team = false }) 
       const name = ub.bone(`sprocket${sideName}${end > 0 ? 'F' : 'R'}`, parent, [x + side * (tw / 2 + T.hubD / 2), r, end * (L / 2 - r)]);
       const sb = ub.paint(name);
       const rs = r * T.hubShare;
-      sb.cylinder(rs, rs, T.hubD, M.seg, S.frame, { rz: HALF_PI });
+      sb.cylinder(rs, rs, T.hubD, M.seg, S.frame, { rz: HALF_PI, detail: 1 });   // B4 r2: the hubs stay in LOD1 (cheap hint of the wheels on the black track box)
       for (let k = 0; k < T.spokes; k++) sb.box(T.hubD * T.spokeD, T.spokeT, rs * T.spokeL, S.trim, { rx: (k * Math.PI) / T.spokes, detail: 0 });
       sprockets.push(name);
     }
@@ -517,10 +519,12 @@ export function tracks(ub, { parent = 'root', L, gauge, tw, th, team = false }) 
     const span = (count - 1) * T.cleatPitch;
     const top = ub.bone(`cleatTop${sideName}`, parent, [x, th, 0]);
     const bottom = ub.bone(`cleatBottom${sideName}`, parent, [x, 0, 0]);
-    for (let i = 0; i < count; i++) {   // upper run shifts +[0, pitch), lower run −[0, pitch): offset so both stay centred
+    // B4 unit-lod: only the upper run is modelled (the lower run is half under the ground and covered by the track box:
+    // 2 x count boxes saved per tank), the lower bone stays (drivers move it) without geometry; cleats are LOD0 only
+    ub.vehicleLod = true;
+    for (let i = 0; i < count; i++) {   // upper run shifts +[0, pitch): offset so it stays centred
       const z = -span / 2 + i * T.cleatPitch;
-      ub.paint(top).box(tw * T.cleatOver, T.cleatH, T.cleatD, S.dark, { z: z - T.cleatPitch / 2, detail: 1 });
-      ub.paint(bottom).box(tw * T.cleatOver, T.cleatH, T.cleatD, S.dark, { z: z + T.cleatPitch / 2, detail: 1 });
+      ub.paint(top).box(tw * T.cleatOver, T.cleatH, T.cleatD, S.dark, { z: z - T.cleatPitch / 2, detail: 0 });
     }
     ub.meta.tracks.push({ side, halfGauge: gauge / 2, pitch: T.cleatPitch, radius: r, top, bottom, sprockets });
     // skirt by silhouette
@@ -555,6 +559,7 @@ export function wheels(ub, { parent = 'root', L, gauge, r, ww, axles, steer = 1 
   const kit = ub.kit;
   const S = kit.S;
   const Wh = M.wheel;
+  ub.vehicleLod = true;
   ub.paint(parent).box(gauge - ww - Wh.bellyGap, r * Wh.bellyShare, L, S.hullDark, { y: r });
   axles.forEach((z, i) => {
     for (const side of [1, -1]) {
@@ -569,7 +574,7 @@ export function wheels(ub, { parent = 'root', L, gauge, r, ww, axles, steer = 1 
         spin = ub.bone(`wheel${i}${sideName}`, parent, pos);
       }
       const b = ub.paint(spin);
-      b.cylinder(r, r, ww, M.seg + Wh.tyreSegExtra, S.rubber, { rz: HALF_PI });
+      b.cylinder(r, r, ww, M.seg + Wh.tyreSegExtra, S.rubber, { rz: HALF_PI, detail: 1 });   // B4 r2: the tyres stay in LOD1 (hubs do not: budget)
       b.cylinder(r * Wh.hubShare, r * Wh.hubShare, ww * Wh.hubOver, M.seg, S.frame, { rz: HALF_PI });
       for (let k = 0; k < Wh.spokes; k++) b.box(ww * Wh.hubOver * Wh.spokeOver, Wh.spokeT, r, S.trim, { rx: (k * Math.PI) / Wh.spokes, detail: 0 });
       ub.meta.wheels.push({ spin, steer: steerBone, radius: r, side, halfGauge: gauge / 2, steerSign: 1 });
@@ -589,6 +594,7 @@ export function hover(ub, { bone = 'hull', L, W, skirtH, pads }) {
   const S = kit.S;
   const Hv = M.hover;
   const b = ub.paint(bone);
+  ub.vehicleLod = true;
   const sil = kit.style.silhouette;
   if (sil === 'angular') b.taperedBox(W * Hv.taper, W, skirtH, L, S.hullDark, {}, L);
   else if (sil === 'round') b.cylinder(1, Hv.taper, skirtH, Hv.skirtSeg, S.hullDark, { sx: W / 2, sz: L / 2, y: skirtH / 2 });
@@ -620,6 +626,7 @@ export function turret(ub, { parent = 'hull', y, z = 0, w, d, h, team = false })
   const S = kit.S;
   const T = M.turret;
   const TT = M.team.turret;
+  z += pivotFit(ub, parent, y, z);   // [B5-muzzles] turret pivot towards stats simBody.muzzle.pivotZ (within budget)
   const bone = ub.bone('turret', parent, [0, y, z], { far: true });
   ub.meta.turret = bone;
   const b = ub.paint(bone);
@@ -628,7 +635,7 @@ export function turret(ub, { parent = 'hull', y, z = 0, w, d, h, team = false })
   let hatchY = h * T.hatchTop;
   if (sil === 'angular') {
     const A = T.angular;
-    b.taperedBox(w, w * A.topW, h, d, S.hull, {}, d * A.topD);
+    b.taperedBox(w, w * A.topW, h, d, S.hull, { detail: 2 }, d * A.topD);   // B4 r2: turret body stays with the team parts sitting on it (detail 2)
     for (const side of [1, -1]) {
       b.box(w * T.binShare, h * A.binH, d * A.binD, team ? S.teamPaint : S.hullDark, { x: side * (w / 2 - w * T.binShare * A.binInset), y: h * A.binY, z: d * A.binZ, detail: team ? TPU.lod.panel : undefined });
     }
@@ -646,8 +653,8 @@ export function turret(ub, { parent = 'hull', y, z = 0, w, d, h, team = false })
     }
   } else if (sil === 'round') {
     const R = T.round;
-    b.add(new THREE.SphereGeometry(1, T.domeSegW, T.domeSegH, 0, TAU, 0, HALF_PI), S.hull, { sx: w / 2, sy: h, sz: d / 2 });
-    b.torus(1, T.ringT, M.ring.radial, M.ring.tubular, TAU, S.neon, { rx: HALF_PI, sx: w / 2 + T.ringT * R.ringInset, sy: d / 2 + T.ringT * R.ringInset, y: T.ringT });
+    b.add(new THREE.SphereGeometry(1, T.domeSegW, T.domeSegH, 0, TAU, 0, HALF_PI), S.hull, { sx: w / 2, sy: h, sz: d / 2, detail: 2 });   // r2: dome stays with its team cap (detail 2) – no floating cap in LOD2
+    b.torus(1, T.ringT, M.ring.radial, M.ring.tubular, TAU, S.neon, { rx: HALF_PI, sx: w / 2 + T.ringT * R.ringInset, sy: d / 2 + T.ringT * R.ringInset, y: T.ringT, detail: 1 });   // B4: no neon ring in LOD2
     let at = R.emblemAt;
     let share = T.emblemShare;
     if (team) {
@@ -667,7 +674,7 @@ export function turret(ub, { parent = 'hull', y, z = 0, w, d, h, team = false })
     hatchY = h * T.domeHatch;
   } else if (sil === 'faceted') {
     const F = T.faceted;
-    b.add(flat(new THREE.CylinderGeometry(T.faceTop, 1, 1, 4)), S.hull, { sx: w / 2, sy: h, sz: d / 2, y: h / 2 });
+    b.add(flat(new THREE.CylinderGeometry(T.faceTop, 1, 1, 4)), S.hull, { sx: w / 2, sy: h, sz: d / 2, y: h / 2, detail: 2 });
     for (const side of [1, -1]) b.box(F.finT, h * F.finH, d * F.finD, S.hullDark, { x: side * w * F.finX, y: h * F.finY, z: d * F.finZ });
     if (team) {
       // rhombus over the top diamond; emblems on plates on the two front flank faces (planes through the +x / +z
@@ -687,7 +694,7 @@ export function turret(ub, { parent = 'hull', y, z = 0, w, d, h, team = false })
       emblems = [{ position: [0, h + F.emblemOut, d * F.emblemZ], normal: [0, 1, 0], up: [0, 0, 1], size: h * F.emblemSize }];
     }
   } else {
-    unitBox(b, kit, w, h, d, S.hull, { y: h / 2 });
+    unitBox(b, kit, w, h, d, S.hull, { y: h / 2, detail: 2 });
     b.box(w * T.bandOver, h * T.bandShare, d * T.bandOver, team ? S.teamPaint : S.team, { y: h * T.bandY, detail: team ? TPU.lod.panel : undefined });
     if (team) {
       const C = TT.rounded;
@@ -707,6 +714,61 @@ export function turret(ub, { parent = 'hull', y, z = 0, w, d, h, team = false })
   ub.emblem(bone, emblems);
   ub.socket('turret', bone, [0, h, 0]);
   return { bone, top: h, front: d / 2, mid: h * T.midShare };
+}
+
+// ---------------------------------------------------------------- [B5-muzzles] muzzle fit (stats simBody, MuzzleFit.js)
+
+const clampAbs = (v, max) => Math.max(-max, Math.min(max, v));
+
+/** Turret z shift towards ub.muzzleFit.pivotZ (model space), within PROC_MUZZLE.fit.pivotShift; 0 without a target */
+function pivotFit(ub, parent, y, z) {
+  const f = ub.muzzleFit;
+  if (f?.pivotZ == null) return 0;
+  const root = ub.rootPoint(parent, [0, y, z]);
+  return root ? clampAbs(f.pivotZ - root[2], PROC_MUZZLE.fit.pivotShift) : 0;
+}
+
+/** Fitted muzzle socket z from the trunnion as [slope, intercept] of the barrel length (same sums as weapon() below) */
+function muzzleReach(kind, c) {
+  const out = M.flash.muzzleOut;
+  switch (kind) {
+    case 'missile': return [0, M.missile.depth * M.missile.frontShare + M.missile.launchOut];   // pod centre (launch sockets)
+    case 'gun': return [1, M.gun.receiver[2] - M.gun.receiverBack + out];
+    case 'laser': return [1, M.laser.lensD + out];
+    case 'plasma': return [M.plasma.tubeLen, c * M.plasma.core * 2 + out];
+    case 'lightning': return [M.lightning.rodLen, M.lightning.prongLen + out];
+    default: return [1, out];   // cannon
+  }
+}
+
+/**
+ * Main weapon fitted to ub.muzzleFit: trunnion lift (± lift), barrel length (× stretch range), then a slide along the
+ * barrel (± slide) for the rest – { position, length } or null (no target, other socket, rotated parent chain).
+ */
+function weaponFit(ub, kind, sfx, parent, position, length, c) {
+  const socket = kind === 'missile' ? `launch${sfx}_1` : `muzzle${sfx}`;
+  return fitMount(ub, socket, parent, position, length, muzzleReach(kind, c));
+}
+
+/**
+ * [B5-muzzles] Fit of a weapon mount whose muzzle socket sits at z = position.z + a × length + b on the mount bone (own
+ * launchers use it directly): lift ± PROC_MUZZLE.fit.lift, length × stretch, slide ± slide (slideFirst: slide before
+ * stretching – for parts that should rather move than grow). { position, length, lift } or null (no target for `socket`,
+ * target already used, rotated parent chain).
+ */
+export function fitMount(ub, socket, parent, position, length, [a, b], { slideFirst = false } = {}) {
+  const f = ub.muzzleFit;
+  if (!f || f.used || f.socket !== socket) return null;
+  const root = ub.rootPoint(parent, position);
+  if (!root) return null;
+  const F = PROC_MUZZLE.fit;
+  f.used = true;
+  const lift = clampAbs(f.y - root[1], F.lift);
+  const want = f.z - root[2] - b;   // a × length + slide
+  let slide = slideFirst ? clampAbs(want - a * length, F.slide) : 0;
+  const len = a > 0 ? Math.min(length * F.stretch[1], Math.max(length * F.stretch[0], (want - slide) / a)) : length;
+  if (!slideFirst) slide = clampAbs(want - a * len, F.slide);
+  return { position: [position[0], position[1] + lift, position[2] + slide], length: len, lift };
 }
 
 // ---------------------------------------------------------------- weapons
@@ -737,6 +799,9 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
   const S = kit.S;
   const u = ub.style;
   const sil = kit.style.silhouette;
+  const c = caliber * (sil === 'angular' ? M.barrel.angularScale : 1);
+  const fit = weaponFit(ub, kind, sfx, parent, position, length, c);   // [B5-muzzles]
+  if (fit) { position = fit.position; length = fit.length; }
   const barrel = ub.bone(`barrel${sfx}`, parent, position);
   if (!ub.meta.barrel) { ub.meta.barrel = barrel; ub.meta.pitch = pitch; }
   const recoil = ub.bone(`recoil${sfx}`, barrel);
@@ -750,7 +815,9 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
   let energy = false;
   let flashSize = caliber * M.flash.size;
   let flashColor = u.weaponGlow;
-  const c = caliber * (sil === 'angular' ? M.barrel.angularScale : 1);
+  // B4 unit-lod r2: the MAIN weapon (sfx '') stays readable in the far LODs: cradle / muzzle parts up to LOD1, barrel up to
+  // LOD2 (explicit `detail`; the secondary weapons keep the size rule). wd(n) = n for the main weapon, undefined otherwise.
+  const wd = (n) => (sfx === '' ? n : undefined);
 
   switch (kind) {
     case 'missile': {
@@ -761,13 +828,13 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
       const pw = cols * (Mi.tubeR * 2 + Mi.tubeGap) + Mi.tubeGap;
       const ph = rows * (Mi.tubeR * 2 + Mi.tubeGap) + Mi.tubeGap;
       const front = Mi.depth * Mi.frontShare;
-      unitBox(bb, kit, pw, ph, Mi.depth, S.hullDark, { z: front - Mi.depth / 2 });
+      unitBox(bb, kit, pw, ph, Mi.depth, S.hullDark, { z: front - Mi.depth / 2, detail: wd(2) });
       bb.box(pw * M.turret.bandOver, ph * Mi.bandH, Mi.depth * Mi.bandD, S.team, { y: ph * Mi.bandY, z: front - Mi.depth / 2 });
       for (let i = 0; i < n; i++) {
         const tx = -pw / 2 + Mi.tubeGap + Mi.tubeR + (i % cols) * (Mi.tubeR * 2 + Mi.tubeGap);
         const ty = ph / 2 - Mi.tubeGap - Mi.tubeR - Math.floor(i / cols) * (Mi.tubeR * 2 + Mi.tubeGap);
-        bb.cylinder(Mi.tubeR, Mi.tubeR, Mi.holeD, M.seg, S.hole, { rx: HALF_PI, x: tx, y: ty, z: front + Mi.holeD / 2 });
-        bb.torus(Mi.tubeR, Mi.rim, Mi.rimRadial, M.seg, TAU, S.frame, { x: tx, y: ty, z: front + Mi.rim, detail: 0 });
+        bb.add(new THREE.CircleGeometry(Mi.tubeR, M.seg), S.hole, { x: tx, y: ty, z: front + Mi.holeD, detail: wd(1) });   // flat disc = front cap of the old hole cylinder (8 instead of 32 tri)
+        bb.torus(Mi.tubeR, Mi.rim, Mi.rimRadial, Mi.rimSeg, TAU, S.frame, { x: tx, y: ty, z: front + Mi.rim, detail: 0 });
         ub.socket(`launch${sfx}_${i + 1}`, barrel, [tx, ty, front + Mi.launchOut]);
       }
       tip = front;
@@ -778,13 +845,13 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
     case 'gun': {
       const G = M.gun;
       const front = G.receiver[2] - G.receiverBack;
-      bb.box(G.receiver[0], G.receiver[1], G.receiver[2], S.hullDark, { z: G.receiver[2] / 2 - G.receiverBack });
+      bb.box(G.receiver[0], G.receiver[1], G.receiver[2], S.hullDark, { z: G.receiver[2] / 2 - G.receiverBack, detail: wd(1) });
       bb.box(G.ammo[0], G.ammo[1], G.ammo[2], S.accent, { x: G.receiver[0] / 2 + G.ammo[0] / 2, y: G.ammoY, z: G.ammoZ });
       const spin = ub.bone(`spin${sfx}`, recoil, [0, 0, front]);
       const sb = ub.paint(spin);
       for (let k = 0; k < G.barrels; k++) {
         const a = (k / G.barrels) * TAU;
-        sb.cylinder(G.barrelR, G.barrelR, length, G.barrelSeg, S.frame, { rx: HALF_PI, x: Math.cos(a) * G.ring, y: Math.sin(a) * G.ring, z: length / 2 });
+        sb.cylinder(G.barrelR, G.barrelR, length, G.barrelSeg, S.frame, { rx: HALF_PI, x: Math.cos(a) * G.ring, y: Math.sin(a) * G.ring, z: length / 2, detail: wd(k === 0 ? 2 : 1) });
       }
       sb.torus(G.ring + G.barrelR, G.barrelR * G.clampT, G.clampSeg[0], G.clampSeg[1], TAU, S.frame, { z: length * G.clampZ, detail: 0 });
       fire.spinners.push(meta.spinners.length);
@@ -797,11 +864,11 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
     }
     case 'laser': {
       const La = M.laser;
-      bb.box(c * La.mantlet[0], c * La.mantlet[1], c * La.mantlet[2], S.hullDark, {});
-      rb.cylinder(c * La.taper, c, length, M.seg, S.frame, { rx: HALF_PI, z: length / 2 });
+      bb.box(c * La.mantlet[0], c * La.mantlet[1], c * La.mantlet[2], S.hullDark, { detail: wd(1) });
+      rb.cylinder(c * La.taper, c, length, M.seg, S.frame, { rx: HALF_PI, z: length / 2, detail: wd(2) });
       const ringCount = rings ?? La.rings;
       for (let k = 1; k <= ringCount; k++) rb.torus(c * La.ringR, La.ringT, M.ring.radial, M.seg, TAU, S.trim, { z: (length * k) / (ringCount + 1), detail: 0 });
-      rb.cylinder(La.lensR, La.lensR, La.lensD, M.seg, S.lens, { rx: HALF_PI, z: length + La.lensD / 2 });
+      rb.cylinder(La.lensR, La.lensR, La.lensD, M.seg, S.lens, { rx: HALF_PI, z: length + La.lensD / 2, detail: wd(1) });
       const lens = ub.bone(`lens${sfx}`, recoil, [0, 0, length + La.lensD]);
       const lensGlow = ub.glow(lens).point([0, 0, 0], La.lensR * La.halo, u.weaponGlow, { intensity: La.haloGlow });
       if (ringCount > 0) lensGlow.torus(La.lensR * La.haloRing, La.haloRingT, M.ring.radial, M.seg, u.weaponGlow, {});
@@ -815,11 +882,11 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
     case 'plasma': {
       const P = M.plasma;
       const tubeL = length * P.tubeLen;
-      bb.box(c * P.mantlet[0], c * P.mantlet[1], c * P.mantlet[2], S.hullDark, {});
-      rb.cylinder(c * P.tubeTop, c, tubeL, M.seg, S.hullDark, { rx: HALF_PI, z: tubeL / 2 });
+      bb.box(c * P.mantlet[0], c * P.mantlet[1], c * P.mantlet[2], S.hullDark, { detail: wd(1) });
+      rb.cylinder(c * P.tubeTop, c, tubeL, M.seg, S.hullDark, { rx: HALF_PI, z: tubeL / 2, detail: wd(2) });
       const lens = ub.bone(`lens${sfx}`, recoil, [0, 0, tubeL + c * P.core]);
       for (let k = 1; k <= P.coils; k++) rb.torus(c * P.coilR, P.coilT, M.ring.radial, M.seg, TAU, S.trim, { z: (tubeL * k) / (P.coils + 1) });
-      rb.sphere(c * P.core, P.coreSeg[0], P.coreSeg[1], S.plasma, { z: tubeL + c * P.core * P.coreZ });
+      rb.sphere(c * P.core, P.coreSeg[0], P.coreSeg[1], S.plasma, { z: tubeL + c * P.core * P.coreZ, detail: wd(1) });
       ub.glow(lens).sphere(c * P.halo, P.haloSeg[0], P.haloSeg[1], u.plasma, { intensity: P.haloGlow })
         .point([0, 0, 0], c * P.core * P.pointShare, u.weaponGlow, {});
       fire.lenses.push(meta.lenses.length);
@@ -834,8 +901,8 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
     case 'lightning': {
       const Li = M.lightning;
       const rodL = length * Li.rodLen;
-      bb.box(c * Li.mantlet[0], c * Li.mantlet[1], c * Li.mantlet[2], S.hullDark, {});
-      rb.cylinder(c * Li.rodTop, c * Li.rodBottom, rodL, M.seg, S.frame, { rx: HALF_PI, z: rodL / 2 });
+      bb.box(c * Li.mantlet[0], c * Li.mantlet[1], c * Li.mantlet[2], S.hullDark, { detail: wd(1) });
+      rb.cylinder(c * Li.rodTop, c * Li.rodBottom, rodL, M.seg, S.frame, { rx: HALF_PI, z: rodL / 2, detail: wd(2) });
       rb.torus(c * Li.ringR, Li.prongR * Li.ringT, M.ring.radial, M.seg, TAU, S.neon, { z: length * Li.ringZ });
       const tips = [];
       const spread = c * Li.spread;
@@ -843,7 +910,7 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
         const a = (k / Li.prongs) * TAU + HALF_PI;
         const px = Math.cos(a) * spread;
         const py = Math.sin(a) * spread;
-        rb.cylinder(0, Li.prongR, Li.prongLen, Li.prongSeg, S.trim, { rx: HALF_PI, x: px, y: py, z: rodL + Li.prongLen / 2 });
+        rb.cylinder(0, Li.prongR, Li.prongLen, Li.prongSeg, S.trim, { rx: HALF_PI, x: px, y: py, z: rodL + Li.prongLen / 2, detail: wd(1) });
         tips.push([px, py, rodL + Li.prongLen * Li.tipAt]);
       }
       // arcs between the prong tips on their own bone (flicker = scale on / off around the recoil origin)
@@ -872,14 +939,15 @@ export function weapon(ub, kind, { parent = 'turret', position = [0, 0, 0], leng
     }
     default: {   // cannon
       const B = M.barrel;
-      unitBox(bb, kit, c * B.mantletW, c * B.mantletH, c * B.mantletD, S.hullDark, {});
-      rb.cylinder(c, c, length, M.seg, S.frame, { rx: HALF_PI, z: length / 2 });
-      rb.cylinder(c * B.fumeShare, c * B.fumeShare, length * B.fumeLen, M.seg, S.frame, { rx: HALF_PI, z: length * B.fumeZ, detail: 1 });
+      if (B.mantletRounded) unitBox(bb, kit, c * B.mantletW, c * B.mantletH, c * B.mantletD, S.hullDark, { detail: wd(1) });
+      else bb.box(c * B.mantletW, c * B.mantletH, c * B.mantletD, S.hullDark, { detail: wd(1) });   // B4 unit-lod: chamfer = +96 tri for a cradle half inside the turret
+      rb.cylinder(c, c, length, M.seg, S.frame, { rx: HALF_PI, z: length / 2, detail: wd(2) });
+      rb.cylinder(c * B.fumeShare, c * B.fumeShare, length * B.fumeLen, M.seg, S.frame, { rx: HALF_PI, z: length * B.fumeZ, detail: wd(1) });
       const bz = length - (length * B.brakeLen) / 2;
-      if (sil === 'angular') rb.box(c * B.brakeBox[0], c * B.brakeBox[1], length * B.brakeLen, S.hullDark, { z: bz });
-      else if (sil === 'round') rb.sphere(c * B.brakeShare, B.brakeSeg[0], B.brakeSeg[1], S.hull, { z: bz });
-      else if (sil === 'faceted') prism(rb, 4, c * B.brakePrism, c * B.brakePrism, length * B.brakeLen, S.hullDark, { z: bz });
-      else rb.cylinder(c * B.brakeShare, c * B.brakeShare, length * B.brakeLen, M.seg, S.hullDark, { rx: HALF_PI, z: bz });
+      if (sil === 'angular') rb.box(c * B.brakeBox[0], c * B.brakeBox[1], length * B.brakeLen, S.hullDark, { z: bz, detail: wd(1) });
+      else if (sil === 'round') rb.sphere(c * B.brakeShare, B.brakeSeg[0], B.brakeSeg[1], S.hull, { z: bz, detail: wd(1) });
+      else if (sil === 'faceted') prism(rb, 4, c * B.brakePrism, c * B.brakePrism, length * B.brakeLen, S.hullDark, { z: bz, detail: wd(1) });
+      else rb.cylinder(c * B.brakeShare, c * B.brakeShare, length * B.brakeLen, M.seg, S.hullDark, { rx: HALF_PI, z: bz, detail: wd(1) });
       recoilDist = length * B.recoil;
       flashSize = c * M.flash.size * B.flashScale;
       flashColor = null;
@@ -966,6 +1034,7 @@ export function fuselage(ub, { bone = 'hull', y = 0, L, W, H }) {
   const b = ub.paint(bone);
   const sil = kit.style.silhouette;
   const Fu = M.fuselage;
+  ub.vehicleLod = true;
   if (sil === 'angular') {
     const A = Fu.angular;
     b.taperedBox(W, W * A.topW, H, L * A.bodyL, S.hull, { y: y - H / 2, z: L * A.bodyZ }, L * A.topL);

@@ -138,7 +138,7 @@ function buildTorsoBase(ub, kit, ctx, D) {
   ub.bone(gltfNode(ctx, 'chest'), ctx.bone);
   const cb = ub.paint('chest');
   const keel = D.bodyKeel;
-  hullLoft(cb, kit, D.waist.map(([y, w, d, z]) => ({ y, w, d, z })), S.frame);
+  hullLoft(cb, kit, D.waist.map(([y, w, d, z]) => ({ y, w, d, z })), S.frame, {}, { points: SEG_SMALL });   // hidden frame: 6 points (B4 trim)
   hullLoft(cb, kit, D.body.map(([y, w, d, z]) => ({ y, w, d, z, keel })), S.hull);
   const A = D.arms;
   const side = stationAt(D.body, D.sideLine.y);
@@ -241,9 +241,9 @@ registerRobotPart('torso', 'flak', {
     const R = T.radar;
     const radar = ub.bone('flakRadar', yaw, R.at);
     const rb = ub.paint(radar);
-    rb.box(MAST_T, R.mastH, MAST_T, S.frame, { y: R.mastH / 2, detail: 0 });
-    rb.box(R.w, R.h, R.th, S.hullDark, { y: R.mastH + R.h / 2 });
-    ub.glow(radar).point([0, R.mastH + R.h / 2, R.th], R.th * 2, unitStyle(kit).weaponGlow, { intensity: GLOW_DIM });
+    // plate sits straight on the turret roof (no mast: B4 triangle trim, −12 tri)
+    rb.box(R.w, R.h, R.th, S.hullDark, { y: R.h / 2 });
+    ub.glow(radar).point([0, R.h / 2, R.th], R.th * 2, unitStyle(kit).weaponGlow, { intensity: GLOW_DIM });
     ctx.robot.extras.spin.push({ bone: radar, axis: 'y', speed: R.spin });
     out.rig.turret = { yaw, pitch, limits: T.limits, muzzles, shots: T.shots };
     return out;

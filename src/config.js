@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v28';
+export const GAME_VERSION = 'v29';
 // Game name (brand, shown in the main menu title; not translated)
 export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
@@ -126,8 +126,8 @@ export const MAP = {
     hillFrequency: [[0.03, 0.025], [0.011, 0.017]], // per unit, [x, z] of each layer
     flatRadius: 70,          // units – fully flat around starts / super node
     flatFalloff: 90,         // units – hills fade in over this distance beyond flatRadius
-    color: 0x6b7350,
-    colorHigh: 0x7d7a5a,     // tint of the hill tops
+    color: 0x5f6148,         // [A8-style] dead ground
+    colorHigh: 0x6e6c52,    // tint of the hill tops
     colorVariation: 0.5,     // 0 = single colour, 1 = full tint at the highest point
     symmetryGain: 1.5,       // symmetric maps average 4 rotated hill layers (lower peaks) – this restores the height
   },
@@ -252,6 +252,8 @@ export const SIM = {
   maxFrameTime: 0.25,       // s – longer frame gaps (tab in background) are cut to this before catching up
   defaultSeed: 0x5eed5eed,  // world.rng seed before a match picks one (tests, console experiments)
   spawnDelayTicks: 6,     // produced units appear this many ticks after the request (async model load window)
+  lockstepLoadRetries: 3,   // [A1-3] lockstep match: a failed spawn / part load is retried this often, then the match is held
+  lockstepLoadRetryMs: 2000, // [A1-3] real-time pause before each retry (only delays the waiting tick, never changes the result)
   interpolate: true,        // render moving objects between the last two ticks (smooth motion above tickRate fps)
   interpolationSnapDistance: 20, // units – a jump longer than this in one tick (teleport, crew exits) is not blended
   hashPositionScale: 100,   // world.stateHash rounds positions to 1/100 unit…
@@ -280,6 +282,34 @@ export const FORMATION = {
   kindGap: 14,              // units between the blocks of mechs / vehicles / crews (one behind the other)
   wedgeLateral: 0.75,       // wedge: sideways step per rank × spacing
   wedgeBack: 0.75,          // wedge: backward step per rank × spacing
+  // [A7b] P2 marching formation (src/game/Formation.js): one leader path, members hold offsets, column in narrows
+  minGroupSize: 2,          // own units a selection needs for the formation button / key / facing (1 unit = no formation at all)
+  marchOrders: ['move', 'attackMove'], // point orders that march as a group (patrol / guard-point keep the P1 shape only)
+  dragFacing: true,         // right-drag on the ground with a shaped group selected sets the front direction (instead of panning)
+  dragFacingMinDistance: 6, // units on the ground the drag must cover before it counts as a direction
+  regroupDistance: 60,      // units – a member farther than this from its spot plans its own path there
+  regroupExitShare: 0.5,    // …and walks in formation again once closer than regroupDistance × this (with a clear line)
+  slotTolerance: 6,         // units – a member this close to its spot counts as in place (gathering)
+  catchupGain: 0.8,         // 1/s – extra speed per unit of distance behind the spot (members catch up, wait when ahead)
+  lagTolerance: 15,         // units – members lagging less than this do not slow the leader
+  lagStop: 60,              // units – at this lag the leader walks at minLeaderFactor × group speed
+  minLeaderFactor: 0.2,     // the leader never stops completely for a lagging member (a stuck one must not hold the group)
+  turnRate: 0.8,            // rad/s – how fast the formation turns to a new path direction
+  finalAlignDistance: 40,   // units of leader path left from which the formation turns to its final front
+  finishDistance: 20,       // units – the leader ending its order this close to its spot ends the march (members walk to their spots)
+  minRemaining: 40,         // units – path length a marching member reports at least (no early arrival; > every arrive distance)
+  gatherTimeout: 5,         // s – at the start the leader waits at most this long for the members to take their spots
+  reformDelay: 1,           // s without a fighting member before the group forms again after a fight
+  reformTimeout: 5,         // s – after a fight the leader waits at most this long for the members
+  checkTicks: 6,            // simulation ticks between obstacle checks of a group (corridor width, spots, regroup)
+  lookahead: 60,            // units ahead of the leader up to which the corridor width is checked too (fold before the gap)
+  lookaheadSamples: 3,      // points checked on the way to lookahead (evenly spaced)
+  narrowLagSlowdown: false, // in a column the leader does not slow down for lagging members (they queue behind it anyway)
+  trailStep: 4,             // units between recorded leader positions (the column follows them)
+  trailPoints: 160,         // recorded leader positions kept (trailStep × this = longest column)
+  unfoldMargin: 10,         // units the leader walks in the open beyond the column length before the shape unfolds again
+  columnSpacingFactor: 1,   // column gap = the member's formation spacing × this
+  leaderRadiusShare: 0.75,  // leader candidates: path radius at least this share of the widest member's (then the front rank leads)
 };
 
 /** Building placement and deleting (Construction.js, Walls.js, buildCommands.js, CommandInput.js) */
@@ -333,7 +363,8 @@ export const NET = {
   historyTurns: 600,         // executed turns kept for desyncReport() (60 s at the defaults)
   maxMessageBytes: 4096,     // room limit for one message (UTF-8 bytes of its JSON)
   messageHeadroomBytes: 384, // room left in a message for the header (acks, ping, hashes) when packing turns
-  maxCommandBytes: 2048,     // (~300 unit ids in one command; must fit one message part: maxMessageBytes - headroom) a bigger local command is refused (never sent, never executed)
+  maxCommandBytes: 2048,     // (~300 unit ids in one command; must fit one message part: maxMessageBytes - headroom) a bigger local command is split by its `units` list (maxCommandChunks), else refused (never sent, never executed)
+  maxCommandChunks: 16,      // [A1-3] a too-big command is sent as at most this many chunks ({…, units: part, chunk: [i, n]}); CommandBus joins them back
   maxChunksPerSend: 4,       // a backlog of unacknowledged turns goes out in at most this many messages at once
   resendMs: 200,             // nothing sent for this long (stalled / waiting): resend the unacknowledged turns + acks
   maxTurnsAhead: 64,         // a received turn this far beyond the executed one is ignored (garbage / old match)
@@ -403,7 +434,7 @@ export const NET = {
       'stun:stun.cloudflare.com:3478',
     ],
     turnServers: [],             // optional TURN relays {urls, username, credential} for strict NAT (none yet)
-    topics: ['lobby', 'turn', 'hash', 'start', 'ready', 'chat'],// receivers registered as soon as a room is joined
+    topics: ['lobby', 'turn', 'hash', 'start', 'ready', 'chat', 'save', 'cont'], // [A2-net] save transfer + continue sync; receivers registered as soon as a room is joined
     relayCheckTimeoutMs: 5000,   // relayCheck.js: a relay not answering a subscription (EOSE) by then counts as dead
     relayCheckKind: 20078,       // relayCheck.js: ephemeral event kind in the test subscription (any valid kind works)
   },
@@ -516,7 +547,8 @@ export const AI = {
   // the HQ (cos > frontConeDot, farther than frontClearFrom) stays free for the army and the defences
   // E1: base buildings keep a crew passage (Construction #passageGap: nav cell + 2 × (crew radius + clearance));
   // passRadius = crew radius used before any own crew exists
-  placement: { minRadius: 30, step: 8, maxRadius: 220, angles: 24, gap: 7, frontConeDot: 0.5, frontClearFrom: 40, defenseSearchRadius: 40, passRadius: 5 },
+  // [A1-5] denseSpacing = units between spots along a ring once a building found no spot (more than `angles` per ring)
+  placement: { minRadius: 30, step: 8, maxRadius: 220, angles: 24, gap: 7, frontConeDot: 0.5, frontClearFrom: 40, defenseSearchRadius: 40, passRadius: 5, denseSpacing: 10 },
   // No spot found for a building: the next search reaches radiusGrowth farther (up to maxRadiusLimit, the front cone
   // is allowed from the 2nd failure), retries wait retryBase × 2^(failures-1) s (≤ retryMax); after giveUpAfter
   // failures the building id is not wanted any more for giveUpSeconds (reactive builds only; the log notes it once)
@@ -538,6 +570,10 @@ export const AI = {
   wallTries: 4,                   // …this many times before the item is skipped
   turretWaitSeconds: 150,         // turrets wait this long for their wall posts to be finished
   partStatsCacheSeconds: 30,      // part stats are re-read this often (research changes them)
+  // [A1-5] robots while energy is tight: a part with an energy cost that could not be ordered (resources / budget)
+  // makes new plans ore-only for energyTightSeconds; a plan needing energy, waiting longer than planStaleSeconds
+  // with energy tight, is dropped (X / Z: every ranged arm costs energy – the first plan blocked all parts)
+  mechEnergy: { energyTightSeconds: 30, planStaleSeconds: 45 },
   starvedSeconds: 20,             // a resource we lacked within this time counts as "short"
   scoutWaypointRadius: 40,        // a scout waypoint is done when explored or this close
   superNodeSafeRadius: 120,       // harvesting at the super node needs no known enemy army within this radius
@@ -581,6 +617,17 @@ export const AI = {
   boardStuck: { seconds: 20, progress: 4, avoidSeconds: 120, noteEvery: 10, mechFails: 2, keepSpots: 10, spotRadius: 25, crewSpotRadius: 45 },
 };
 // --- [AI] end ---
+// --- [A2-ai] AI taking over a game in progress (src/ai/Resume.js, docs/notes/a2-ai.md) ---
+export const AI_RESUME = {
+  // Defence plan items that already stand are skipped: a tower within placement.defenseSearchRadius of its planned
+  // point, a straight wall with a post within half its length + slack of its centre, an edge wall with a post within
+  // wallShiftStep × ceil(wallTries / 2) + slack of the point edgeProbePosts posts out along it
+  defense: { slack: 20, edgeProbePosts: 2 },
+  // Army units farther than baseRadius × awayRadiusFactor from the base on an attack order = the previous owner's wave
+  // (adopted when at least difficulty.attack.minWave); units on releaseOrders (orders the AI never gives) go home
+  military: { awayRadiusFactor: 2, releaseOrders: ['patrol', 'guard'] },
+};
+// --- [A2-ai] end ---
 // --- [LOADOUT] starting robot loadouts (src/game/StartLoadouts.js) ---
 // Per slot a list of part sets in order of preference: the first one the faction may produce (canProduce) and has a
 // model of wins, so one template gives every faction its own robot. Frame / Alien are never picked.
@@ -837,6 +884,7 @@ export const KEYBINDINGS = {
   behaviourPassive: ['KeyL'],    // mechs and crews
   repair: ['KeyO'],              // start field repair / stop it while repairing
   rotateBuilding: ['KeyT'],      // while placing a building: turn it by PLACEMENT.rotateStep (Shift = the other way)
+  launchSuperweapon: [],         // [A9-F4a] own superweapon: start targeting (empty = panel button only)
   idleCrew: [],                  // select the next idle crew + centre the camera (no default key – set in Settings → Controls)
   idleBuilder: [],               // same for idle builder vehicles
   idleDrill: [],                 // same for idle drill trucks (harvest ability, no order)
@@ -1196,7 +1244,7 @@ export const SETTINGS_DEFAULTS = {
   nickname: '',                   // empty = UI shows the translated "Player"
   keybindings: {},                // action -> list of KeyboardEvent.code, only the remapped ones
   mouse: { rotateSensitivity: 1, zoomSensitivity: 1, panSensitivity: 1, invertRotate: false, invertZoom: false, invertPan: false },
-  audio: { master: 0.8, effects: 1, music: 0.6 },
+  audio: { master: 0.8, effects: 1, music: 0.6, ui: 0.8 }, // [A6] ui = UI clicks + announcement jingles
   // quality: 'full' | 'reduced' | 'custom' (always derived from `advanced`, see GRAPHICS); advanced: the individual options
   graphics: { quality: 'full', advanced: { ...GRAPHICS_FULL } },
   ui: { alwaysShowHealthBars: false, alwaysShowBuildProgress: false, edgeScroll: true, autoAssist: true }, // autoAssist → setAutoAssist command at match start; copied to world.settings.ui by main.js; edgeScroll is read live
@@ -1272,30 +1320,73 @@ export const HIGHLIGHT = {
   intensity: 0.15, // 0 = none, 1 = full emissive colour
 };
 
-/** Sound hook (src/audio/Sound.js). eventName -> file (relative to sounds/); empty = silent. */
+/**
+ * [A6] Sound engine (src/audio/Sound.js + Synth.js, docs/notes/a6-audio-engine.md). Sounds are synthesized with WebAudio
+ * from data/sounds.json (event table, synth patches, weapon -> event map); any event can be switched to a file there.
+ * Audio only: nothing here may influence the simulation.
+ */
 export const AUDIO = {
-  basePath: 'sounds/',
-  maxDistance: 250,        // units – sounds farther from the camera are silent (positional events)
-  falloffExponent: 1.5,
-  // Sound event of each kind of shot (Combat.js): keys of `events`
-  shotEvents: { melee: 'meleeHit', energy: 'shotLaser', projectile: 'shotCannon', hitscan: 'shotRifle' },
-  // eventName -> file. Empty = no sound, nothing is loaded (no sound files exist yet).
-  // Planned files: ui/click.ogg, weapons/rifle.ogg, weapons/cannon.ogg, weapons/laser.ogg, fx/explosion.ogg,
-  // weapons/melee.ogg, fx/arm_drop.ogg, fx/mech_destroyed.ogg, ui/order.ogg, fx/crew_board.ogg
-  events: {
-    uiClick: '',
-    shotRifle: '',
-    shotCannon: '',
-    shotLaser: '',
-    explosion: '',
-    meleeHit: '',
-    armDropped: '',
-    mechDestroyed: '',
-    orderAck: '',
-    crewBoard: '',
+  dataUrl: './data/sounds.json', // event table + patches + weapon map
+  basePath: 'sounds/',           // file events / music: paths are relative to this
+  maxDistance: 250,              // units – positional sounds farther from the listener are skipped (no nodes created)
+  falloffExponent: 1.5,          // gain = (1 - d / maxDistance) ^ exponent
+  panWidth: 0.6,                 // stereo pan at max distance straight to the side (0 = no panning)
+  panMin: 0.03,                  // |pan| below this creates no StereoPanner node
+  // weaponSoundEvent() fallback for weapons missing from data/sounds.json → weapons (events by weapon data)
+  weaponFallback: {
+    melee: 'meleeHit', area: 'shotPulse', artillery: 'shotArtillery', flame: 'shotFlame', energyProjectile: 'shotPlasma',
+    energy: 'shotLaser', rocket: 'shotRocket', projectile: 'shotCannon', gatling: 'shotGatling', hitscan: 'shotRifle',
   },
-  categories: { uiClick: 'effects', orderAck: 'effects' }, // everything not listed here is 'effects'; music goes through playMusic
-  musicTracks: { menu: '', game: '' }, // empty = no music (planned: music/menu.ogg, music/game.ogg)
+  rocketShapes: ['missile', 'rocket'],  // projectileShape values that sound like a rocket
+  flameEffects: ['burn'],               // weapon effect types that sound like fire
+  flameIdPart: 'flame',                 // weapon ids containing this sound like fire
+  gatlingMinBurst: 6,                   // hitscan weapons with burst >= this (or any spread) sound like a gatling
+  // Mix / limits (audio time = AudioContext.currentTime, never simulation time)
+  maxVoices: 24,                 // simultaneous event sounds; when full the quietest × lowest priority voice is stolen
+  defaultMaxPerEvent: 4,         // per event, unless the event sets maxPerEvent
+  defaultMinIntervalMs: 40,      // repeats of one event inside this window merge into the running voice
+  mergeGainBoost: 1.12,          // merged repeat: gain × this on the running voice …
+  mergeMaxBoost: 1.6,            // … up to this total
+  minAudibleGain: 0.005,         // effective gain below this = skipped
+  stealFadeSec: 0.025,           // fade-out of a stolen voice
+  envFloor: 0.0001,              // exponential ramps cannot reach 0: they go to this
+  stopTailSec: 0.03,             // sources stop this long after their envelope ends
+  defaultPitchVar: 0.04,         // per-play random pitch variation (±fraction) when the patch does not set pitchVar
+  defaultGainVar: 0.08,          // per-play random gain variation (±fraction)
+  maxLayers: 3,                  // layers per patch (more are ignored)
+  defaultCategory: 'effects',    // event without category
+  // Noise buffers (generated once per AudioContext)
+  noiseSeconds: 1,
+  crunchHoldSamples: 6,          // 'crunch' noise = sample & hold every N samples (8-bit style)
+  pulseHarmonics: 48,            // harmonics of the pulse25 / pulse12 PeriodicWaves
+  // Master limiter (keeps a big battle from clipping)
+  compressor: { threshold: -14, knee: 8, ratio: 6, attack: 0.003, release: 0.2 },
+  musicTracks: { menu: '', game: '' }, // track -> file under basePath; empty = no music (planned: music/menu.ogg, music/game.ogg)
+};
+
+/**
+ * [A6] Where game / UI events trigger Sound.play (src/audio/GameSounds.js, UiSounds.js, Effects.js, EconomyAlerts.js,
+ * BuildMenu.js). Everything here is presentation only – never read by the simulation.
+ */
+export const SOUND_HOOKS = {
+  // GameSounds: local-team announcements found by polling the world (read only)
+  pollIntervalSec: 0.25,       // real seconds between two looks at the world (construction finished, HP lost)
+  attackCooldownSec: 25,       // real seconds between two "base under attack" announcements
+  attackMinHpLoss: 1,          // HP a local unit / building must lose between two polls to count as attacked
+  silentTickGap: 15,           // more sim ticks than this between two polls (hidden tab, fast-forward): changes are taken silently
+  productionEvents: {          // Production item kind -> announcement of the local team (kinds not listed: silent)
+    vehicle: 'unitReady', crew: 'unitReady', mech: 'unitReady', research: 'researchComplete', analysis: 'researchComplete',
+  },
+  // Effects.burst: sound of an explosion without an explicit `sound` option, by its size multiplier
+  burstLargeSize: 1.5,         // size >= this = explosionLarge, smaller = explosionSmall
+  // UiSounds: delegated document listeners
+  clickSelector: 'button, .menu-btn, [role="button"]',
+  ignoreSelector: ':disabled, .empty, [aria-disabled="true"]',
+  hoverThrottleMs: 90,         // at most one hover sound per this many ms
+  lowPowerCooldownMs: 20000,   // EconomyAlerts: shortest gap between two lowPower sounds (energy flickering around the limit)
+  // Refusal notices (BuildMenu.notify): sound of a refusal, and of a refusal for missing resources
+  refusalSound: 'uiError',
+  fundsSound: 'lowFunds',
 };
 
 /**
@@ -1405,7 +1496,7 @@ export const HUD = {
 export const HUD_V2 = {
   baseWidth: 1920,           // reference resolution of the artwork
   baseHeight: 1080,
-  scaleMin: 0.8,             // --hud-scale = clamp(min(W / baseWidth, H / baseHeight), scaleMin, scaleMax)
+  scaleMin: 0.8,             // DEPRECATED, unused since A5 (Hud.js uses UI_SCALE.scaleMin); --hud-scale = clamp(min(W / baseWidth, H / baseHeight), scaleMin, scaleMax)
   scaleMax: 1.25,
   // Margin of the frame artwork per side up to its SOLID metal edge (base px, alpha > 200 measured in the hud2 frame pieces:
   // left tl 13 / sl 13 / bl 14 / deco 13, right tr 13 / sr 13 / br 13, top tl 11 / ta 12 / tc 11 / tb 12 / tr 11, bottom
@@ -1624,6 +1715,57 @@ export const RESEARCH = {
   iconLetters: 3,             // letters of a research name shown as its grid icon
 };
 
+// [A9-research] Research tiers 2–4, Data network and the match option "superweapons" (src/game/Research.js,
+// src/data/Stats.js canProduce, docs/notes/a9-f1-research.md); balance is in stats.json → research, rules.research
+export const RESEARCH_A9 = {
+  networkCheckInterval: 0.5,   // s of sim time between checks of Data network nodes (node building built / destroyed)
+  networkEffect: 'dataNetwork', // research effect type that makes a team a Data network member ({ nodeStructures })
+  sharedEffectTypes: ['modify', 'rule'], // effects of common research an allied node gets (no unlocks, no tiers)
+  // canProduce also checks stats requiresTier for these exclusive groups (structures keep the buildCommands /
+  // BuildMenu check, which shows the tier reason instead of hiding the building)
+  tierCheckedGroups: ['vehicles', 'partSets'],
+  superweaponFlags: ['superweapon', 'superweaponProgram'], // stats fields of items hidden while superweapons are off
+  programFlag: 'superweaponProgram', // research field: superweapon program (tier rule requiresCompletedFlag, not shared, not a start research)
+  superweaponsSetting: 'superweapons', // world.settings key of the lobby option (missing = on)
+};
+
+// [A9-superweapons] Superweapons: charge, launch command, warning, impact (src/game/Superweapons.js,
+// src/game/commands/superweaponCommands.js, docs/notes/a9-f3-superweapons.md); balance is in stats.json →
+// structures[id].superweapon and rules.superweapons
+export const SUPERWEAPON = {
+  commandType: 'launchSuperweapon',
+  options: [true, false],    // values of the lobby / new-game combobox (world.settings[RESEARCH_A9.superweaponsSetting])
+  defaultEnabled: true,
+  seedEidFactor: 31,         // FX seed = building eid × this + launch tick (docs/notes/b3-common.md)
+  launchHeightFactor: 1,     // FX start point of the shot: building origin + bodyHeight × this
+  lethalDamage: 1e9,         // damage that kills a crew squad whatever its armour (neutron bomb)
+};
+
+// [A9-buildings] Enhancer auras, target designation, building self-repair, cloak / detection, vehicle wreck analysis
+// (src/game/Auras.js, src/game/Stealth.js, Research.js, docs/notes/a9-f2-buildings.md); balance is in stats.json →
+// structures[*].aura, rules.auras, rules.stealth, rules.repair.structureSelfRepair
+export const AURAS = {
+  recomputeTicks: 15,          // sim ticks between aura / designation recomputes (15 at 30 Hz = 0.5 s)
+  ruleRefreshTicks: 60,        // sim ticks between re-reads of team research rules (self-repair, cloak while moving)
+  maxTeams: 31,                // team bit masks (designation / detection) use 1 << allianceLeader(team)
+  // building fields whose finished buildings draw their energyUse all the time (Economy.update, like towers)
+  passiveConsumerFields: ['aura', 'archeology'],
+  // aura types that apply only to buildings / only to units (others: both)
+  structureOnlyTypes: ['construction'],
+  unitOnlyTypes: ['sightRange'],
+};
+export const STEALTH = {
+  updateTicks: 3,              // sim ticks between cloak / detection updates (also on every shot: Stealth.noteFired)
+  moveEpsilon: 0.5,            // units/s – a unit faster than this counts as moving (cloaks without whileMoving drop)
+  abilityType: 'cloak',        // ability that cloaks ({ whileMoving, duration, cooldown, breaksOnAttack })
+  detectionType: 'detection',  // ability that reveals cloaked enemies ({ radius })
+  designationStat: 'designationRange', // unit stat that also detects (target designation, e.g. targetingVehicle)
+};
+export const ARCHEOLOGY = {
+  vehicleLootPrefix: 'salvageVehicle:', // loot key prefix of an analysed vehicle wreck (part loot keys stay 'salvage<set:kind>')
+  vehicleLootKind: 'vehicle',           // loot.kind of a vehicle wreck (part loot: 'legs' | 'torso' | 'arm')
+};
+
 /** Vehicles (src/units/Vehicle.js) – visuals and collisions; stats are in stats.json → vehicles */
 export const VEHICLE = {
   modelScale: 1.5,           // vehicle models are small next to the mechs
@@ -1717,6 +1859,7 @@ export const WALL_DRAG = {
 export const GATE = {
   minLengthFactor: 0.6,      // a segment shorter than WALL.postSpacing × this is no "full" one (cut segments – trim – never are)
   maxBatch: 64,              // segments per upgradeGate command at most
+  openCheckTicks: 3,         // [A1] the open state (visual only) of a gate is re-evaluated every N ticks (phase = eid)
 };
 // --- [H1] end ---
 
@@ -1947,20 +2090,29 @@ SETTINGS_DEFAULTS.ui.preferCombatOnDrag = SELECTION.preferCombatDefault; // Prof
  * Map registry (src/game/Map.js GameMap.load resolves ids). `file` = data/maps/<file>.json. Old ids keep working
  * through `aliases`. ASCII maps (a "rows" array in the file) are turned into map data by src/game/AsciiMap.js.
  */
+/** Modes a map can be offered in (MAPS.list[].modes); MAP_MODE_ANY is only a validation argument = no mode filter */
+export const MAP_MODES = { campaign: 'campaign', skirmish: 'skirmish', multiplayer: 'multiplayer' };
+export const MAP_MODE_ANY = 'any';
 export const MAPS = {
+  // list item: { id, file (data/maps/<file>.json, a sub-folder is allowed: 'campaign/c_m01'), modes? (MAP_MODES values, default defaultModes) }
   list: [
     { id: 'gen_01AI', file: 'basic' },
     // Naming: Map<players>_<creation order among maps with that player count>; list sorted by players, then order
     { id: 'Map2_01', file: 'map2_01' },
+    { id: 'Map2_02', file: 'map2_02', modes: [MAP_MODES.skirmish, MAP_MODES.multiplayer] }, // Calorian basin (Mercury, from mission M1; docs/maps)
     { id: 'Map4_01', file: 'map4_01' },
     { id: 'Map4_02', file: 'map4_02' },   // same layout as Map4_01 on Mercury
     { id: 'Map6_01', file: 'map6_01' },   // destroyed city (Venus)
     { id: 'Map6_02', file: 'map6_02' },   // ruined wasteland (Mars)
     { id: 'Map8_01', file: 'map8_01' },   // city (Earth)
+    // Campaign HELIOVRT (generated by tools/gen-maps.ps1 from docs/maps/blueprints; never offered in menus / lobby)
+    { id: 'C_M01', file: 'campaign/c_m01', modes: [MAP_MODES.campaign] },
+    { id: 'C_M04', file: 'campaign/c_m04', modes: [MAP_MODES.campaign] },
   ],
   // Old ids (saved profiles, lobby settings) keep working
   aliases: { basic: 'gen_01AI', Map02: 'Map2_01', Map03: 'Map4_01', Map04: 'Map6_01', Map05: 'Map8_01', Map06: 'Map6_02' },
   defaultMap: 'gen_01AI',
+  defaultModes: [MAP_MODES.skirmish, MAP_MODES.multiplayer], // maps without "modes" (must contain the default map's modes)
   // Per-map ore richness (map file key "oreMultiplier"): scales the starting amount of every deposit of the map
   // (incl. the super node); multiplies with the lobby ORE_MULTIPLIER. 1 = unchanged, <1 poorer, >1 richer map
   oreMultiplier: { default: 1, min: 0.25, max: 4 },
@@ -1968,11 +2120,11 @@ export const MAPS = {
     cellSize: 7,               // units per character (current map 900 units ≈ 130 characters)
     chars: { wall: '#', grass: '?', concrete: '.', start: 'S', field: 'o', fieldCore: '+', rift: '-' },
     padChar: '#',              // short rows / non-square grids are padded with this
-    wallHeight: 18,            // units – height of '#' blocks
-    wallHeightJitter: 0.25,    // ± share of wallHeight per block (fixed per map, visual only)
+    wallHeight: 12.3,          // units – height of '#' blocks ([A8] 1.5 × mech height, PROC_MAP_FX; simulation: LOS / wall stops)
+    wallHeightJitter: 0.12,    // ± share of wallHeight per block (fixed per map; stays above LOS.minHeight)
     riftDepth: 6,              // units the terrain sinks under '-' cells (visual; ground units cannot enter)
     // Ground tint per cell type, mixed into the terrain colour by tintStrength
-    colors: { grass: 0x5f6e44, concrete: 0x8b8a83, field: 0x6f6447, fieldCore: 0x7d613c, rift: 0x1d1b19, wall: 0x4f4a42 },
+    colors: { grass: 0x5a5c48, concrete: 0x757672, field: 0x5c5440, fieldCore: 0x66523a, rift: 0x1a1918, wall: 0x2f302f }, // [A8-style] dead, desaturated
     tintStrength: 0.75,
     terrain: { hillAmplitude: [2, 3], flatRadius: 80, flatFalloff: 60 }, // gentler hills than MAP.terrain
     // Starts are pushed away from walls until no '#' cell is within startClearance (room for the base behind the
@@ -2020,35 +2172,124 @@ export const MAPS = {
 export const MAP_PLANET_I18N_PREFIX = 'planet.';
 export const MAP_PLANETS = {
   earth: {
-    colors: { grass: 0x5d7a3e, concrete: 0x8d8e8c, field: 0x6f6447, fieldCore: 0x7d613c, rift: 0x1d1b19, wall: 0x56585a },
+    colors: { grass: 0x5f6150, concrete: 0x7a7b79, field: 0x5f5842, fieldCore: 0x6b563a, rift: 0x1a1918, wall: 0x2e3032 }, // [A8-style] dead, built-up
     ridge: 0x6b6d70,
     sky: { color: 0x9fb8c9, fogNear: 700, fogFar: 2200 },
     sun: { color: 0xfff4e0, intensity: 2.2 },
     hemi: { sky: 0xdde8ff, ground: 0x3a3326, intensity: 0.9 },
   },
   mars: {
-    colors: { grass: 0xa8552f, concrete: 0xb67a52, field: 0x7a4a33, fieldCore: 0x8a4a2b, rift: 0x2a1410, wall: 0x6b3426 },
+    colors: { grass: 0x8c5a3e, concrete: 0x926c52, field: 0x6a4a3a, fieldCore: 0x784a30, rift: 0x241410, wall: 0x3a2a26 }, // [A8-style]
     ridge: 0x7d3b28,
     sky: { color: 0xc98b66, fogNear: 450, fogFar: 1500 },
     sun: { color: 0xffc99a, intensity: 2.0 },
     hemi: { sky: 0xf0b890, ground: 0x4a2a1e, intensity: 0.85 },
   },
   venus: {
-    colors: { grass: 0x8d9a35, concrete: 0xa89d55, field: 0x7c6a2e, fieldCore: 0x8f6f26, rift: 0x2a2610, wall: 0x6b6228 },
+    colors: { grass: 0x76744a, concrete: 0x8a8456, field: 0x6b6040, fieldCore: 0x7a6330, rift: 0x24220f, wall: 0x3a3820 }, // [A8-style]
     ridge: 0x7a7030,
     sky: { color: 0xb9ae52, fogNear: 180, fogFar: 950 },
     sun: { color: 0xf2e08a, intensity: 1.3 },
     hemi: { sky: 0xd8cf7a, ground: 0x4a4420, intensity: 0.8 },
   },
   mercury: {
-    colors: { grass: 0x7b7a78, concrete: 0xa09e9a, field: 0x6a625a, fieldCore: 0x7a6a56, rift: 0x151515, wall: 0x4a4947 },
+    colors: { grass: 0x6a6968, concrete: 0x8a8885, field: 0x5e564f, fieldCore: 0x6c5e4c, rift: 0x121212, wall: 0x3a3938 }, // [A8-style]
     ridge: 0x5c5b59,
     sky: { color: 0x050506, fogNear: null, fogFar: null }, // black sky, no fog
     sun: { color: 0xffffff, intensity: 3.2 },
     hemi: { sky: 0xb8b8c0, ground: 0x2a2826, intensity: 0.35 },
   },
+  // New planets (campaign maps): all values are estimates, to be tuned by eye
+  moon: { // grey regolith, black sky without fog, cold hard light
+    colors: { grass: 0x6e6e70, concrete: 0x8c8c8e, field: 0x5f5b58, fieldCore: 0x6c635a, rift: 0x0e0e10, wall: 0x38383b },
+    ridge: 0x58585b,
+    sky: { color: 0x020203, fogNear: null, fogFar: null },
+    sun: { color: 0xe8f0ff, intensity: 3.0 },
+    hemi: { sky: 0xa8b0c0, ground: 0x242426, intensity: 0.3 },
+  },
+  asteroid: { // black rock, black space; a rift is starry darkness
+    colors: { grass: 0x3c3a3a, concrete: 0x55524f, field: 0x4a4038, fieldCore: 0x5a4a38, rift: 0x000000, wall: 0x1e1d1d },
+    ridge: 0x2e2c2c,
+    sky: { color: 0x000000, fogNear: null, fogFar: null },
+    sun: { color: 0xfff0dc, intensity: 2.6 },
+    hemi: { sky: 0x8890a0, ground: 0x181616, intensity: 0.28 },
+  },
+  interior: { // bunker: dark background, short dark fog, artificial warm light, concrete walls
+    colors: { grass: 0x4a4944, concrete: 0x6a6964, field: 0x57503f, fieldCore: 0x64543a, rift: 0x0c0c0b, wall: 0x2a2a28 },
+    ridge: 0x5e5d58,
+    sky: { color: 0x0b0a09, fogNear: 250, fogFar: 900 },
+    sun: { color: 0xffd9a0, intensity: 1.4 },
+    hemi: { sky: 0xe0c090, ground: 0x2a2620, intensity: 0.7 },
+  },
+  station: { // like interior, colder and metallic
+    colors: { grass: 0x4b4f55, concrete: 0x6b7077, field: 0x55524a, fieldCore: 0x625640, rift: 0x080a0c, wall: 0x25292e },
+    ridge: 0x6f767f,
+    sky: { color: 0x07090c, fogNear: 300, fogFar: 1000 },
+    sun: { color: 0xd8e6ff, intensity: 1.5 },
+    hemi: { sky: 0xb8d0f0, ground: 0x22262c, intensity: 0.7 },
+  },
 };
 // --- [MAPS] end ---
+
+// --- [A8-terrain] terrain type layer of a map (docs/blocks/A8.md; speed / path cost: [A14-terrain] below) ---
+// Map file key "terrainTypes": { cellSize, cols, rows: string[] } – one RLE string per grid row (row 0 = −Z, column 0 = −X),
+// "<count><code>" pairs (count omitted = 1), e.g. "40s12d3l"; the grid is the navigation grid (ASCII maps: the padded
+// character grid). Maps without the key (or with a wrong size) are all `solid`. Index = position in `types`.
+// Map file key "lavaCracks": [{ points: [[col, row], …], width }] – flat lava fissures (grid cells, floats; visual only).
+export const MAP_TERRAIN = {
+  types: ['solid', 'dust', 'rubble', 'mud', 'ice', 'lavaEdge'],
+  codes: { solid: 's', dust: 'd', rubble: 'r', mud: 'm', ice: 'i', lavaEdge: 'l' },
+  defaultType: 'solid',
+  // tint of each type on the terrain / minimap (mixed into the planet ground colour; solid = no extra tint)
+  colors: { solid: null, dust: 0xb08a5a, rubble: 0x5a5550, mud: 0x3d3326, ice: 0xb8d4e0, lavaEdge: 0x7a2a12 },
+  tintStrength: 0.45,
+};
+// --- [A8-terrain] end ---
+
+// --- [A14-terrain] terrain difficulty: speed factor per terrain type and chassis class, weighted A* (docs/notes/a14-terrain-sim.md) ---
+// Numbers live in stats.json rules.terrain.speed[type][class] (missing = 1, 0 = impassable); the type list is MAP_TERRAIN.types.
+export const TERRAIN_COST = {
+  weightedPath: true,      // false = A* with uniform cost (as before A14; read when findPath runs); speed factors still apply
+  classes: ['legs', 'wheels', 'tracks', 'hover', 'air'], // chassis classes (index = column of the factor table)
+  weightedClasses: ['legs', 'wheels', 'tracks', 'hover'], // classes with a cost grid (air flies straight, never weighted)
+  movementClasses: ['hover', 'air'], // mobility.movementType values that are a class of their own
+  legsClass: 'legs',       // mechs and crews (stats with loadCapacity / squadSize)
+  defaultChassis: 'tracks', // ground vehicle without mobility.chassis
+  unweightedClass: 'air',  // factor always 1 whatever the data says
+  escapeFactor: 0.25,      // speed factor on an impassable cell (0 in data) – the unit drives out instead of sticking there
+  sampleStep: 0.5,         // cells – step of the terrain cost samples along a segment (line of sight shortcuts)
+  shortcutTolerance: 0.02, // share – a straight shortcut may cost this much more than the planned path (sampling noise)
+  shortcutSlack: 1,        // cells (× the cheapest cell cost) added to that limit when smoothing: the unit / goal is not
+                           // at a cell centre, the A* costs are measured between centres
+};
+// --- [A14-terrain] end ---
+
+// --- [A14-ui] terrain label at the cursor (src/ui/TerrainLabel.js, docs/notes/a14-terrain-ui.md) ---
+export const TERRAIN_UI = {
+  offsetX: 16,            // px from the cursor (right)
+  offsetY: 36,            // px from the cursor (down; below the wreck tooltip offset)
+  pickInterval: 0.1,      // s between ground raycasts (camera moves under a still cursor)
+  maxClasses: 3,          // classes listed in one label
+  hideTypes: ['solid'],   // types shown only when a unit is selected
+  decimals: 2,            // max decimals of the multiplier
+};
+// --- [A14-ui] end ---
+
+// --- [A8-style] near-future map look: stone walls, lava cracks, terrain type tint (src/game/Map.js, docs/notes/a8-map-visual.md) ---
+export const MAP_STYLE = {
+  wallChunk: 360,        // units – walls / rocks are merged into one mesh per square chunk of this size (draw calls + culling)
+  wallSeed: 101,         // seed offset of the uneven wall tops (+ obstacle index)
+  wallSink: 0.5,         // units the wall base is buried below the lowest terrain point of its footprint
+  rockWidthFactor: 1.8,  // rock block width = radius × factor (blocks of stone instead of icosahedrons)
+  lavaStep: 4,           // units – cracks are resampled to this step so the flat ribbon follows the terrain
+  lavaLift: 0.45,        // units above the terrain (lava ribbon)
+  rimLift: 0.6,          // units above the terrain (glow rim, above the lava)
+  rimWidthFactor: 2.2,   // rim ribbon width = crack width × factor
+  lavaRenderOrder: 1,
+  rimRenderOrder: 2,
+  minimapLava: { color: 'rgba(255, 110, 30, 0.9)', minWidth: 1 }, // px – crack lines on the minimap / preview
+};
+// --- [A8-style] end ---
 
 // --- [SHIFT_BATCH] Shift + click on a production button queues several pieces (BuildMenu / RobotProduction) ---
 export const SHIFT_BATCH = {
@@ -2146,7 +2387,7 @@ export const AIR = {
 // --- [N7-los] line of sight over tall map obstacles + wall snapping to them (Combat.hasLineOfSight, Walls.planLine) ---
 export const LOS = {
   enabled: true,
-  minHeight: 10,          // units – map obstacles at least this tall block shots and stop wall lines (ASCII walls ≈ 13–22)
+  minHeight: 10,          // units – map obstacles at least this tall block shots and stop wall lines (ASCII walls ≈ 10.8–13.8)
   clearance: 0.5,         // units – a shot passing this much above the top edge is not blocked
   wallGap: 0.5,           // units – gap left between a wall line's last post and the obstacle it stops at
 };
@@ -2189,16 +2430,137 @@ export const PROC_STATE = {
   powerSteps: 8,             // quantisation of the power fade (emissive of the static body)
   offGlow: 0.08,             // emissive scale of the static body (windows, neon) when unpowered (glow layers go to 0)
   fadeSeconds: 0.6,          // power fade duration (full → off and back)
+  gateUnpoweredSpeed: 0.15,  // wall gate leaf speed without power, × WALL_ANIM.gateSpeed (slow manual opening; visual only)
 };
 
 // --- [proc-robot] procedural combat robots (src/units/ProcMechVisual.js, docs/notes/proc-robot-wire.md) ---
 // Display only: the GLB parts stay the (hidden) simulation body, so on / off never changes the simulation.
 // A robot is drawn procedurally when its owner's race is listed and every mounted part has a registered
 // stats.json procModel; otherwise the GLB parts are drawn. window.steelMen.procedural = false turns it off too.
+// --- [W-skin] hand-made GLB robot parts drawn over the stand-in simulation body (src/units/GlbSkinVisual.js,
+// docs/notes/w-glb-skin.md). Display only; win over PROC_ROBOTS when every mounted part of the robot has a skin.
+// Skin meshes follow the stand-in rig node with the same `_partNN` suffix. shift = skin part's socket minus the stand-in
+// socket (part space, model units; from the designer's Assembly_*.glb), offset = whole skin in mech space (feet on ground).
+export const GLB_SKINS = {
+  enabled: true,
+  teamColorTag: 'team-palette',  // glTF material extras.runtimeColor that takes the owner's colour
+  races: {
+    W: {
+      offset: [0, -0.87, 0],     // skin soles 0.87 above the stand-in's (measured in game)
+      sets: {
+        Basic: {
+          legs:     { path: 'RobotPartsMercuryDraft/BasicLegsW_Skel.glb',      shift: [0, 0, 0] },
+          torso:    { path: 'RobotPartsMercuryDraft/BasicTorsoW_Skel.glb',     shift: [-0.1, -0.2, -0.3] },
+          leftArm:  { path: 'RobotPartsMercuryDraft/BasicArmW_Left_Skel.glb',  shift: [1.1, -0.1, 1.6] },
+          rightArm: { path: 'RobotPartsMercuryDraft/BasicArmW_Right_Skel.glb', shift: [-1.0, -0.1, 1.6] },
+        },
+      },
+    },
+  },
+};
+
+// --- [W-skin-tex] procedural textures of the GLB skins (src/units/GlbSkinTexture.js, docs/notes/w-skin-texture.md) ---
+// Display only. Canvas textures generated once, shared by every robot; UVs generated once per shared geometry by a
+// per-triangle box projection in part space. kinds = glTF material name -> texture kind. Values of the kinds are linear
+// multipliers (map × material colour), absolute roughness / metalness (the material's own factors are replaced).
+export const GLB_SKIN_TEXTURE = {
+  enabled: true,
+  seed: 0x3e5c,              // deterministic pattern generator (no Math.random)
+  tileSize: 14,              // model units covered by one texture tile (robot ≈ 32 units tall)
+  anisotropy: 4,
+  normalScale: 0.9,          // material.normalScale of textured skin materials
+  kinds: {
+    W_Graphite_Titanium: 'graphite',
+    W_Brushed_Titanium: 'brushed',
+    W_TeamColour_Accent: 'team',
+    W_Photon_Emissive: 'photon',
+  },
+  // tile layout (shared by all kinds, in tile units 0..1)
+  layout: {
+    diamondsPerTile: 4,      // rhombus panels across one tile
+    seamKeep: 0.78,          // share of rhombus edges drawn as seams (the rest merge panels)
+    insetChance: 0.35,       // panel gets a raised inner rhombus plate
+    insetScale: 0.56,
+    glowDotChance: 0.22,     // panel gets a glowing rhombus point (graphite emissive)
+    glowDotSize: 0.011,
+    traces: 22,              // engraved circuit traces (logo rays: straight runs, 45° bends, ring pad at the end)
+    traceSegments: [2, 4],
+    traceLength: [0.035, 0.13],
+    traceBundle: [1, 3],     // parallel lines per trace
+    traceSpacing: 0.0085,
+    traceGlowChance: 0.3,    // trace also lit in the emissive map (graphite)
+    padRadius: 0.006,
+    brushLines: 900,         // brushed titanium streaks per tile
+  },
+  // line widths in tile units
+  seamWidth: 0.0045,
+  traceWidth: 0.0026,
+  glowWidth: 0.0018,
+  height: { base: 0.5, seam: 0.12, trace: 0.36, inset: 0.64, pad: 0.4 },
+  normalStrength: 2.2,       // height gradient → normal slope
+  kindsSetup: {
+    graphite: {
+      size: 1024, seams: true, insets: true, traces: 1, brush: 0,
+      color: 0.92, toneVar: 0.09, seamColor: 0.32, traceColor: 0.72, insetColor: 1.0,
+      roughness: 0.26, roughVar: 0.05, seamRough: 0.6, traceRough: 0.42, metalness: 0.88, seamMetal: 0.5,
+      emissive: { color: '#ff6a12', intensity: 1.6, traces: true, dots: true },
+    },
+    brushed: {
+      size: 1024, seams: true, insets: false, traces: 0.4, brush: 1,
+      color: 0.95, toneVar: 0.05, seamColor: 0.38, traceColor: 0.78, insetColor: 1.0,
+      roughness: 0.25, roughVar: 0.03, seamRough: 0.55, traceRough: 0.4, metalness: 0.8, seamMetal: 0.5,
+      brushColor: 0.1, brushRough: 0.12,
+      emissive: null,
+    },
+    team: {
+      size: 512, seams: true, insets: false, traces: 0, brush: 0,
+      color: 1.0, toneVar: 0.03, seamColor: 0.45, traceColor: 0.85, insetColor: 1.0,
+      roughness: 0.3, roughVar: 0.04, seamRough: 0.6, traceRough: 0.45, metalness: 0.5, seamMetal: 0.3,
+      emissive: null,
+    },
+    photon: {
+      size: 256, maps: false,  // emissive map only (keeps the model's colour, roughness and emissive colour)
+      emissive: { base: 0.72, lines: 6, lineWidth: 0.02 }, // lit base, brighter 45° laser lines
+    },
+  },
+  // faction emblem decal (one plane per robot, shared geometry / material); placed by a ray on the slot's skin meshes
+  emblem: {
+    enabled: true,
+    slot: 'torso',
+    center: [0, 3.1],        // x, y in part space where the ray is cast (along -z from the front, torso front = +z)
+    size: 2.4,               // model units
+    lift: 0.03,              // above the surface (also polygonOffset)
+    texSize: 512,
+    color: '#ffffff',        // emissive tint (the canvas carries the logo's orange-gold gradient)
+    intensity: 1.1,
+    rays: 40,
+  },
+};
+
 export const PROC_ROBOTS = {
   enabled: true,
   races: ['W'],
   charredFactor: 0.25,       // colour multiplier of a destroyed robot's paint (like MechPart DARK_FACTOR)
+  // Procedural attack layer over GLB mechs (src/procedural/robots/GlbAttackFx.js): muzzle flash (no recoil: GLB nodes are never touched) of the
+  // firing part, for weapons whose GLB set has no attack clip (MechAnimator fallback / redirect). Visual only.
+  glbFx: {
+    fallbackClip: 'attackidlestill', // MechAnimator CLIPS.attackFallback – a weapon whose clip is this (or redirected) gets the layer
+    maxAttacks: 4,           // simultaneous attacks of one mech (2 arms + torso + legs)
+    maxFlashes: 6,           // pooled flash meshes per mech (shared geometry / materials; none is created per shot)
+    flashTime: 0.08,         // s a flash stays
+    // weapon → kind: melee gets nothing; first match wins: projectileShape, class, a projectileColor (laser) → 'beam', else 'gun'
+    byShape: { missile: 'launcher', bolt: 'blaster', shell: 'gun', orb: 'blaster' },
+    byClass: { area: 'pulse', artillery: 'launcher' },
+    // color flash tint (stats projectileColor wins), radius / length = flash size in mech units,
+    // lead = share of attackTime before the first shot, share = shots spread over it
+    kinds: {
+      gun: { color: '#ffe08a', radius: 0.9, length: 2.4, lead: 0.15, share: 0.75 },
+      launcher: { color: '#ffb347', radius: 1.5, length: 3.2, lead: 0.2, share: 0.7 },
+      blaster: { color: '#66e0ff', radius: 1.1, length: 2.2, lead: 0.2, share: 0.6 },
+      beam: { color: '#ff7a3a', radius: 1.3, length: 4.5, lead: 0.55, share: 0.2 },
+      pulse: { color: '#9ad0ff', radius: 3.2, length: 1.6, lead: 0.5, share: 0.1 },
+    },
+  },
 };
 
 // --- [18P] procedural building performance (src/procedural/BuildingBatcher.js, docs/notes/proc-perf.md) ---
@@ -2293,7 +2655,9 @@ export const PART_SALE = {
 // --- [ICON] building icons rendered at runtime (src/ui/IconRenderer.js, docs/notes/icon-renderer.md) ---
 export const ICON_RENDERER = {
   size: 96,                         // px, default icon edge
-  perFrame: 1,                      // icons rendered per animation frame
+  perFrame: 1,                      // icons rendered per animation frame (minimum, even when a frame is already slow)
+  maxPerFrame: 6,                   // [B5] cap per frame while a backlog waits
+  frameBudgetMs: 6,                 // [B5] extra icons are rendered in the same frame only while this time budget is not used up
   fov: 26,                          // deg
   fitMargin: 1.12,                  // > 1: free space around the bounding sphere
   viewDir: [0.8, 0.7, 1],           // camera direction from the model centre (+Z = gate side, front-right, above)
@@ -2303,6 +2667,22 @@ export const ICON_RENDERER = {
   hemi: { sky: 0xdfe8ff, ground: 0x4a4a52, intensity: 1.6 },
   sun: { color: 0xfff1dc, intensity: 2.6, pos: [-1.2, 2, 1.4] },
   emblemColorFallback: '#ffffff',
+  // [B2-1] units / robots / parts (IconScenes.js): fitted by the projected bounding box (fitMargin = share of free space)
+  unit: { viewDir: [0.9, 0.55, 1], fitMargin: 1.06 },    // vehicles stand on the ground, jets / hovers float without extra border
+  robot: { viewDir: [0.8, 0.45, 1], fitMargin: 1.06 },
+  part: {
+    fitMargin: 1.08,
+    viewDir: { legs: [0.8, 0.45, 1], torso: [0.8, 0.5, 1], arm: [0.9, 0.25, 1] },   // by part kind
+    mirrorLeftArm: true,            // the left arm is seen from its own side (x of viewDir mirrored)
+  },
+  crew: {                           // crew squad icon (no model): team-coloured disc with a helmeted bust and the race emblem
+    background: '#23272e', silhouette: '#aeb4bd', visor: '#10131a', ringWidth: 5, discRadius: 46,
+    head: { x: 50, y: 37, r: 14 },
+    visorBox: { x: 40, y: 34, w: 20, h: 7 },
+    shoulders: { left: 22, right: 78, bottom: 90, top: 58, neckY: 60 },
+    emblem: { x: 39, y: 66, size: 22 },
+  },
+  hiddenBoneScale: 1e-4,            // scale of bones hidden in a single-part icon (0 would be a degenerate matrix)
 };
 
 // --- [GENBLAST] death blast of a power generator (Combat.structureBlast; balance in stats.json structures.powerGenerator.explosion) ---
@@ -2351,6 +2731,108 @@ export const CREW_ANIM = {
 };
 // --- [I2] end ---
 
+// --- [b5-crew] procedural crew member (src/procedural/crew/ProcCrew.js, docs/notes/b5-crew-venus.md) ---
+// Visual only. One crew member as a ProcUnit (UnitKit: LOD0 skinned, far LOD instanced by the UnitBatcher). Model units =
+// the GLB crew (≈ 7 high, feet on y = 0, forward +Z); Crew applies stats.crew.modelScale (0.5). The simulation never reads
+// the model: Crew.bodyHeight / aimHeight keep coming from the GLB box (see the note), so on / off changes no sim value.
+export const PROC_CREW = {
+  enabled: true,
+  races: ['Z'],                  // races (style keys) that have a procedural crew; the others keep the GLB
+  height: 7.0,                   // model units, reference height of the figure (informative; shape below adds up to it)
+  defaultTeamColor: '#3a5ccc',
+  segments: { sphere: [10, 7], limb: 8, joint: [8, 6] },   // wSeg × hSeg of spheres, sides of limb cylinders (base for variants without `seg`)
+  pillowSubdiv: 2,               // [b4-crew-slim] subdivision per face of the cheap rounded box (segs: 0): 12 · n² = 48 triangles
+  // [b6-crew] shape variants by style silhouette (kit.style.silhouette of data/buildingStyles.json; never by race). A variant
+  // overrides parts of `shape` below: torso / head / visor / shoulder / pack / chest / belt (false = none) / foot, plus limbSeg /
+  // jointSeg. `kind` picks the primitive: torso ellipsoid(default) | rounded | tapered | prism; head dome(default) | rounded |
+  // tapered | facet; visor ellipsoid(default) | slab; shoulder pad sphere(default) | rounded | slab | facet; pack sphere(default) |
+  // box | prism. Unknown silhouette = defaultVariant. Head top must stay ≈ height (7.0 ± 3 %), feet on y = 0 (legs untouched).
+  defaultVariant: 'round',
+  variants: {
+    // [b4-crew-slim] `lean: true` = open limb ends hidden inside joints / pads, no hip ball; `seg` = sphere segments [w, h] per part,
+    // belt / packCap = sides of those cylinders; handSeg = hand ball. segs: 0 of a rounded box = cheap 48-triangle pillow.
+    round: {                     // = the base shape below (ellipsoid torso, dome helmet, ball pads, ball pack); ≈ 730 triangles
+      lean: true,
+      limbSeg: 6,
+      jointSeg: [6, 4],
+      jointScale: 0.92,          // knee / elbow ball radius × this: its low-poly vertices stay inside the hex limb (no spiky ring)
+      handSeg: [8, 4],
+      seg: { torso: [8, 6], head: [10, 6], pad: [6, 4], pack: [6, 3], visor: [6, 3], belt: 8, packCap: 6 },
+    },
+    rounded: {                   // ≈ 760 triangles
+      lean: true,
+      limbSeg: 6,
+      jointSeg: [6, 4],
+      jointScale: 0.92,
+      handSeg: [6, 4],
+      torso: { kind: 'rounded', w: 1.9, h: 2.05, d: 1.35, radius: 0.42, segs: 1 },
+      chest: { z: 0.7, w: 1.0 },
+      belt: false,
+      head: { kind: 'rounded', w: 1.4, h: 1.3, d: 1.3, radius: 0.4, segs: 1 },
+      visor: { kind: 'slab', w: 1.0, h: 0.34, d: 0.2, y: 0.05, z: 0.62, glowZ: 0.76 },
+      shoulder: { kind: 'rounded', x: 1.22, w: 0.95, h: 0.62, d: 0.9, radius: 0.24, segs: 0, padY: 0.1 },
+      pack: { kind: 'box', w: 1.05, h: 1.5, d: 0.75, radius: 0.25, segs: 0, y: 1.2, z: -0.95, capScale: 0.6, capH: 0.14, glowZ: -1.32 },
+    },
+    angular: {
+      limbSeg: 6,
+      jointSeg: [6, 4],
+      torso: { kind: 'tapered', w: 1.55, topW: 2.15, h: 2.1, d: 1.3 },
+      chest: { z: 0.68, w: 1.0 },
+      belt: false,
+      head: { kind: 'tapered', w: 1.4, topW: 1.0, h: 1.24, d: 1.3, crest: { w: 0.2, h: 0.26, d: 0.95, z: -0.05, sink: 0.08 } },
+      visor: { kind: 'slab', w: 1.1, h: 0.28, d: 0.2, y: 0.08, z: 0.62, glowZ: 0.76 },
+      shoulder: { kind: 'slab', x: 1.4, w: 1.0, h: 0.45, d: 1.0, tilt: 0.28, padY: 0.18 },
+      pack: { kind: 'box', w: 1.2, h: 1.4, d: 0.85, radius: 0, y: 1.2, z: -1.0, capScale: 0.5, capH: 0.16, glowZ: -1.45 },
+      foot: { w: 0.8, d: 1.3, z: 0.35 },
+    },
+    faceted: {
+      limbSeg: 6,
+      jointSeg: [6, 4],
+      torso: { kind: 'prism', rTop: 0.98, rBottom: 0.76, h: 2.1, sides: 6 },
+      chest: { z: 0.8, w: 0.8 },
+      belt: false,
+      head: { kind: 'facet', wSeg: 6, hSeg: 4 },
+      visor: { kind: 'slab', w: 0.95, h: 0.3, d: 0.2, y: 0.05, z: 0.7, glowZ: 0.82 },
+      shoulder: { kind: 'facet', x: 1.2, wSeg: 5, hSeg: 3 },
+      pack: { kind: 'prism', rTop: 0.5, rBottom: 0.6, h: 1.5, sides: 6, y: 1.2, z: -0.95, capScale: 0.6, capH: 0.14, glowZ: -1.55 },
+    },
+  },
+  shape: {
+    hipY: 3.3,                   // hip joint height above the ground
+    hipX: 0.5,                   // hip joint x
+    pelvis: { w: 1.5, h: 0.5, d: 1.0, y: 0.1 },
+    thigh: { len: 1.55, rTop: 0.42, rBottom: 0.34 },
+    knee: { r: 0.36 },
+    shin: { len: 1.45, rTop: 0.33, rBottom: 0.27 },
+    foot: { w: 0.7, h: 0.3, d: 1.1, z: 0.25, drop: 0.15 },   // drop: foot centre below the ankle (ankle = shin end)
+    torso: { y: 0.25, cy: 1.05, rx: 0.95, ry: 1.1, rz: 0.72 },   // torso bone above the hip; ellipsoid centre / radii
+    chest: { w: 0.95, h: 0.7, d: 0.14, y: 1.25, z: 0.66 },       // team plate on the chest
+    belt: { r: 0.85, h: 0.22, y: 0.05 },
+    neck: { y: 2.15, r: 0.25, h: 0.35 },
+    head: { y: 2.65, r: 0.72, sy: 1.0, sz: 1.05 },
+    visor: { rx: 0.52, ry: 0.27, rz: 0.3, y: 0.05, z: 0.5, glowR: 0.1, glowZ: 0.78 },
+    shoulder: { x: 1.1, y: 1.7, padR: 0.5, padSy: 0.75, padY: 0.08 },   // team pad sphere on the shoulder joint
+    upperArm: { len: 1.3, rTop: 0.3, rBottom: 0.25 },
+    elbow: { r: 0.27 },
+    forearm: { len: 1.2, rTop: 0.25, rBottom: 0.22 },
+    hand: { r: 0.3 },
+    armRest: 0.08,               // rad, arms hang slightly outwards
+    pack: { y: 1.25, z: -0.95, r: 0.55, sy: 1.15, capR: 0.36, capH: 0.12, glowR: 0.3, glowZ: -0.5 },
+  },
+  motion: {
+    moveEpsilon: 0.3,            // units/s – below this the member idles
+    runRefSpeed: 7,              // units/s – stride rate 1× (same reference as stats.crew.runAnimRefSpeed)
+    minRate: 0.6,                // lowest stride rate while moving (CREW.minRunAnimRate)
+    cyclesPerSecond: 1.5,        // full strides (left + right step) per second at rate 1
+    blendRate: 8,                // 1/s – smoothing between idle and run
+  },
+  run: { thigh: 0.75, knee: 1.1, arm: 0.65, elbow: 0.9, lean: 0.14, twist: 0.12, bob: 0.45 },   // rad / model units
+  idle: { breath: 0.025, breathRate: 0.35, look: 0.25, lookRate: 0.12, armSway: 0.03, swayRate: 0.3, packPulse: 0.15, packRate: 1.1 },
+  preview: { gap: 9, rowGap: 14, squad: 5, spacing: 5, maxDelta: 0.1, switchEvery: 3, runSpeed: 10,   // console preview (UI only)
+    compareRaces: ['X', 'Y', 'Z', 'W'], compareSquad: 3 },   // spawnCrewCompare: races side by side (proc front, GLB behind), members each
+};
+// --- [b5-crew] end ---
+
 // --- [J2] save ui ---
 export const SAVE_UI = {
   nameMaxLength: 60,           // longest name of a saved game
@@ -2358,12 +2840,48 @@ export const SAVE_UI = {
   notifyStorageKey: 'steelMen.saveIncompatSeen', // localStorage: ids of incompatible saves the user already decided about
 };
 // --- [J2] end ---
+// --- [A2-ui] continue lobby ---
+export const LOBBY_CONTINUE = {
+  pickMode: 'pick',                    // SaveLoadView.openList({ mode }) – the row button returns the save
+  pickFilter: 'mp',                    // SaveLoadView.openList({ filter }) – multiplayer saves only
+  phases: ['send', 'receive', 'replay', 'sync'], // phases of lobby.onContinueProgress (i18n lobby.continue.phase.<phase>)
+  dragMime: 'text/x-steelmen-seat',    // dataTransfer type of a seat dragged by its grip
+  percent: 100,                        // ratio -> percent
+  dragTimeoutMs: 30000,                // a seat drag that never reports its end (aborted, focus lost) is dropped after this long
+  dragGuardEvents: ['blur', 'pointerup', 'pointercancel', 'dragend'], // window events that end a seat drag (not 'drop': the seat row handles it first)
+};
+// --- [A2-ui] end ---
+// --- [A2-net] multiplayer saves / continue lobby (src/net/SaveTransfer.js, src/net/MpContinue.js, docs/notes/a2-net.md) ---
+export const NET_CONTINUE = {
+  topic: 'save',             // transport topic of the save transfer host → clients (lobby, before the start)
+  syncTopic: 'cont',         // transport topic of the end-of-replay hash exchange (after the start, before the lockstep)
+  chunkChars: 3000,          // base64 characters of the save per chunk message (+ framing stays < NET.maxMessageBytes)
+  maxSaveBytes: 32 * 1024 * 1024, // a transfer announcing more (gzip bytes) is refused by the clients
+  pumpMs: 100,               // sender: one send round this often…
+  chunksPerPump: 3,          // …with at most this many chunk messages (room capability ≈ 40 messages/s per client)
+  ackMs: 250,                // receiver: acknowledgement at most this often (and repeated while incomplete)
+  maxMissingReported: 48,    // receiver: missing chunk indices listed in one acknowledgement
+  stallMs: 20000,            // no progress of the transfer for this long (either side) = net.continue.error.timeout
+  syncResendMs: 400,         // end-of-replay hash re-sent this often until every player's arrived
+  syncLingerMs: 15000,       // …and still answered this long after this client finished (late players)
+  stallOfferMs: 45000,       // load / replay / sync / lockstep stuck this long = the host is offered to end the match
+  endRepeat: 4,              // the host's "match ended" notice is sent this many times…
+  endRepeatMs: 250,          // …this far apart
+  aiFallbackDifficulty: 'normal', // AI that takes over a seat of a human who did not come back (original AI: its own difficulty)
+  passGapAcks: 2,            // sender: a new pass over the still missing chunks waits this many ack intervals
+  maxKeyLength: 64,          // receiver: longest i18n key accepted from the host's "transfer given up" message
+  maxIdLength: 64,           // receiver: longest transfer id accepted (the id is "<code>-<base36>")
+  base64Block: 0x8000,       // bytes per String.fromCharCode call while encoding the save
+  hashRadix: 16,             // textHash is written in this base
+  maxHashWords: 8,           // sync hash message: most 32-bit words of the world hash a peer may send
+};
+// --- [A2-net] end ---
 // --- [J1] save games ---
 // Saved game = replay: match settings + seed + every non-AI command from tick 0 (src/game/SaveGame.js,
 // src/core/SaveStore.js, docs/notes/j1-save-core.md). Loading checks SIM_VERSION and the data fingerprint, never GAME_VERSION.
 // Raise SIM_VERSION with every change that alters the simulation (combat, balance code, AI decisions, command
 // executors, determinism fixes); text / UI / visual-only releases keep it, so saves stay loadable.
-export const SIM_VERSION = 1;
+export const SIM_VERSION = 6; // 6 = A9 (research T2/T3, super tier, Data network, new buildings / parts, vehicle tiers); 5 = A14 (terrain speed factor per chassis, weighted A*); 4 = A8 (ASCII map wall height 12.3 ± 12 % → line of sight / wall stops); 3 = A7 (crew morale bail-out, melee sweep vs wrecks, formation P2 march); 2 = A1 (simBody of structures, AI production / placement, chunked commands) after v28
 export const SAVE = {
   format: 'steelmen-save',      // marker of a save object / .smsave file
   formatVersion: 1,             // layout of the save object (not the simulation)
@@ -2419,8 +2937,8 @@ export const PROC_WORK_FX = {
   // drag = 1/s velocity damping, alpha = peak opacity, grow = size multiplier at death, group = 'add' | 'norm'.
   kinds: {
     build: [
-      { id: 'spark', color: 'weapon', group: 'add', rate: 46, life: [0.18, 0.5], size: [0.05, 0.11], speed: [1.6, 4.2], up: 0.7, spread: 1, gravity: 7.5, drag: 0.8, alpha: 1, grow: 0.4, jitter: 0.06 },
-      { id: 'flash', color: 'weapon', group: 'add', rate: 7, life: [0.05, 0.14], size: [0.35, 0.6], speed: [0, 0.2], up: 0, spread: 0.2, gravity: 0, drag: 0, alpha: 0.7, grow: 1.6, jitter: 0.04 },
+      { id: 'spark', color: 'weapon', group: 'add', rate: 64, life: [0.2, 0.55], size: [0.05, 0.11], speed: [1.6, 4.2], up: 0.7, spread: 1, gravity: 7.5, drag: 0.8, alpha: 1, grow: 0.4, jitter: 0.06 },
+      { id: 'flash', color: 'weapon', group: 'add', rate: 10, life: [0.05, 0.14], size: [0.35, 0.6], speed: [0, 0.2], up: 0, spread: 0.2, gravity: 0, drag: 0, alpha: 0.7, grow: 1.6, jitter: 0.04 },
     ],
     repair: [
       { id: 'glint', color: 'repair', group: 'add', rate: 30, life: [0.5, 1.1], size: [0.07, 0.14], speed: [0.2, 0.9], up: 1.1, spread: 0.55, gravity: -0.9, drag: 1.2, alpha: 0.9, grow: 0.3, jitter: 0.18 },
@@ -2433,3 +2951,265 @@ export const PROC_WORK_FX = {
   },
 };
 // --- [B1-W3] end ---
+
+// --- [A7] blood stains (src/game/BloodStains.js): decals where crew squads die, display only ---
+export const BLOOD_STAINS = {
+  enabled: true,                 // no gore setting in the options yet; false = nothing is drawn
+  event: 'steelmen:crewDied',    // window CustomEvent dispatched by Crew on death, detail { crew }
+  max: 96,                       // instances in the one InstancedMesh (the oldest stain is replaced when full)
+  lifetime: 70,                  // seconds a stain stays (visual time), the last fadeTime of it fades out
+  fadeTime: 15,
+  alpha: 0.8,                    // peak opacity
+  size: [2.2, 4.2],              // stain diameter, world units (random per stain)
+  scatter: 1.6,                  // random offset from the member's place, world units
+  perMember: 1,                  // stains per squad member
+  heightOffset: 0.06,            // above the terrain (z-fighting)
+  slopeOffset: 1.2,              // extra lift per unit of slope × radius (stain on a slope)
+  normalStep: 0.8,               // sampling distance for the terrain normal
+  polygonOffset: -2,             // factor and units of the material's polygon offset
+  renderOrder: 1,
+  color: '#7d0f0f',
+  sizeHalf: 0.5,                 // half of the stain size: radius used for the slope lift
+  // canvas texture (own fixed PRNG: same look every run); radii / distances are shares of the texture size
+  texture: {
+    size: 128, blobs: 7, droplets: 14, seed: 90817,
+    mainRadius: 0.3, mainAlpha: 1,
+    blobSpread: 0.2, blobRadius: [0.08, 0.2], blobAlpha: 0.9,
+    dropletDistance: [0.25, 0.47], dropletRadius: [0.02, 0.06], dropletAlpha: 0.95,
+    gradientMid: 0.6, gradientMidAlpha: 0.8, // soft edge: colour stop and its alpha share
+  },
+};
+// --- [A7] end ---
+
+// --- [B5-muzzles] procedural muzzle fit (debug probe src/procedural/debug/MuzzleProbe.js) ---
+export const PROC_MUZZLE = {
+  probeRaces: ['X', 'Y', 'Z', 'W'],  // styles the probe builds (W shows modelRace X)
+  tolerance: 0.1,                    // world units – max distance model socket ↔ stats simBody muzzle
+  teamColor: 0x3a7bd5,               // paint of the probe models (never shown)
+  digits: 3,                         // decimals in the printed table
+  // Build-time fit of a procedural vehicle's main weapon to its stats simBody muzzle (src/procedural/units/MuzzleFit.js,
+  // UnitModules turret() / weapon()). Budgets in MODEL units keep the model's look: what is left over stays a deviation
+  // (docs/notes/b5-muzzles.md lists those exceptions with proposed data values)
+  fit: {
+    enabled: true,
+    aircraft: false,       // jets / bombers: the default sim muzzle (radius ahead) is the wing span, not a gun – no fit
+    stretch: [0.7, 1.6],   // barrel length factor range (cannon / gun / laser / plasma / lightning)
+    lift: 0.3,             // max trunnion shift up / down
+    slide: 0.4,            // max weapon shift along the barrel (rest after stretching; the only z fit of missile pods)
+    pivotShift: 0.6,       // max turret shift along the hull (simBody.muzzle.pivotZ only)
+  },
+  // Wall turrets (WallTurretProc) fitted to stats simBody.muzzles (byRace): barrels move inside the head (up to its half
+  // height − barrel radius), a rest of the height is taken by the pedestal (± share of its height), length × stretch,
+  // barrel x towards the data (± xShift, GLB model units); fewer data muzzles than barrels → one barrel per data muzzle
+  wall: { stretch: [0.7, 1.6], xShift: 0.3, pedestalShare: 0.4 },
+};
+// --- [B5-muzzles] end ---
+
+// --- [B5-map-fx] procedural map materials (src/procedural/maps/MapMaterials.js, docs/notes/b5-map-fx.md) ---
+// Visual only (own seeded noise, no world.rng). Dark stone walls + glowing lava in fissures for the A8 map restyle.
+export const PROC_MAP_FX = {
+  mechHeight: 8.2,               // world units – height of a procedural mech (stats simBody.bodyHeight 7.8–8.7), reference for walls
+  wallHeightFactor: 1.5,         // default wall height = mechHeight × this
+  stone: {
+    textureSize: 256,            // px (square), tileable; colour + normal + roughness
+    tileWorld: 6,                // world units one texture tile covers (blocks ≈ tileWorld / blockRows tall)
+    blockRows: 4,                // block courses per tile
+    blocksPerRow: [2, 3],        // block count range per course
+    mortarWidth: 0.045,          // share of a course height
+    bevel: 0.18,                 // share of a block's size over which the edge rounds off
+    noiseAmount: 0.35,           // fine height / colour noise
+    normalStrength: 3.2,
+    colorDark: '#1f2024', colorLight: '#3b3c42', colorTint: '#2c2a2f', // block colours range (dark basalt)
+    roughness: [0.78, 1.0],
+    anisotropy: 4,
+    seed: 7301,
+    wallSegmentLength: 4,        // geometry subdivision along a wall (jagged top / crack lines)
+    jag: 0.06,                   // top edge unevenness, share of the wall height
+    metalness: 0.05,
+    noisePeriods: [8, 16, 32, 64],  // lattice sizes of the tileable noise octaves
+    blockWidthJitter: [0.6, 1.4],   // relative block width range inside a course
+    colorMix: { shade: 0.8, fine: 0.2, tint: 0.4 },  // block colour: dark→light by shade+fine noise, tint share
+    mortarDim: 0.45, mortarHeight: 0.1,              // colour multiplier where height < mortarHeight
+    crackDepth: 0.18, crackWidth: 0.025, crackDim: 0.35, // dark crack lines (second noise near 0.5)
+    roughFromHeight: 0.6,           // roughness: share from (1 − height), rest from fine noise
+  },
+  lava: {
+    layerMix: [0.6, 0.4], warpMix: [0.65, 0.35],     // shader: weights of the two noise layers (a, b)
+    layerScale: { a2: 2.1, b1: 1.7, b2: 3.9 }, driftScale: { a2: 1.7, b2: 0.6 }, // octave scales / relative drift speeds
+    heatRange: [0.35, 1.0],         // smoothstep range where mid → hot colour
+    seedScale: 0.731, seedMod: 1000, // noise offset = (seed % seedMod) × seedScale
+    colorHot: '#ffd060', colorMid: '#ff6a10', colorCrust: '#1a0804',
+    noiseScale: 0.11,            // noise cells per world unit
+    flowSpeed: [0.18, 0.07],     // noise drift (units of noise space per second) x / z
+    warp: 0.7,                   // domain warp of the flow
+    crustLow: 0.5, crustHigh: 0.66, // smoothstep range of the dark crust over the noise value
+    pulseAmount: 0.22, pulseSpeed: 1.3,
+    intensity: 1.6,              // emissive multiplier (>1 = bright over tone mapping)
+    edgeCrust: 0.3,              // ribbon geometry: crust grows towards the ribbon edges (0 = off)
+    seed: 4417,
+    timeWrap: 4096,              // seconds after which the time uniform wraps
+  },
+  rim: {
+    color: '#ff5a10', intensity: 1.4, falloff: 2.0, pulseAmount: 0.25, pulseSpeed: 0.9, waveScale: 0.15, // waveScale: pulse phase per world unit
+    polygonOffset: -2,           // factor and units
+  },
+  ribbon: { lift: 0.05, minSegments: 1 }, // createLavaRibbonGeometry: height above y 0, extra subdivision
+};
+// --- [B5-map-fx] end ---
+
+// --- [B4] model budget (src/procedural/debug/ModelBudget.js, docs/notes/b4-budget-tool.md) ---
+// Limits of the triangle / draw call budget of every model the game can draw (target 60 FPS on a GTX 1650). Read by the
+// console measuring tool only (never by the game); `unitTri` / `robotTri` / `crewTri` count the LOD0 model, buildings the batched LODs.
+export const PROC_BUDGET = {
+  unitTri: 2000,            // vehicle, LOD0 (skinned model close to the camera)
+  robotTri: 2500,           // robot, LOD0 – heaviest part combination per style
+  crewTri: 800,             // crew member, LOD0
+  buildingDrawCalls: 12,    // building, LOD1 and coarser: draw calls of one building (static body + emblem + frozen far parts)
+  buildingTri: 20000,       // building, LOD0: informative only (a row over it is marked "info", not counted in overLimit)
+  lodLevels: [1, 2],        // far LOD levels of units / crew / robots that are measured (0 = the skinned LOD0 model)
+  teamColor: '#3a5ccc',     // team colour the measured models are built with
+  styles: null,             // style keys to measure; null = every style of data/buildingStyles.json that is also a race of stats.json
+  percentile: 0.9,          // suggested buildingTri = this percentile of the measured LOD0 building triangle counts
+  yieldEvery: 12,           // models measured between two yields to the event loop (the console stays responsive)
+};
+// --- [B4] end ---
+
+// --- [A5] UI scaling below full HD (docs/roadmap/13-ui-scaling.md, docs/blocks/A5.md) ---
+// Detail levels of the HUD by window height (CSS px, innerHeight): class on #hud-root, also used by menu / lobby / dialog CSS
+// as the same breakpoints (@media cannot read var(), so CSS repeats these values with a "= UI_SCALE.…" comment).
+export const UI_SCALE = {
+  scaleMin: 0.7,               // replaces HUD_V2.scaleMin when the compact level is on (Hud.js #applyScale)
+  breakpoints: {               // window height (CSS px): below `compact` → .hud-compact, below `tiny` → .hud-tiny
+    compact: 800,
+    tiny: 650,
+    hysteresis: 20,            // a level is left only when the height is this much past the breakpoint (no flicker)
+  },
+  narrowWidth: 1100,           // window width (CSS px) below which the HUD is at least compact (4:3, narrow windows)
+  fontMain: 12,                // px floor for main numbers (resources, HP)
+  fontSmall: 11,               // px floor for small text (labels, hints)
+  hitTarget: 32,               // px floor of a clickable target (padding grows, not the image)
+  dialogFont: 14,              // px font of tooltips and dialogs (not scaled)
+  userScales: ['auto', '0.75', '1', '1.25'], // settings.ui.hudScale (strings: Profile keeps only the default's type): 'auto' or a multiplier over the automatic scale
+  userScaleDefault: 'auto',
+  // One-time "turn on full screen" offer (c8): when not in fullscreen and the window is smaller than this
+  fullscreenOffer: { width: 1280, height: 720 },
+};
+SETTINGS_DEFAULTS.ui.hudScale = UI_SCALE.userScaleDefault;  // Profile.js only keeps keys that exist in the defaults
+SETTINGS_DEFAULTS.ui.fullscreenOffered = false;            // the c8 offer was shown once (never again)
+// --- [A5] end ---
+
+// --- [B3] superweapon effects (src/procedural/fx/SuperweaponFx.js) ---
+// Visual only. Colours are data keyed by race code ('default' fallback); the code never names a faction.
+export const PROC_SUPERWEAPON_FX = {
+  maxEffects: 8,               // simultaneously running launch/impact effects (extra ones are dropped)
+  pools: { glow: 900, smoke: 600, debris: 160 }, // particle capacity per batched InstancedMesh
+  sphereDetail: [0, 1, 0],     // IcosahedronGeometry detail of the glow / smoke / debris particle spheres
+  segments: 16,                // radial segments of cylinders / rings / domes
+  sphereRows: 8,               // height segments of the shared shape sphere
+  rim: { centerLevel: 0.1, power: 2.2 }, // fresnel of domes: centre brightness (0..1) and rim sharpness (volume instead of a flat disc)
+  renderOrder: 12,             // after VFX.renderOrder (units, normal explosions)
+  gravity: 26,                 // world units / s^2 for debris
+  drag: 0.6,                   // particle velocity damping per second
+  glowFadePower: 1.6,
+  smokeFadeStart: 0.55,        // age ratio where smoke starts shrinking
+  smokeOpacity: 0.62,
+  debrisOpacity: 1,
+  // Colours per race: core (white-hot), glow (main), accent (secondary), smoke, dust (ground)
+  colors: {
+    default: { core: 0xffffff, glow: 0xffa040, accent: 0xff5a20, smoke: 0x2a2724, dust: 0x6b5a45 },
+    X: { core: 0xffffff, glow: 0xffc860, accent: 0xff7a20, smoke: 0x2b2824, dust: 0x75603f },
+    W: { core: 0xffffff, glow: 0xffd23a, accent: 0xe8a010, smoke: 0x2b2824, dust: 0x75603f }, // amber glow
+    Y: { core: 0xf0ffff, glow: 0x70e0ff, accent: 0x2a8cff, smoke: 0x1f2a30, dust: 0x4f6068 },
+    Z: { core: 0xfff0f0, glow: 0xff6a50, accent: 0xc01818, smoke: 0x2a1c1a, dust: 0x6a4a40 },
+  },
+  phaseColors: { core: 0xf4eaff, glow: 0x9a6bff, accent: 0x3c6bff }, // phaseCharge is always blue-violet
+  neutronColors: { core: 0xffffff, glow: 0xe8f2ff, accent: 0xbcd8ff }, // neutronBomb is always white
+  orbital: {
+    skyHeight: 520,            // where the targeting beam / bomb starts above the target
+    beamRadius: 0.9,           // thin targeting beam radius
+    beamPulse: 7,              // pulses per second of the targeting beam
+    headSize: 7,               // bright falling head
+    columnRadiusFactor: 0.34,  // impact column radius / blast radius
+    columnHeightFactor: 14,    // impact column height / blast radius
+    columnLife: 1.0,
+    columnBrightness: 0.4,     // impact column brightness (was overexposed at 1)
+    columnFadePower: 3,
+    flashLife: 0.7,
+    flashSizeFactor: 0.9,
+    waveLife: 1.6,
+    waveSizeFactor: 1.15,
+    smoke: 150, sparks: 120, debris: 36,
+    smokeLife: [3.5, 6], smokeSize: [0.1, 0.34], smokeSpeed: [0.15, 0.7], smokeRise: [6, 20],
+    smokeSpread: 0.25, smokeDrag: 1.2,   // smoke start spread (x R) and velocity damping
+    spark: { speedMin: 8, speedRMax: 1.1, upMin: 6, upRMax: 1.3, life: [0.7, 1.7], size: 0.12, sizeEnd: 0.02, gravityShare: 0.5, spread: 2 }, // size x R
+    debrisFx: { speedMin: 10, speedRMax: 1.3, up: [16, 60], life: [1.6, 3.2], size: 0.6, sizeEnd: 0.5, drag: 0.15, spread: 4 },
+    beamParticleRate: 90, beamRampMin: 0.2, beamWidthGrow: 0.6, markerRingShrink: 0.15, markerBrightness: 0.6, headStretch: 1.6,
+    headParticle: { jitter: 2, height: 20, rise: 20, life: 0.5, size: 2.4, sizeEnd: 0.2 },
+    columnGrow: 0.6, columnGlowWidth: 1.8, columnGlowShare: 0.5,
+    flashMin: 0.35, flashLift: 0.3, flashHaloSize: 1.5, flashHaloShare: 0.45,
+    waveDomeHeight: 0.35, waveDomeWidth: 0.8, waveDomeShare: 0.25, waveLift: 0.5,
+  },
+  tectonic: {
+    crackCount: 28,            // dust/crack puffs per second of flight (scaled by distance)
+    crackPerUnit: 0.9,         // + puffs per world unit of path
+    crackSize: [1.6, 4.2],
+    crackLife: [1.6, 3.2],
+    glowSize: 1.4,             // glowing fissure head
+    eruptSmoke: 130, eruptDebris: 70, eruptSparks: 60,
+    columnLife: 1.8,
+    columnRadiusFactor: 0.3,
+    columnHeightFactor: 0.9,
+    ringLife: 1.4,
+    ringSizeFactor: 1.05,
+    debrisSpeed: [20, 52], debrisUp: [26, 60], debrisSize: [0.5, 1.7],
+    smokeSpread: 0.3, smokeDrag: 0.9, smokeSpeed: [0.1, 0.55], smokeRise: [10, 1.4], // speed x R; rise: min, max x R
+    debrisLife: [2, 4.5], debrisDrag: 0.1, debrisSpread: 0.25,
+    spark: { speedMin: 4, speedRMax: 0.6, upMin: 20, upRMax: 1.4, life: [0.8, 1.8], size: 0.09, sizeEnd: 0.02, gravityShare: 0.6, spread: 0.2 },
+    fissurePulseHz: 18, fissureBase: 0.35, fissureAmp: 0.4, fissureRadius: 0.55, fissureLift: 0.2,
+    crackDust: { speedMin: 2, speedRange: 5, rise: 2, riseRange: 6, jitter: 3, lift: 0.6, drag: 1.3, tintMin: 0.7, tintRange: 0.3, trailBack: 0.02 },
+    crackSpark: { chance: 0.5, speedShare: 0.4, rise: 3, riseRange: 5, life: 0.5, lifeRange: 0.5, size: 0.9, sizeEnd: 0.1, lift: 0.4 },
+    columnRise: 0.35, columnGrow: 0.6, columnGlowShare: 0.8, capSize: 1.1, capHeight: 0.6, ringLift: 0.4, ringDustBoost: 1.4, innerRing: 0.6, innerRingShare: 0.6,
+    smokeLife: [3, 6], smokeSize: [0.1, 0.3],
+  },
+  phase: {
+    arcHeight: 0.22,           // arc apex height / horizontal distance
+    arcMin: 40,
+    ballSize: 3.2,
+    trailRate: 60,             // trail sparks per second
+    trailLife: 0.7,
+    flashLife: 0.55,
+    flashSizeFactor: 0.6,
+    implodeLife: 1.1,          // sphere shrinks to a point (starts big, collapses)
+    implodeSizeFactor: 1.0,
+    ringLife: 1.6,
+    ringSizeFactor: 1.1,
+    sparks: 140, smoke: 40,
+    ballPulseHz: 30, ballPulseAmp: 0.15, ballHaloSize: 1.8, ballHaloShare: 0.5,
+    trailSpeed: 1, trailSpeedRange: 3, trailUp: 0.3, trailSizeShare: 0.7, trailSizeEnd: 0.1, trailDrag: 1.5, trailLifeJitter: 0.6, trailLifeRange: 0.8,
+    flashLift: 4, flashMin: 0.4, flashHaloSize: 1.6, flashHaloShare: 0.4,
+    implodeShrink: 0.98, implodeMin: 0.5, implodeLift: 0.3, implodeBrightMin: 0.35, implodeShellShare: 0.8, implodeCoreSize: 0.55,
+    burst: { speedMin: 6, speedRMax: 1.3, upRMin: -0.2, upRMax: 0.7, life: [0.6, 1.5], size: 0.08, sizeEnd: 0.01, spread: 1 },
+    puff: { speedMin: 2, speedRMax: 0.3, upMin: 1, upMax: 8, life: [2, 3.5], size: 0.1, sizeEnd: 0.25, spread: 0.2 },
+    ringLift: 0.5, ringWallHeight: 0.6, ringGlowShare: 0.25, ringDomeWidth: 0.7, ringDomeHeight: 0.5, ringDomeShare: 0.18,
+  },
+  neutron: {
+    riseFraction: 0.3,         // share of the flight time spent climbing straight up
+    turnFraction: 0.2,         // share spent turning over at the apex
+    apexHeight: 260,
+    bodyLength: 9, bodyRadius: 0.9,
+    trailRate: 80, trailLife: 0.9,
+    flashLife: 0.5,
+    flashSizeFactor: 1.0,
+    domeLife: 1.6,
+    domeSizeFactor: 1.0,
+    haloLife: 0.9,
+    sparks: 60,
+    spark: { speedMin: 6, speedRMax: 0.9, upMin: 2, upRMax: 0.6, life: [0.8, 1.6], size: 0.08, sizeEnd: 0.02, spread: 0.1 },
+    bodyHalf: 0.5, noseSize: 2.4, noseShare: 0.9, apexDescent: 0.7, turnLift: 0.25,
+    trailSpeed: 2, trailSpeedRange: 4, trailBack: 8, trailLifeJitter: 0.6, trailLifeRange: 0.8, trailSize: 2.8, trailSizeEnd: 0.2, trailDrag: 1.4,
+    smokeChance: 0.4, smokeSpeedShare: 0.3, smokeLifeMul: 2, smokeSize: 2, smokeSizeEnd: 5, smokeColor: [0.85, 0.88, 0.92],
+    flashLift: 0.2, flashMin: 0.5, flashScale: 1.2, domeInnerScale: 0.82, domeShare: 0.85, domeInnerShare: 0.5, haloScale: 1.2, haloLift: 0.4,
+  },
+  demo: { spacing: 120, flightTime: 3.2, radius: 30 },
+};
+// --- [B3] end ---

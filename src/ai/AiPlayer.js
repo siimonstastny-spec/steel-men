@@ -23,6 +23,7 @@ import { ResearchManager } from './managers/Research.js';
 import { MaintenanceManager } from './managers/Maintenance.js';
 import { Budget } from './Budget.js';
 import { clearIntent } from './allyBoard.js';
+import { resumeFromWorld } from './Resume.js';
 
 /** Queued commands older than this (s) are dropped – the situation has changed */
 const COMMAND_STALE_SECONDS = 5;
@@ -40,12 +41,20 @@ export class AiPlayer {
    * @param {string} [opts.difficulty] 'easy' | 'normal' | 'hard'
    * @param {object} [opts.unlocks]    the team's unlock record (game.unlocks[team]); world.production's is used if missing
    * @param {number[]} [opts.allies]   extra teams never attacked (match allies from src/game/Alliances.js are never attacked anyway)
+   * @param {boolean} [opts.resumed]  [A2-ai] takes over a game in progress (default: created at tick > 0). The first
+   *   update then derives the managers' memory from the world (src/ai/Resume.js); false forces a fresh start
    */
-  constructor({ world, commandBus, team, race, difficulty = 'normal', unlocks = null, allies = [] }) {
+  constructor({ world, commandBus, team, race, difficulty = 'normal', unlocks = null, allies = [], resumed = undefined }) {
     Object.assign(this, { world, commandBus, team, race, unlocks, allies: [...allies] });
     this.difficultyId = difficulty;
+    // [A2-ai] an AI created during the match (loaded MP game, seat taken over from a human / another AI) continues
+    // the base it finds; at tick 0 nothing changes (bootstrap only when resumed)
+    this.resumed = resumed ?? world.tick > 0;
+    this.bootstrapped = false;
     // D1: own seeded generator (never world.rng – AI choices must not move the simulation stream). The AI is created
     // right after world.startSimulation(seed), so the world generator still holds the match seed at this point.
+    // [A2-ai] created later (takeover at tick T): world.rng.state is part of the simulation state at T – the same
+    // after a replay to T – so the seed is still derived deterministically from the match seed, the tick and the team.
     this.rng = new Rng((world.rng.state ^ Math.imul(team + 1, RNG_TEAM_STEP)) >>> 0);
     this.diff = null;      // difficulty settings once the data is loaded
     this.data = null;
@@ -159,6 +168,10 @@ export class AiPlayer {
     this.now = simTime;
     this.perception.update(simTime, dt);
     if (!this.perception.own.anchor) return; // nothing left to play with
+    if (!this.bootstrapped) { // [A2-ai] once, with the first own-unit refresh: read the game in progress
+      this.bootstrapped = true;
+      if (this.resumed) resumeFromWorld(this, simTime);
+    }
     const scale = this.diff.thinkScale ?? 1;
     for (const e of this.managers) {
       e.timer -= dt;
@@ -246,6 +259,9 @@ export class AiPlayer {
       analyses: this.stats.analyses ?? 0,
       salvage: this.stats.salvaged ?? 0,
       bay: this.maintenance ? `${this.maintenance.stats.bayVisits}/${this.maintenance.stats.swaps}` : '-',
+      // [A1-5] what keeps the next robot back (Production: 'waits for parts / parts budget', 'no crew slot', 'bay in service'…)
+      mechWhy: this.production?.mechWhy ?? '-',
+      inBays: own.serviced.length,                       // own robots in an assembly bay for service now
       fieldRep: this.maintenance?.stats.fieldRepairs ?? 0,
       harass: this.stats.harassRuns ?? 0,
       counters: this.production?.lastCounter ? 'on' : '-',
@@ -291,6 +307,8 @@ export class AiPlayer {
       // E1 (docs/notes/e1-ai-air.md): population plan for aircraft
       airRes: `${this.production?.airPop ?? 0}/${this.production?.airWant ?? 0}`, // population kept for aircraft / aircraft wanted
       popHeld: `${this.production?.popHeld ?? 0}/${this.production?.crewHeld ?? 0}/${this.production?.released ?? 0}`, // crews+vehicles held for the reserve / robot assemblies held (no crew) / queued items cancelled
+      // [A2-ai] sim second the AI took over a game in progress ('-' = started with the match)
+      resumed: this.resumed ? (this.stats.resumedAt === undefined ? 'pending' : Math.round(this.stats.resumedAt)) : '-',
       commands: this.stats.commands,
       dropped: this.stats.dropped,
     };

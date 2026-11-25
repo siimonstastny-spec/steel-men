@@ -17,9 +17,14 @@
   --hud-gap: 8px;
   /* ---- HUD v2 layout (docs/roadmap/hud-v2.md, docs/notes/hud2-layout.md) ----
      --hud-scale (unitless, set on :root by Hud.js = clamp(min(W/1920, H/1080), HUD_V2.scaleMin, HUD_V2.scaleMax)).
-     --hud-u = one base pixel at the current scale: write sizes as calc(N * var(--hud-u)). Text: max(11px, ...). */
+     --hud-u = one base pixel at the current scale: write sizes as calc(N * var(--hud-u)). Text: max(var(--ui-fs-small), ...) (UI_SCALE floors). */
   --hud-scale: 1;
   --hud-u: calc(var(--hud-scale, 1) * 1px);
+  /* UI_SCALE floors (config.js; --ui-font-main / -small / -hit / -dialog-font are published by Hud.js, fallbacks only before it runs) */
+  --ui-fs-main: calc(var(--ui-font-main, 12) * 1px);   /* main numbers: resources, HP */
+  --ui-fs-small: calc(var(--ui-font-small, 11) * 1px); /* everything else */
+  --ui-hit-px: calc(var(--ui-hit, 32) * 1px);          /* clickable target: real px */
+  --ui-fs-dialog: calc(var(--ui-dialog-font, 14) * 1px);
   --hud-edge-gap: 10px;        /* screen-edge band (unscaled) that stays free of opaque frame blocks: edge scrolling needs the canvas there */
   /* the same band measured from the edge of the (pushed out) root, per side */
   --hud-edge-l: calc(var(--hud-ml, 0) * var(--hud-u) + var(--hud-edge-gap));
@@ -41,7 +46,7 @@
 
 /* The frame artwork has a transparent margin on every side (HUD_V2.frameBleed, base px, published by Hud.js as --hud-ml/-mr/-mt/-mb):
    the root is pushed out by it, so the frame reaches the screen edge while every slot keeps its base coordinates. */
-#hud-root { position: fixed; inset: calc(-1 * var(--hud-mt, 0) * var(--hud-u)) calc(-1 * var(--hud-mr, 0) * var(--hud-u)) calc(-1 * var(--hud-mb, 0) * var(--hud-u)) calc(-1 * var(--hud-ml, 0) * var(--hud-u)); pointer-events: none; z-index: 3; color: var(--hud-text); font-family: system-ui, sans-serif; font-size: max(11px, calc(13 * var(--hud-u))); }
+#hud-root { position: fixed; inset: calc(-1 * var(--hud-mt, 0) * var(--hud-u)) calc(-1 * var(--hud-mr, 0) * var(--hud-u)) calc(-1 * var(--hud-mb, 0) * var(--hud-u)) calc(-1 * var(--hud-ml, 0) * var(--hud-u)); pointer-events: none; z-index: 3; color: var(--hud-text); font-family: system-ui, sans-serif; font-size: max(var(--ui-fs-small), calc(13 * var(--hud-u))); }
 #hud-root[hidden] { display: none; }
 body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { visibility: hidden; }
 /* floating popup (help) – the only steel box left; everything else is frame artwork */
@@ -49,7 +54,7 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
   pointer-events: auto; box-sizing: border-box; padding: 8px 10px; background: var(--hud-bg-strong); border: 1px solid var(--hud-border);
   box-shadow: var(--menu-edge), 0 3px 10px rgba(0,0,0,0.55);
 }
-#hud-root h3 { margin: 0; font-size: max(11px, calc(12 * var(--hud-u))); font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: var(--hud-accent); }
+#hud-root h3 { margin: 0; font-size: max(var(--ui-fs-small), calc(12 * var(--hud-u))); font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: var(--hud-accent); }
 :where(#hud-root button) { font: inherit; color: inherit; } /* :where keeps the specificity low so class rules can set sizes */
 #hud-root .muted { color: var(--hud-muted); }
 #hud-root .warn { color: var(--hud-warn); }
@@ -95,8 +100,8 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 .hud-res-ore { left: calc(2 * var(--hud-u)); width: calc(100 * var(--hud-u)); }
 .hud-res-energy { left: calc(105 * var(--hud-u)); width: calc(117 * var(--hud-u)); }
 .hud-res-population { left: calc(225 * var(--hud-u)); width: calc(105 * var(--hud-u)); }
-.hud-res i { font-style: normal; flex: 0 0 auto; width: calc(20 * var(--hud-u)); text-align: center; font-size: max(11px, calc(14 * var(--hud-u))); }
-.hud-res b { font-weight: 600; font-size: max(11px, calc(15 * var(--hud-u))); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+.hud-res i { font-style: normal; flex: 0 0 auto; width: calc(20 * var(--hud-u)); text-align: center; font-size: max(var(--ui-fs-small), calc(14 * var(--hud-u))); }
+.hud-res b { font-weight: 600; font-size: max(var(--ui-fs-main), calc(15 * var(--hud-u))); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
 .hud-res.disabled b { color: var(--hud-muted); }
 .hud-res.warn b { color: var(--hud-warn, #f0a030); } /* energy at its cap, population full */
 
@@ -117,12 +122,12 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 /* OptionGrid (data-el="optionGrid") renders title, tabs, grid, summary, action as direct children: they join the column */
 [data-el="optionGrid"] { display: contents; }
 /* spacer for the title slot, so the grid always starts at y 76 even for a view without a title */
-.hud-prod-col::before { content: ""; order: 0; display: block; height: calc(33 * var(--hud-u)); }
-.hud-prod-col h3 { position: absolute; left: calc(12 * var(--hud-u)); top: 0; display: block; box-sizing: border-box; width: calc(212 * var(--hud-u)); height: calc(22 * var(--hud-u)); margin: 0; line-height: calc(22 * var(--hud-u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-prod-col::before { content: ""; order: 0; display: block; flex: 0 0 auto; height: calc(33 * var(--hud-u)); }
+.hud-prod-col h3 { z-index: 1; position: absolute; left: calc(12 * var(--hud-u)); top: 0; display: block; box-sizing: border-box; width: calc(212 * var(--hud-u)); height: calc(22 * var(--hud-u)); margin: 0; line-height: calc(22 * var(--hud-u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* [W3] the grid is at least 4×4 cells and grows with its rows (the whole building list fits; the panel's mid strip follows, Hud.#fitProduction) */
-.hud-grid { order: 1; display: grid; grid-template-columns: repeat(var(--hud-cols, 4), calc(60 * var(--hud-u))); grid-auto-rows: calc(60 * var(--hud-u)); align-content: start; gap: 0; width: calc(240 * var(--hud-u) + 6px); height: auto; min-height: calc(240 * var(--hud-u)); margin-bottom: calc(2 * var(--hud-u)); overflow-x: hidden; overflow-y: auto; }
+.hud-grid { order: 1; position: relative; z-index: 0; display: grid; grid-template-columns: repeat(var(--hud-cols, 4), calc(60 * var(--hud-u))); grid-auto-rows: calc(60 * var(--hud-u)); align-content: start; gap: 0; width: calc(240 * var(--hud-u) + 6px); height: auto; min-height: calc(240 * var(--hud-u)); margin-bottom: calc(2 * var(--hud-u)); overflow-x: hidden; overflow-y: auto; }
 .hud-tabs { order: 2; display: flex; gap: 3px; margin-bottom: 4px; }
-.hud-summary { order: 3; margin-top: 2px; padding-top: 4px; border-top: 1px solid var(--hud-line); font-size: max(11px, calc(11.5 * var(--hud-u))); color: #b9c4cf; }
+.hud-summary { order: 3; margin-top: 2px; padding-top: 4px; border-top: 1px solid var(--hud-line); font-size: max(var(--ui-fs-small), calc(11.5 * var(--hud-u))); color: #b9c4cf; }
 .hud-action { order: 4; }
 .hud-queue { order: 5; display: flex; flex-direction: column; margin-top: calc(2 * var(--hud-u)); }
 .hud-queue:empty { display: none; }
@@ -132,16 +137,16 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 #hud-root ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--hud-neon, #3ea6ff) 55%, #0a1018); border: 1px solid var(--hud-neon, #3ea6ff); border-radius: 0; }
 #hud-root ::-webkit-scrollbar-thumb:hover { background: var(--hud-neon, #3ea6ff); }
 #hud-root ::-webkit-scrollbar-corner { background: transparent; }
-.hud-back { float: right; padding: 0 calc(8 * var(--hud-u)); height: calc(18 * var(--hud-u)); margin-top: calc(2 * var(--hud-u)); line-height: 1; border-radius: 0; border: 1px solid var(--hud-border); background: rgba(8, 24, 44, .8); cursor: pointer; text-transform: uppercase; letter-spacing: .08em; font-size: max(11px, calc(10 * var(--hud-u))); }
+.hud-back { float: right; padding: 0 calc(8 * var(--hud-u)); height: calc(18 * var(--hud-u)); margin-top: calc(2 * var(--hud-u)); line-height: 1; border-radius: 0; border: 1px solid var(--hud-border); background: rgba(8, 24, 44, .8); cursor: pointer; text-transform: uppercase; letter-spacing: .08em; font-size: max(var(--ui-fs-small), calc(10 * var(--hud-u))); }
 .hud-back:hover { border-color: var(--menu-accent); box-shadow: var(--menu-neon-glow); }
-.hud-tabs button { flex: 1; padding: 3px 2px; border-radius: 0; border: 1px solid var(--hud-line); background: transparent; cursor: pointer; font-size: max(11px, calc(11 * var(--hud-u))); text-transform: uppercase; letter-spacing: .06em; }
+.hud-tabs button { flex: 1; padding: 3px 2px; border-radius: 0; border: 1px solid var(--hud-line); background: transparent; cursor: pointer; font-size: max(var(--ui-fs-small), calc(11 * var(--hud-u))); text-transform: uppercase; letter-spacing: .06em; }
 .hud-tabs button:hover { border-color: var(--menu-border-hover); }
 .hud-tabs button.on { background: var(--hud-cell-on); border-color: var(--hud-primary); box-shadow: inset 0 -2px 0 var(--menu-accent); }
 
 /* production queue rows (one item = one production_mid strip) */
 .hud-qitem { position: relative; box-sizing: border-box; height: calc(var(--hud-prod-row-h) * var(--hud-u)); padding: 0 calc(8 * var(--hud-u)); display: flex; align-items: center; gap: calc(8 * var(--hud-u)); cursor: pointer; overflow: hidden; background: rgba(8, 24, 44, .55); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hud-neon, #3ea6ff) 30%, transparent); }
 .hud-qitem:hover { background: color-mix(in srgb, var(--hud-neon, #3ea6ff) 18%, rgba(8, 24, 44, .7)); }
-.hud-qitem .ico { flex: 0 0 auto; width: calc(26 * var(--hud-u)); text-align: center; font-size: max(11px, calc(18 * var(--hud-u))); }
+.hud-qitem .ico { flex: 0 0 auto; width: calc(26 * var(--hud-u)); text-align: center; font-size: max(var(--ui-fs-small), calc(18 * var(--hud-u))); }
 .hud-qitem .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hud-qitem .tm { flex: 0 0 auto; color: var(--hud-muted); font-variant-numeric: tabular-nums; }
 .hud-qitem .bar { position: absolute; left: 0; bottom: 0; height: calc(4 * var(--hud-u)); background: var(--hud-accent); }
@@ -161,14 +166,18 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 .hud-cell.pending { outline: 2px solid var(--hud-pending); outline-offset: -2px; }
 .hud-cell:disabled { opacity: .35; cursor: default; }
 .hud-cell.empty { visibility: hidden; }
-.hud-cell .ico { font-size: max(14px, calc(18 * var(--hud-u))); line-height: 1; }
+.hud-cell .ico { font-size: max(calc(var(--ui-font-small, 11) * 1px + 3px), calc(18 * var(--hud-u))); line-height: 1; } /* letter / emoji fallback glyph floor = small floor + 3 */
 /* Building icons rendered at runtime (src/ui/IconRenderer.js); the letters stay as the fallback */
 .ico-img { display: block; width: 1em; height: 1em; object-fit: contain; pointer-events: none; }
-.hud-cell .ico-img { width: max(30px, calc(44 * var(--hud-u))); height: max(30px, calc(44 * var(--hud-u))); }
+/* icon box fills the cell above the label (label keeps its 2 lines, the icon never overlaps it); letters / emoji stay centred in it */
+.hud-cell .ico { flex: 1 1 0; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.hud-cell .lbl { flex: 0 0 auto; }
+.hud-cell .ico-img { width: 100%; height: 100%; object-fit: contain; }
 #queue-frame .qf-item .ico-img { width: calc(34 * var(--hud-u)); height: calc(34 * var(--hud-u)); }
+.stk-name .ico-img { display: inline-block; width: 2em; height: 2em; vertical-align: middle; margin-right: .4em; } /* part stock window rows */
 /* label: up to 2 lines (min 11 px), long words break; the full text is in the tooltip (title of the cell) */
-.hud-cell .lbl { font-size: max(11px, calc(10 * var(--hud-u))); line-height: 1.05; text-align: center; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; hyphens: auto; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
-.hud-cell kbd { position: absolute; right: calc(3 * var(--hud-u)); top: calc(1 * var(--hud-u)); max-width: calc(100% - 6px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1; box-sizing: border-box; font: max(11px, calc(9 * var(--hud-u))) system-ui, sans-serif; color: var(--hud-muted); }
+.hud-cell .lbl { font-size: max(var(--ui-fs-small), calc(10 * var(--hud-u))); line-height: 1.05; text-align: center; max-width: 100%; overflow: hidden; overflow-wrap: normal; word-break: normal; hyphens: manual; text-overflow: clip; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.hud-cell kbd { position: absolute; right: calc(3 * var(--hud-u)); top: calc(1 * var(--hud-u)); max-width: calc(100% - 6px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1; box-sizing: border-box; font: max(var(--ui-fs-small), calc(9 * var(--hud-u))) system-ui, sans-serif; color: var(--hud-muted); }
 .hud-summary div { display: flex; justify-content: space-between; gap: 8px; margin: 1px 0; }
 .hud-summary b { color: var(--hud-text); font-weight: 600; text-align: right; }
 .hud-action { width: 100%; margin-top: 4px; padding: 5px; border: 1px solid var(--menu-accent); border-radius: 0; color: #fff !important; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; text-shadow: 0 1px 2px rgba(0,0,0,.6); cursor: pointer; background: linear-gradient(180deg, color-mix(in srgb, var(--hud-neon, #3ea6ff) 22%, #0a1018), color-mix(in srgb, var(--hud-neon, #3ea6ff) 10%, #060a10)); box-shadow: var(--menu-neon-inset); }
@@ -176,13 +185,13 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 .hud-action:disabled { background: #1a1e23; border-color: var(--menu-border-soft); box-shadow: none; text-shadow: none; color: var(--hud-muted) !important; cursor: default; }
 
 /* ---------- bottom left: idle crew / idle builder (slots above the command block) and the command grid ---------- */
-.hud-idle { position: absolute; z-index: 2; bottom: calc((var(--hud-idle-from-bottom) - 60) * var(--hud-u)); width: calc(var(--hud-idle-size) * var(--hud-u)); height: calc(var(--hud-idle-size) * var(--hud-u)); box-sizing: border-box; pointer-events: auto; padding: 0; border-radius: 0; border: 2px solid var(--hud-pending); background: var(--hud-bg-strong); cursor: pointer; font-size: max(14px, calc(22 * var(--hud-u))); display: grid; place-items: center; animation: hud-idle-pulse 1.6s ease-in-out infinite; }
+.hud-idle { position: absolute; z-index: 2; bottom: calc((var(--hud-idle-from-bottom) - 60) * var(--hud-u)); width: calc(var(--hud-idle-size) * var(--hud-u)); height: calc(var(--hud-idle-size) * var(--hud-u)); box-sizing: border-box; pointer-events: auto; padding: 0; border-radius: 0; border: 2px solid var(--hud-pending); background: var(--hud-bg-strong); cursor: pointer; font-size: max(calc(var(--ui-font-small, 11) * 1px + 3px), calc(22 * var(--hud-u))); display: grid; place-items: center; animation: hud-idle-pulse 1.6s ease-in-out infinite; }
 .hud-idle[hidden] { display: none; }
 /* three equal squares side by side: x = left + n × (size + gap) (config HUD_V2.idleButton) */
 .hud-idle-crew { left: calc(var(--hud-idle-left) * var(--hud-u)); }
 .hud-idle-builder { left: calc((var(--hud-idle-left) + var(--hud-idle-size) + var(--hud-idle-gap)) * var(--hud-u)); }
 .hud-idle-drill { left: calc((var(--hud-idle-left) + 2 * (var(--hud-idle-size) + var(--hud-idle-gap))) * var(--hud-u)); }
-.hud-idle b { position: absolute; right: -2px; bottom: -2px; min-width: 18px; height: 18px; border-radius: 0; background: var(--hud-pending); color: #1b1f24; font-size: 11px; display: grid; place-items: center; padding: 0 3px; box-sizing: border-box; }
+.hud-idle b { position: absolute; right: -2px; bottom: -2px; min-width: 18px; height: 18px; border-radius: 0; background: var(--hud-pending); color: #1b1f24; font-size: var(--ui-fs-small); display: grid; place-items: center; padding: 0 3px; box-sizing: border-box; }
 @keyframes hud-idle-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--hud-pending) 30%, transparent); } }
 .hud-cmd { position: absolute; z-index: 2; left: calc(59 * var(--hud-u)); bottom: calc(40 * var(--hud-u)); width: calc(240 * var(--hud-u)); pointer-events: auto; }
 .hud-cmd .hud-grid { width: calc(240 * var(--hud-u)); margin-bottom: 0; overflow: hidden; }
@@ -193,14 +202,25 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 .hud-group { pointer-events: auto; display: flex; align-items: baseline; justify-content: center; gap: calc(4 * var(--hud-u)); min-width: calc(38 * var(--hud-u)); height: calc(26 * var(--hud-u)); box-sizing: border-box; padding: 0 calc(6 * var(--hud-u)); align-items: center; border-radius: 0; border: 1px solid color-mix(in srgb, var(--hud-neon, #3ea6ff) 45%, transparent); background: rgba(8, 24, 44, .85); cursor: pointer; line-height: 1; }
 .hud-group:hover { background: color-mix(in srgb, var(--hud-neon, #3ea6ff) 18%, rgba(8, 24, 44, .85)); border-color: var(--menu-accent); }
 .hud-group.on { background: color-mix(in srgb, var(--hud-neon, #3ea6ff) 28%, rgba(8, 24, 44, .85)); border-color: var(--menu-accent); box-shadow: var(--menu-neon-inset); }
-.hud-group b { font-size: max(11px, calc(13 * var(--hud-u))); }
-.hud-group small { font-size: max(11px, calc(10 * var(--hud-u))); color: var(--hud-muted); }
-.hud-top-btn { position: absolute; z-index: 2; top: calc(24 * var(--hud-u)); height: calc(38 * var(--hud-u)); padding: 0; pointer-events: auto; border-radius: 0; border: 1px solid transparent; background: transparent; cursor: pointer; font-weight: 700; font-size: max(11px, calc(18 * var(--hud-u))); }
+.hud-group b { font-size: max(var(--ui-fs-main), calc(13 * var(--hud-u))); }
+/* click target: the visible chip / button keeps its scaled size, an invisible layer grows the hit area to --ui-hit real px */
+.hud-group, .hud-top-btn, .hud-idle { --hit-h: calc(26 * var(--hud-u)); }
+.hud-idle { --hit-w: calc(var(--hud-idle-size) * var(--hud-u)); }
+.hud-top-btn { --hit-h: calc(38 * var(--hud-u)); --hit-w: calc(40 * var(--hud-u)); }
+.hud-groups { row-gap: max(calc(4 * var(--hud-u)), calc(var(--ui-hit-px) - 26 * var(--hud-u))); } /* wrapped chip rows: hit layers never overlap */
+.hud-idle { --hit-h: calc(var(--hud-idle-size) * var(--hud-u)); }
+.hud-top-btn::after, .hud-idle::after { left: calc(-0.5 * max(0px, var(--ui-hit-px) - var(--hit-w))) !important; right: calc(-0.5 * max(0px, var(--ui-hit-px) - var(--hit-w))) !important; }
+.hud-group::after, .hud-top-btn::after, .hud-idle::after { content: ""; position: absolute; left: 0; right: 0; top: calc(-0.5 * max(0px, var(--ui-hit-px) - var(--hit-h))); bottom: calc(-0.5 * max(0px, var(--ui-hit-px) - var(--hit-h))); }
+.hud-group { position: relative; }
+.hud-tabs button { min-height: var(--ui-hit-px); }  /* queue rows keep their art-aligned height (--hud-prod-row-h) */
+.hud-back::after { content: ""; position: absolute; inset: -8px -4px; } .hud-back { position: relative; }
+.hud-group small { font-size: max(var(--ui-fs-small), calc(10 * var(--hud-u))); color: var(--hud-muted); }
+.hud-top-btn { position: absolute; z-index: 2; top: calc(24 * var(--hud-u)); height: calc(38 * var(--hud-u)); padding: 0; pointer-events: auto; border-radius: 0; border: 1px solid transparent; background: transparent; cursor: pointer; font-weight: 700; font-size: max(var(--ui-fs-small), calc(18 * var(--hud-u))); }
 .hud-top-btn[hidden] { display: none; }
 .hud-top-btn:hover { border-color: var(--menu-accent); box-shadow: var(--menu-neon-inset); }
 .hud-dip-btn { right: calc(76 * var(--hud-u)); width: calc(41 * var(--hud-u)); }
 .hud-help-btn { right: calc(28 * var(--hud-u)); width: calc(39 * var(--hud-u)); }
-.hud-help { position: absolute; z-index: 5; top: calc(70 * var(--hud-u)); right: calc(28 * var(--hud-u)); width: calc(360 * var(--hud-u)); font-size: max(11px, calc(12 * var(--hud-u))); line-height: 1.5; color: #b9c4cf; }
+.hud-help { position: absolute; z-index: 5; top: calc(70 * var(--hud-u)); right: calc(28 * var(--hud-u)); width: calc(360 * var(--hud-u)); font-size: max(var(--ui-fs-small), calc(12 * var(--hud-u))); line-height: 1.5; color: #b9c4cf; }
 .hud-help[hidden] { display: none; }
 
 /* ---------- bottom centre container (content: SelectionPanel / RobotPanel, styled by hud2-panels in its own CSS) ----------
@@ -222,7 +242,7 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 .uo .b { height: var(--uo-h, 5px); background: rgba(0, 0, 0, .55); border: 1px solid var(--uo-border, #000); border-radius: 0; overflow: hidden; box-sizing: content-box; }
 .uo .b > i { display: block; height: 100%; }
 .uo .ico { font-size: 12px; line-height: 1; text-shadow: 0 0 2px #000; }
-.hud-tooltip { position: fixed; z-index: 6; pointer-events: none; background: var(--hud-bg-strong); border: 1px solid var(--hud-border); border-radius: 0; box-shadow: var(--menu-edge), 0 3px 10px rgba(0,0,0,.6); padding: 6px 8px; font: 12px system-ui, sans-serif; color: var(--hud-text); white-space: nowrap; }
+.hud-tooltip { position: fixed; z-index: 6; pointer-events: none; background: var(--hud-bg-strong); border: 1px solid var(--hud-border); border-radius: 0; box-shadow: var(--menu-edge), 0 3px 10px rgba(0,0,0,.6); padding: 6px 8px; font: var(--ui-fs-dialog) system-ui, sans-serif; color: var(--hud-text); white-space: nowrap; }
 .hud-tooltip[hidden] { display: none; }
 .hud-tooltip b { color: var(--hud-accent); }
 #hud-message { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 7; max-width: 480px; padding: 12px 16px; border-radius: 0; border: 1px solid var(--hud-warn); box-shadow: var(--menu-edge), 0 0 10px rgba(255,180,84,.3); background: var(--hud-bg-strong); color: var(--hud-warn); font: 700 14px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .08em; }
@@ -237,7 +257,7 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 }
 
 /* ---- player statistics above the minimap: stats_top (header) + one stats_row per team + stats_bottom (PlayerStatsBar.js) ---- */
-#player-stats-bar { position: absolute; z-index: 3; right: calc(25 * var(--hud-u)); bottom: calc(305 * var(--hud-u)); width: calc(255 * var(--hud-u)); isolation: isolate; pointer-events: auto; color: var(--hud-text); font: max(11px, calc(12 * var(--hud-u))) system-ui, sans-serif; }
+#player-stats-bar { position: absolute; z-index: 3; right: calc(25 * var(--hud-u)); bottom: calc(305 * var(--hud-u)); width: calc(255 * var(--hud-u)); isolation: isolate; pointer-events: auto; color: var(--hud-text); font: max(var(--ui-fs-small), calc(12 * var(--hud-u))) system-ui, sans-serif; }
 #player-stats-bar[hidden] { display: none; }
 #player-stats-bar .psb-row, #player-stats-bar .psb-foot { position: relative; box-sizing: border-box; }
 #player-stats-bar .psb-row::before, #player-stats-bar .psb-foot::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; filter: var(--hud-frame-filter, none); background: no-repeat 0 0 / 100% 100% url("../../data/image/ui/hud2/stats_row.png"); }
@@ -259,11 +279,11 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 .hud-clock {
   position: absolute; z-index: 2; left: calc(50% - 16 * var(--hud-u)); top: calc(17 * var(--hud-u)); width: calc(77 * var(--hud-u)); height: calc(35 * var(--hud-u)); box-sizing: border-box;
   display: flex; align-items: center; justify-content: center; gap: 4px; pointer-events: none; white-space: nowrap;
-  font: 700 max(11px, calc(14 * var(--hud-u))) var(--menu-font, system-ui, sans-serif); letter-spacing: 0.06em; font-variant-numeric: tabular-nums;
+  font: 700 max(var(--ui-fs-small), calc(14 * var(--hud-u))) var(--menu-font, system-ui, sans-serif); letter-spacing: 0.06em; font-variant-numeric: tabular-nums;
   color: var(--hud-text);
 }
 .hud-clock[hidden] { display: none; }
-.hud-clock small { font-size: 11px; color: var(--hud-pending); letter-spacing: 0.04em; }
+.hud-clock small { font-size: var(--ui-fs-small); color: var(--hud-pending); letter-spacing: 0.04em; }
 .match-speed { display: flex; flex-direction: column; gap: 4px; }
 .match-speed-row { display: flex; gap: 6px; }
 .match-card .match-speed-row button { flex: 1 1 0; padding: 8px 4px; letter-spacing: 0.04em; }
@@ -333,3 +353,30 @@ body #match-observer { top: calc(70 * var(--hud-u)); }
 .wall-cost-tip[hidden] { display: none; }
 .wall-cost-tip .bad { color: #ff5a4d; }
 .wall-cost-tip .muted { color: var(--hud-muted); font-weight: 400; }
+
+/* ---------- [A5] detail levels: .hud-compact / .hud-tiny on #hud-root (Hud.js #applyLevel, breakpoints = UI_SCALE.breakpoints / narrowWidth) ----------
+   Priority when space is short (user decision c5): robot panel labels → control group chip labels → player stats.
+   The production queue always stays; whatever is hidden is still in the tooltip (title) of its element. */
+/* compact: robot panel keeps the first line (name, HP, bar); the second line (details, bonuses) is in the tooltip; weapon names next to the part name go too */
+#hud-root.hud-compact .rp-lbody .rp-line:nth-child(2), #hud-root.hud-tiny .rp-lbody .rp-line:nth-child(2),
+#hud-root.hud-compact .rp-name small, #hud-root.hud-tiny .rp-name small { display: none; }
+/* HP line is a main number: 12 px floor */
+#hud-root .rp-line:first-child { font-size: max(var(--ui-fs-main), 1em); }
+/* compact: slimmer control group chips (the unit count stays in the title) */
+#hud-root.hud-compact .hud-group, #hud-root.hud-tiny .hud-group { min-width: 0; padding: 0 calc(4 * var(--hud-u)); gap: calc(2 * var(--hud-u)); }
+/* compact: player statistics show the SOLO column only */
+#hud-root.hud-compact #player-stats-bar .psb-val:nth-child(4), #hud-root.hud-tiny #player-stats-bar .psb-val:nth-child(4) { display: none; }
+/* tiny: robot state text and chip counts go too; player statistics fold into one wrapping row of colour + value chips */
+#hud-root.hud-tiny .rp-state, #hud-root.hud-tiny .hud-group small { display: none; }
+#hud-root.hud-tiny #player-stats-bar { display: flex; flex-wrap: wrap; gap: calc(2 * var(--hud-u)) calc(8 * var(--hud-u)); padding: calc(3 * var(--hud-u)) calc(6 * var(--hud-u)); box-sizing: border-box; background: rgba(8, 24, 44, .8); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hud-neon, #3ea6ff) 35%, transparent); }
+#hud-root.hud-tiny #player-stats-bar[hidden] { display: none; }
+#hud-root.hud-tiny #player-stats-bar .psb-head, #hud-root.hud-tiny #player-stats-bar .psb-foot, #hud-root.hud-tiny #player-stats-bar .psb-name { display: none; }
+#hud-root.hud-tiny #player-stats-bar .psb-row { height: auto; padding: 0; box-shadow: none; gap: calc(3 * var(--hud-u)); }
+#hud-root.hud-tiny #player-stats-bar .psb-row::before { display: none; }
+#hud-root.hud-tiny #player-stats-bar .psb-val { flex: 0 0 auto; min-width: calc(30 * var(--hud-u)); }
+/* tiny: the production column scrolls (max height already limited by --hud-prod-col-max); show the scrollbar room */
+#hud-root.hud-tiny .hud-prod-col { overscroll-behavior: contain; }
+/* long cell labels: break instead of overflowing the 60 px cell */
+.hud-cell .lbl { word-break: normal; overflow-wrap: normal; } /* never break inside a word; a word wider than the cell is clipped (full text in the tooltip) */
+/* robot panel EJECT: visible size unchanged, invisible layer grows the hit area to --ui-hit real px (--h / --rp-u: slot height in image px) */
+.rp-eject::after { content: ""; position: absolute; left: 0; right: 0; top: calc(-0.5 * max(0px, var(--ui-hit-px) - var(--h) * var(--rp-u))); bottom: calc(-0.5 * max(0px, var(--ui-hit-px) - var(--h) * var(--rp-u))); }

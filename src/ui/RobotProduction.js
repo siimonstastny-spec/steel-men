@@ -10,8 +10,10 @@
 //   • service page while a mech is inside: 'serviceRepair' / 'serviceSwap' / 'serviceCancel' / 'serviceRelease'
 //   • 3D hologram in every own bay (MechHologram): the mech being assembled (Frame for parts not installed yet,
 //     the parts appear one by one with the progress) or, while the bay is selected, the preview of the choice.
-import { HUD, ROBOT_PRODUCTION, HOLOGRAM, ARMS, BAY_CREW, SHIFT_BATCH, PART_SALE } from '../config.js';
+import { HUD, ROBOT_PRODUCTION, HOLOGRAM, ARMS, BAY_CREW, SHIFT_BATCH, PART_SALE, TEAMS } from '../config.js';
+import { partIconUrl } from './IconRenderer.js';
 import { bayCrewCount } from '../game/BayCrew.js';
+import { weaponName } from './hudUtil.js';
 import { partStats, mechStatsFromLoadout, mechAssemblyStats } from '../data/Stats.js';
 import { t } from '../i18n/i18n.js';
 import { MECH_SLOTS, PART_SLOTS, ARM_SLOTS, partOptions, framePart, catalogSlot, armModel, stockKey } from '../game/PartStock.js';
@@ -86,10 +88,16 @@ export class RobotProduction {
   /** Model to mount in a mech slot for a stocked entry (arms: the model of that side) */
   #modelFor(p, slot) { return ARM_SLOTS.includes(slot) ? armModel(p.path, slot) : p.path; }
 
+  /** Rendered icon of a catalog part for a (factory or mech) slot in the local team's colour; undefined until ready (letters stay) */
+  #iconUrl(p, slot) {
+    const mechSlot = slot === ARMS.slot ? ARMS.canonicalSlot : slot;
+    return partIconUrl(mechSlot, this.#modelFor(p, mechSlot), this.race, TEAMS[this.team]?.color) ?? undefined;
+  }
+
   /** Tooltip of a part (stats of an arm do not depend on the side) */
   #partTip(p, slot) {
     const s = partStats(p.path, catalogSlot(slot), this.race);
-    const weapons = (s.weapons ?? []).map((w) => w.id).join(', ');
+    const weapons = (s.weapons ?? []).map((w) => weaponName(w.id)).join(', ');
     return [`${t(`part.${slot}`)}: ${p.set}`, t('grid.cost', { ore: s.cost?.ore ?? 0, energy: s.cost?.energy ?? 0 }),
       t('grid.time', { time: +(s.buildTime ?? 0).toFixed(TIME_DECIMALS) }), `HP ${s.hp ?? '–'}`, weapons,
       t('parts.inStock', { n: this.stock.count(this.team, p.path) })].filter(Boolean).join('\n');
@@ -111,7 +119,7 @@ export class RobotProduction {
     const slot = this.factorySlot;
     const full = this.queue.isFull(producer);
     const items = partOptions(this.catalog, slot, this.race, this.buildMenu.unlocks).map((p) => ({
-      icon: p.set.slice(0, ROBOT_PRODUCTION.setIconLetters), label: p.set, disabled: full,
+      icon: p.set.slice(0, ROBOT_PRODUCTION.setIconLetters), iconUrl: this.#iconUrl(p, slot), label: p.set, disabled: full,
       tip: [this.#partTip(p, slot), t('grid.shiftBatch', { n: SHIFT_BATCH.count }), this.#fullTip(producer)].filter(Boolean).join('\n'),
       onClick: (e) => this.#queuePart(structure, slot, p, e?.shift),
     }));
@@ -195,7 +203,7 @@ export class RobotProduction {
       const left = this.#available(slot, p.path); // arms: one in stock cannot go on both sides
       const model = this.#modelFor(p, slot);
       return {
-        icon: p.set.slice(0, ROBOT_PRODUCTION.setIconLetters), label: p.set, on: this.loadout[slot] === model,
+        icon: p.set.slice(0, ROBOT_PRODUCTION.setIconLetters), iconUrl: this.#iconUrl(p, slot), label: p.set, on: this.loadout[slot] === model,
         disabled: left <= 0 && this.loadout[slot] !== model,
         tip: [this.#partTip(p, slot), left <= 0 && ARM_SLOTS.includes(slot) ? t('assembly.armOther') : ''].filter(Boolean).join('\n'),
         onClick: () => this.#choose(structure, slot, model),
@@ -297,7 +305,7 @@ export class RobotProduction {
     for (const p of this.#stocked(slot)) {
       const model = this.#modelFor(p, slot); // arms from the shared stock, model of this side
       items.push({
-        icon: p.set.slice(0, ROBOT_PRODUCTION.setIconLetters), label: p.set,
+        icon: p.set.slice(0, ROBOT_PRODUCTION.setIconLetters), iconUrl: this.#iconUrl(p, slot), label: p.set,
         on: task?.type === 'swap' && task.slot === slot && task.path === model,
         disabled: locked || mounted?.stats.path === model,
         tip: [this.#partTip(p, slot), t(mounted ? 'service.swap.tip' : 'service.mount.tip')].join('\n'),

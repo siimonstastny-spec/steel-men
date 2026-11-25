@@ -76,7 +76,7 @@ function profileAt(profile, t) {
  * Shoulder, upper arm and elbow of every arm: bones shoulder → elbow → fist (GLB-like nodes), hub + team pauldron with a
  * light trim (fin on sharp styles), lofted upper arm, elbow hub. Returns the bone names and the mirror helper.
  */
-function buildUpperArm(ub, kit, ctx, D, { elbowRim = true } = {}) {
+export function buildUpperArm(ub, kit, ctx, D, { elbowRim = true } = {}) {
   const S = kit.S;
   const sg = ctx.side;
   const m = ([x, y, z]) => [x * sg, y, z];

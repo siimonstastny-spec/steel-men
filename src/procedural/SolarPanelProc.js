@@ -473,7 +473,9 @@ export class SolarPanelProc extends ProcModel {
 
   /**
    * Per-frame animation (no allocations). `active` is ignored: a solar panel tracks the sun and glows all the time.
-   * @param {number} delta seconds
+   * Unpowered: ProcModel.tick() hands in `delta * animScale` (0 when dark), so the follow factor `k` is 0 and the panel
+   * stays put (the sunClock / sun direction is only a target, never applied directly) while fan / ring / glow clocks stop.
+   * @param {number} delta seconds (already scaled by the power fade)
    * @param {boolean} [active]  unused
    * @param {number} [sunClock] shared sun clock = seconds × STRUCTURE.sunTrackingSpeed (Structure supplies it; the model
    *   reads no real time itself); without it (preview) the shared-clock mode keeps the model's own clock `this.time`

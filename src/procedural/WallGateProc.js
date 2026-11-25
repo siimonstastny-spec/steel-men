@@ -12,6 +12,7 @@
 //   • the gate is NOT batched (the leaf moves): enableBatching() is empty, so the meshes are always drawn
 // Draw calls: static, leaf, emblem, 1–2 light glow layers = 4–5 (faceted: static, emblem, 3 glow layers + light = 5–6).
 // Triangles ≈ 150–400. No allocations in update().
+import { PROC_STATE } from '../config.js';
 import { PartBuilder, Blinker, smootherstep } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, marking, neonStrip, beacon, spike, emblemDecalGeometry, pulseWave,
@@ -242,8 +243,10 @@ export class WallGateProc extends ProcModel {
   /** Per-frame animation (numbers only, no allocations); `active` is unused */
   update(delta) {
     if (!this.shared) return;
-    this.time += delta;
-    const step = delta * WALL_ANIM.gateSpeed;
+    const dt = delta;   // already scaled by animScale in tick(): barrier pulse and blinking stop without power
+    this.time += dt;
+    // the leaf itself still moves (mechanical, real time); without power only slowly (PROC_STATE.gateUnpoweredSpeed)
+    const step = (this.realDelta || delta) * WALL_ANIM.gateSpeed * (this.powered ? 1 : PROC_STATE.gateUnpoweredSpeed);
     if (this.target > this.openness) this.openness = Math.min(this.target, this.openness + step);
     else if (this.target < this.openness) this.openness = Math.max(this.target, this.openness - step);
     const eased = smootherstep(this.openness);
@@ -252,7 +255,7 @@ export class WallGateProc extends ProcModel {
       this.leaf.visible = eased < 1;
     }
     const moving = this.openness > 0 && this.openness < 1;
-    this.blink.update(delta, moving);
+    this.blink.update(dt, moving);
     const lit = moving ? (this.blink.on ? 1 : 0) : this.openness;   // blinking while it moves, steady when open, off when closed
     this.beaconGlow?.setIntensity(lit);
     const barrier = (1 - eased) * pulseWave(this.time, this.pulseHz);

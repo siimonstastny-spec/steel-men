@@ -10,10 +10,9 @@
 //   above units   health / progress bars (UnitOverlays), wreck tooltip under the cursor
 // --hud-scale (unitless, on :root) = clamp(min(W / 1920, H / 1080), HUD_V2.scaleMin, HUD_V2.scaleMax), updated on resize.
 import * as THREE from 'three';
-import { commandBus } from '../game/commands/CommandBus.js';
-import { HUD, HUD_V2, ECONOMY_ALERTS, KEYBINDINGS, FORMATION, SIM, GAME_CLOCK, GAME_SPEED, IDLE_BUILDER, IDLE_DRILL, ORE_ICON } from '../config.js';
+import { HUD, HUD_V2, UI_SCALE, ECONOMY_ALERTS, KEYBINDINGS, FORMATION, SIM, GAME_CLOCK, GAME_SPEED, IDLE_BUILDER, IDLE_DRILL, ORE_ICON } from '../config.js';
 import { localTeam } from '../core/LocalPlayer.js';
-import { getSettings } from '../core/Profile.js';
+import { getSettings, onSettingsChange } from '../core/Profile.js';
 import { formatGameTime, gameSpeed, speedLabel } from '../game/GameSpeed.js';
 import { getStats } from '../data/Stats.js';
 import { t, getLanguage } from '../i18n/i18n.js';
@@ -22,6 +21,7 @@ import { OptionGrid } from './OptionGrid.js';
 import { setHtmlKeepScroll } from './scrollKeep.js';
 import { SelectionPanel } from './SelectionPanel.js';
 import { UnitOverlays } from './UnitOverlays.js';
+import { TerrainLabel } from './TerrainLabel.js'; // [A14-ui] terrain type + speed factor under the cursor
 import { OrderQueueMarkers } from './OrderQueueMarkers.js';
 import { Pings } from './Pings.js'; // [N7] map pings, lost-part alerts
 import { ProductionQueue } from './ProductionQueue.js';
@@ -33,6 +33,8 @@ const ICONS = { ore: ORE_ICON, energy: '⚡', population: '👥', idleCrew: '�
 const GROUP_COUNT = 9;
 const GEOMETRY_VARS = ['--hud-prod-y', '--hud-prod-top-h', '--hud-prod-bottom-h', '--hud-prod-row-h', '--hud-prod-col-y', '--hud-idle-from-bottom',
   '--hud-ml', '--hud-mr', '--hud-mt', '--hud-mb', '--hud-idle-left', '--hud-idle-size', '--hud-idle-gap', '--hud-backdrop'];
+const UI_SCALE_VARS = ['--ui-font-main', '--ui-font-small', '--ui-hit', '--ui-dialog-font'];
+const LEVEL_FULL = 0, LEVEL_COMPACT = 1, LEVEL_TINY = 2; // detail levels (hud-compact / hud-tiny)
 // Command grid cells highlighted when the selection has this behaviour
 const BEHAVIOUR_CELLS = { behaviourAggressive: 'aggressive', behaviourDefensive: 'defensive', behaviourPassive: 'passive' };
 
@@ -90,16 +92,24 @@ export class Hud {
       icon: '', label: '', hotkey: '', tip: '', disabled: false, on: false, pending: false,
       onClick: () => {
         const name = this.cmdSlots[i];
-        if (name === 'formation') this.#cycleFormation();
-        else if (name) this.input.command(name);
+        if (name) this.input.command(name); // 'formation' too: CommandInput cycles the mode (same as the key)
         if (name) this.refresh();
       },
     }));
     this.fmCounts = new Array(FORMATION.modes.length).fill(0); // recycled: units per formation mode of the selection
     this.cmdSig = { names: new Array(cmdCount).fill(undefined), enabled: new Array(cmdCount).fill(false), formation: undefined,
       repairing: undefined, stance: undefined, behaviour: undefined, pending: undefined, lang: undefined };
+    this.level = LEVEL_FULL;     // detail level: 0 full, 1 compact, 2 tiny
+    this.levelApplied = false;
+    this.userScale = this.#readUserScale();
     this.onResize = () => { this.#applyScale(); this.#fitBudget(); this.#fitProduction(); };
     window.addEventListener('resize', this.onResize);
+    this.offSettings = onSettingsChange(() => { // live HUD scale from the settings screen
+      const u = this.#readUserScale();
+      if (u === this.userScale) return;
+      this.userScale = u;
+      this.onResize();
+    });
     this.#publishGeometry();
     this.#applyScale();
     this.#fitBudget();
@@ -127,6 +137,7 @@ export class Hud {
     this.overlays = new UnitOverlays({ world, camera, dom, input, queue: this.queue, spawnPoint });
     this.orderMarkers = new OrderQueueMarkers({ world, input }); // Shift order queue on the ground
     this.pings = new Pings({ world, camera, dom, focus }); // [N7]
+    this.terrainLabel = new TerrainLabel({ world, camera, dom, input }); // [A14-ui]
     this.hide();
   }
 
@@ -144,10 +155,13 @@ export class Hud {
   dispose() {
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('resize', this.onResize);
+    this.offSettings?.();
+    document.documentElement.classList.remove('ui-compact', 'ui-tiny');
+    for (const name of UI_SCALE_VARS) document.documentElement.style.removeProperty(name);
     if (this.input.onIdleCrew === this.idleCrewHandler) this.input.onIdleCrew = null;
     if (this.input.onIdleBuilder === this.idleBuilderHandler) this.input.onIdleBuilder = null;
     if (this.input.onIdleDrill === this.idleDrillHandler) this.input.onIdleDrill = null;
-    for (const part of [this.queueFrame, this.selectionPanel, this.overlays, this.orderMarkers, this.pings]) part?.dispose?.();
+    for (const part of [this.queueFrame, this.selectionPanel, this.overlays, this.orderMarkers, this.pings, this.terrainLabel]) part?.dispose?.();
     this.root.remove();
     this.el.message.remove();
     this.el.tooltip.remove();
@@ -177,18 +191,54 @@ export class Hud {
     style.setProperty('--hud-idle-size', String(HUD_V2.idleButton.size));
     style.setProperty('--hud-idle-gap', String(HUD_V2.idleButton.gap));
     style.setProperty('--hud-backdrop', String(HUD_V2.frameBackdrop));
+    // UI_SCALE floors for CSS (px, unitless: hud.css wraps them in calc(N * 1px))
+    style.setProperty('--ui-font-main', String(UI_SCALE.fontMain));
+    style.setProperty('--ui-font-small', String(UI_SCALE.fontSmall));
+    style.setProperty('--ui-hit', String(UI_SCALE.hitTarget));
+    style.setProperty('--ui-dialog-font', String(UI_SCALE.dialogFont));
   }
 
   /** --hud-scale on :root: min(W / 1920, H / 1080) clamped to [scaleMin, scaleMax] (hud.css sizes everything in base px × scale) */
   #applyScale() {
+    this.#applyLevel();
     const b = HUD_V2.frameBleed; // the root is wider than the window by the bleed: scale from the extended area
     const raw = Math.min(window.innerWidth / (HUD_V2.baseWidth - b.left - b.right),
       window.innerHeight / (HUD_V2.baseHeight - b.top - b.bottom));
-    const clamped = Math.min(Math.max(raw, HUD_V2.scaleMin), HUD_V2.scaleMax);
+    const clamped = Math.min(Math.max(raw * this.userScale, UI_SCALE.scaleMin), HUD_V2.scaleMax); // user multiplier before the clamp
     const s = Math.round(clamped * HUD_V2.scalePrecision) / HUD_V2.scalePrecision;
     if (s === this.scale) return;
     this.scale = s;
     document.documentElement.style.setProperty('--hud-scale', String(s));
+  }
+
+  /** User multiplier over the automatic scale (settings.ui.hudScale: 'auto' = 1, otherwise '0.75' / '1' / '1.25') */
+  #readUserScale() {
+    const v = Number(getSettings().ui?.hudScale);
+    return Number.isFinite(v) && v > 0 ? v : 1; // 'auto' → NaN → 1
+  }
+
+  /** Detail level by window height (UI_SCALE.breakpoints, with hysteresis) and width: 0 full, 1 compact, 2 tiny */
+  #applyLevel() {
+    const bp = UI_SCALE.breakpoints;
+    const h = window.innerHeight;
+    const up = (limit, on) => h < limit + (on ? bp.hysteresis : 0); // a level is left only past the breakpoint + hysteresis
+    let level = LEVEL_FULL;
+    if (up(bp.tiny, this.level >= LEVEL_TINY)) level = LEVEL_TINY;
+    else if (up(bp.compact, this.level >= LEVEL_COMPACT)) level = LEVEL_COMPACT;
+    if (window.innerWidth < UI_SCALE.narrowWidth + (this.level >= LEVEL_COMPACT ? bp.hysteresis : 0)) level = Math.max(level, LEVEL_COMPACT);
+    if (level === this.level && this.levelApplied) return;
+    this.level = level;
+    this.levelApplied = true;
+    this.#setLevelClasses(this.root);
+  }
+
+  /** hud-compact / hud-tiny on the HUD root, ui-compact / ui-tiny on <html> (menu and dialog CSS reuse them) */
+  #setLevelClasses(root) {
+    const html = document.documentElement.classList;
+    root?.classList.toggle('hud-compact', this.level === LEVEL_COMPACT);
+    root?.classList.toggle('hud-tiny', this.level === LEVEL_TINY);
+    html.toggle('ui-compact', this.level === LEVEL_COMPACT);
+    html.toggle('ui-tiny', this.level === LEVEL_TINY);
   }
 
   /** Room the production panel may grow by (real window height): its bottom stays above the idle buttons (base px).
@@ -243,6 +293,7 @@ export class Hud {
     this.orderMarkers.update();
     this.pings.update(); // [N7]
     this.#renderTooltip();
+    this.terrainLabel.update(dt, this.pointerOnCanvas && !this.root.hidden); // [A14-ui]
     this.#renderClock();
     if ((this.timer -= dt) <= 0) { this.timer = HUD.refreshInterval; this.refresh(); }
   }
@@ -305,6 +356,7 @@ export class Hud {
     tip.hidden = true;
     document.body.appendChild(tip);
     this.root = root;
+    this.#setLevelClasses(root); // the level was computed before the root existed
     this.el = Object.fromEntries([...root.querySelectorAll('[data-el]')].map((e) => [e.dataset.el, e]));
     this.el.message = msg;
     this.el.tooltip = tip;
@@ -417,7 +469,10 @@ export class Hud {
     for (let i = 0; i < layout.length; i++) if (layout[i]) this.cmdSlots[i] = layout[i];
   }
 
-  /** Formation mode of the selected own units: the majority (a tie goes to the earlier mode); null = nothing to order */
+  /**
+   * Formation mode of the selected own units: the majority (a tie goes to the earlier mode); null = no group
+   * ([A7b] fewer than FORMATION.minGroupSize own units – the formation slot stays empty)
+   */
   #selectionFormation() {
     const counts = this.fmCounts;
     counts.fill(0);
@@ -426,7 +481,7 @@ export class Hud {
     total += this.#countFormations(input.selectedMechs, counts);
     total += this.#countFormations(input.selectedCrews, counts);
     total += this.#countFormations(input.selectedVehicles, counts);
-    if (!total) return null;
+    if (total < FORMATION.minGroupSize) return null;
     let best = 0;
     for (let k = 1; k < counts.length; k++) if (counts[k] > counts[best]) best = k;
     return FORMATION.modes[best];
@@ -441,16 +496,6 @@ export class Hud {
       counts[k < 0 ? fallback : k]++;
     }
     return list.length;
-  }
-
-  /** The formation button: the next mode for every selected own unit (command setFormation, the units remember it) */
-  #cycleFormation() {
-    const mode = this.#selectionFormation();
-    if (!mode) return;
-    const input = this.input;
-    const units = [...input.selectedMechs, ...input.selectedCrews, ...input.selectedVehicles];
-    const next = FORMATION.modes[(FORMATION.modes.indexOf(mode) + 1) % FORMATION.modes.length];
-    commandBus.submit({ type: 'setFormation', team: localTeam(), units: units.map((u) => u.eid), mode: next });
   }
 
   #renderCommandGrid() {
@@ -474,6 +519,8 @@ export class Hud {
     // [H1] conditional commands (e.g. wallGate) leave their slot empty while disabled
     const hidden = HUD.commandGrid.hiddenWhenDisabled;
     for (let i = 0; i < grid.length; i++) if (grid[i] && !enabled[grid[i]] && hidden.includes(grid[i])) grid[i] = null;
+    // [A7b] the formation button exists only for a group (>= FORMATION.minGroupSize own units); its slot stays empty otherwise
+    if (formation === null) for (let i = 0; i < grid.length; i++) if (grid[i] === 'formation') grid[i] = null;
     // Rebuild the items only when the "signature" changed (slot names, enabled flags, stance, behaviour, repairing, pending, language)
     const sig = this.cmdSig;
     const pending = input.pending;

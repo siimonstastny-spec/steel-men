@@ -7,12 +7,14 @@
 //     faceted = slim 4-sided pylon with square emitter rings (the laser barrier hooks onto them); the vent follows style.fan,
 //     lights follow style.lights, markings follow style.markings, texture / edges / neon come from the style
 //   • one static mesh (batched like every finished building) + emblem decals (4 plates) + 1–2 glow layers (+ the ring)
-//   • `socket_c6e5475c` (POST_SOCKET) = Object3D on the post top: WallPost.turretHeight reads its world height, so the
-//     turret stands on the post exactly as with the GLB (stats.turretSocket stays unchanged)
+//   • `socket_c6e5475c` (POST_SOCKET) = Object3D at the turret seat. The seat height of the simulation is data
+//     (WallPost.turretHeight = stats simBody.turretHeight, never the model); the socket is placed at that height / model
+//     scale (fallback WALL_LAYOUT.postTop without stats) so the turret model stands on the post as with the GLB
 // Also exports the shared wall constants (WALL_SPAN, WALL_LAYOUT, WALL_ANIM, nextWallInstance) the segment, turret and gate
 // models use. Visual only: update() takes the frame delta, nothing here is read by the simulation. No allocations in update().
 import * as THREE from 'three';
-import { PROC_TEAM_PAINT } from '../config.js';
+import { PROC_TEAM_PAINT, STRUCTURE } from '../config.js';
+import { getStats } from '../data/Stats.js';
 import { PartBuilder, Blinker } from './ProcKit.js';
 import {
   ProcModel, createSharedCache, GlowSet, styledBox, marking, beacon, fanHousing, radiator, spike, ringGeometry,
@@ -314,6 +316,26 @@ const POST_CACHE = createSharedCache(buildShared);
 
 // ---------------------------------------------------------------- the model
 
+const WALL_POST_STATS_ID = 'mobileWall';   // stats.json structures key of the post (simBody.turretHeight)
+
+/**
+ * Socket height in model units: stats simBody.turretHeight (race override byRace[race], else the race's modelRace, else
+ * base) divided by the building model scale. Falls back to WALL_LAYOUT.postTop when stats are not loaded / no data.
+ */
+function turretSeatY(styleKey, race) {
+  try {
+    const st = getStats();
+    const s = st.structures?.[WALL_POST_STATS_ID];
+    const body = s?.simBody;
+    if (!body) return WALL_LAYOUT.postTop;
+    const over = body.byRace?.[race] ?? body.byRace?.[st.races?.[race]?.modelRace] ?? body.byRace?.[styleKey];
+    const h = (over?.turretHeight ?? body.turretHeight);
+    return h > 0 ? h / (STRUCTURE.modelScale * (s.modelScale ?? 1)) : WALL_LAYOUT.postTop;
+  } catch {
+    return WALL_LAYOUT.postTop;
+  }
+}
+
 export class MobileWallProc extends ProcModel {
   /**
    * @param {object} [opts]
@@ -322,6 +344,7 @@ export class MobileWallProc extends ProcModel {
    */
   constructor({ race, teamColor } = {}) {
     super({ race, teamColor, cache: POST_CACHE, name: 'MobileWallProc' });
+    this.seatRace = race;   // race key for the turret seat lookup (stats byRace)
     try {
       this.#build();
     } catch (err) {
@@ -342,10 +365,10 @@ export class MobileWallProc extends ProcModel {
     this.pulseGlow = layer('pulse', gc.pulse, true);
     this.heatGlow = layer('radiator', gc.radiator, false);
 
-    // turret socket on the post top (WallPost.turretHeight reads its world height)
+    // turret socket (visual only): the seat height of the simulation (stats simBody.turretHeight, see turretSeatY)
     this.socket = new THREE.Object3D();
     this.socket.name = POST_SOCKET;
-    this.socket.position.y = WALL_LAYOUT.postTop;
+    this.socket.position.y = turretSeatY(this.kit.key, this.seatRace);
     this.add(this.socket);
 
     this.levitator = null;
@@ -363,12 +386,13 @@ export class MobileWallProc extends ProcModel {
   update(delta) {
     if (!this.shared) return;
     const an = this.kit.style.anim;
-    this.time += delta;
+    const dt = delta;   // already scaled by animScale in tick(); unpowered post:the ring stops, glows go dark through the base class
+    this.time += dt;
     const glow = pulseWave(this.time, an.pulse);
     this.pulseGlow?.setIntensity(glow);
     this.heatGlow?.setIntensity(WALL_ANIM.heat * glow);
-    this.blink.update(delta, true);
+    this.blink.update(dt, true);
     this.beaconGlow?.setIntensity(this.blink.on ? 1 : 0);
-    this.levitator?.update(delta, true);
+    this.levitator?.update(dt, true);
   }
 }

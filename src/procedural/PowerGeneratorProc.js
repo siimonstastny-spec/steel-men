@@ -635,19 +635,20 @@ export class PowerGeneratorProc extends ProcModel {
     if (!this.shared) return;
     const an = this.kit.style.anim;
     const A = GENERATOR_ANIM;
-    this.time += delta;
+    const dt = delta;   // already scaled by animScale in tick(); no grid power:every motion stands still (the generator itself is never unpowered)
+    this.time += dt;
     this.power += ((active ? 1 : 0) - this.power) * Math.min(1, delta * A.powerEase);
-    for (let i = 0; i < this.drives.length; i++) this.drives[i].update(delta, this.power);
-    for (let i = 0; i < this.sliders.length; i++) this.sliders[i].update(delta, this.power);
-    for (let i = 0; i < this.levitators.length; i++) this.levitators[i].update(delta, active);
+    for (let i = 0; i < this.drives.length; i++) this.drives[i].update(dt, this.power);
+    for (let i = 0; i < this.sliders.length; i++) this.sliders[i].update(dt, this.power);
+    for (let i = 0; i < this.levitators.length; i++) this.levitators[i].update(dt, active);
     const glow = pulseWave(this.time, an.pulse) * (A.idleGlow + (1 - A.idleGlow) * this.power);
     this.reactorGlow?.setIntensity(glow);
     this.pulseGlow?.setIntensity(glow);
     this.laserGlow?.setIntensity(glow);
     this.heat += ((active ? 1 : 0) - this.heat) * Math.min(1, delta * an.glowRamp);
     this.heatGlow?.setIntensity(this.heat);
-    this.arcs?.update(delta, this.power > A.arcPower);
-    this.blink.update(delta, active);
+    this.arcs?.update(dt, this.power > A.arcPower);
+    this.blink.update(dt, active);
     this.beacons?.setIntensity(active ? (this.blink.on ? 1 : 0) : A.idleBeacon);
   }
 }

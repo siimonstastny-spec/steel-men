@@ -3,12 +3,15 @@
 // own units use the weapons it improves. Captured parts at the research facility are analysed (queueAnalysis), and
 // spare HoverTrucks fetch legs / torso wrecks (salvage) – a full truck drives to the research facility by itself, a
 // partly loaded idle one is sent there (deliver). The facility itself is wanted by Economy (bb.wantStructures).
-import { AI } from '../../config.js';
+import { AI, RESEARCH_A9 } from '../../config.js';
 import { PRODUCES, REASON } from '../../game/Production.js';
 import { resolve } from '../../game/commands/CommandBus.js';
 import { PRIORITY, dist, posOf, isIdle, alive, nearest, weaponDefsOf, sumCost, affordsAbove } from '../util.js';
 import { researchRolesOf, researchFitsWeapons, resolveStructure } from '../AiData.js';
-import { unitStats } from '../../data/Stats.js';
+import { unitStats, getStats } from '../../data/Stats.js';
+
+/** [A9-F4b] how many levels of missing prerequisites a tech goal pulls in (goal → its requirement → that one's) */
+const PREREQ_DEPTH = 2;
 
 export class ResearchManager {
   constructor(ai) {
@@ -133,7 +136,7 @@ export class ResearchManager {
     const weapons = this.#ownWeapons();
     const options = this.prod.researchOptions(facility).filter((id) => {
       if (this.inflight.has(id) || r.hasPendingEffects(id) && !(r.defs[id].effects ?? []).some((e) => !e.pending)) return false;
-      return r.status(team, id).ok;
+      return r.status(team, id).ok && this.#techAllowed(id); // [A9-F4b] programs / Data network only when they make sense
     });
     const costOf = (id) => Object.values(r.defs[id].cost ?? {}).reduce((s, v) => s + (v ?? 0), 0);
     // [E1] the air plan needs a research tier (hangar requiresTier): the cheapest research of the tier whose
@@ -143,6 +146,9 @@ export class ResearchManager {
       const fits = options.filter((id) => r.defs[id]?.tier === rushTier).sort((a, b) => costOf(a) - costOf(b));
       if (fits.length) return { id: fits[0], role: 'air tier' };
     }
+    // [A9-F4b] tier 2+ by the tech plan (research.json tech): the next tier first, then Mk / faction / … categories
+    const tech = this.#techPick(options, now);
+    if (tech) return tech;
     for (const role of phase.roles ?? []) {
       const fits = options.filter((id) => {
         const roles = researchRolesOf(r.defs[id], r.unlocksOf(id));
@@ -153,7 +159,152 @@ export class ResearchManager {
       fits.sort((a, b) => costOf(a) - costOf(b));
       return { id: fits[0], role };
     }
+    // [A9-F4b] nothing fits the phase roles: any research left (cheapest) – the AI never stalls on a missing id
+    if (this.plan.tech?.fallbackAny && options.length) {
+      const any = [...options].sort((a, b) => costOf(a) - costOf(b));
+      return { id: any[0], role: 'any' };
+    }
     return null;
+  }
+
+  // ---------- [A9-F4b] tech plan (tier 2 / 3 / super tier) ----------
+
+  /**
+   * Category of a research for research.json tech.order (no ids – from its stats.json entry):
+   *   program  – superweapon program (RESEARCH_A9.programFlag)
+   *   network  – Data network effect (only with an ally)
+   *   mk       – part / weapon effects on one part kind (target.partKind; tech.mkOrder ranks the kinds)
+   *   faction  – exclusive research of the own faction (races[race].exclusive.research)
+   *   enhancer – unlocks a building with an aura
+   *   economy  – unlocks a power plant or a deep extractor
+   *   salvage  – unlocks an archeology station
+   *   vehicles – unlocks a vehicle
+   *   defense  – unlocks an armed building
+   * Cached per id (stats do not change in a match).
+   */
+  #categoryOf(id) {
+    this.categories ??= new Map();
+    if (this.categories.has(id)) return this.categories.get(id);
+    const r = this.research;
+    const def = r.defs[id] ?? {};
+    const effects = def.effects ?? [];
+    let cat = null;
+    let kind = null;
+    if (r.isProgram?.(id)) cat = 'program';
+    else if (effects.some((e) => e.type === RESEARCH_A9.networkEffect)) cat = 'network';
+    else if ((kind = effects.find((e) => e.type === 'modify' && e.target?.partKind)?.target.partKind ?? null)) cat = 'mk';
+    else if ((getStats().races?.[this.ai.race]?.exclusive?.research ?? []).includes(id)) cat = 'faction';
+    else {
+      const structures = getStats().structures ?? {};
+      for (const u of r.unlocksOf(id)) {
+        const s = u.group === 'structures' ? structures[u.id] : null;
+        const c = s ? (s.aura ? 'enhancer' : s.archeology ? 'salvage'
+          : ((s.income?.energy ?? 0) > 0 || s.deepExtraction) ? 'economy' : (s.weapons ?? []).length ? 'defense' : null)
+          : u.group === 'vehicles' ? 'vehicles' : null;
+        if (c) { cat = c; break; }
+      }
+    }
+    const out = { cat, kind };
+    this.categories.set(id, out);
+    return out;
+  }
+
+  /** May the tech plan pick this research at all? Programs: Normal+ (difficulty tech.superweapon), option on, none done yet; network: with an ally */
+  #techAllowed(id) {
+    const r = this.research;
+    const { cat } = this.#categoryOf(id);
+    if (cat === 'program') {
+      if (!this.ai.diff.tech?.superweapon || this.plan.tech?.programs === false || !r.superweaponsEnabled?.()) return false;
+      return (r.doneWithFlag?.(this.ai.team, RESEARCH_A9.programFlag) ?? 0) === 0; // one program is enough (1 superweapon)
+    }
+    if (cat === 'network') return this.ai.perception.own.allyStructures.length > 0;
+    return true;
+  }
+
+  /** Sort key of a research in the tech plan: category rank (tech.order), Mk part kind rank (tech.mkOrder), cost */
+  #techRank(id, order, mkOrder, prereq = false) {
+    const { cat, kind } = this.#categoryOf(id);
+    const i = cat ? order.indexOf(cat) : -1;
+    const k = cat === 'mk' ? mkOrder.indexOf(kind) : 0;
+    return (i < 0 ? order.length : i) * 100 + (k < 0 ? mkOrder.length : k) * 10 + (prereq ? 5 : 0);
+  }
+
+  /**
+   * [A9-F4b] Research by the tech plan (research.json tech):
+   *   1. from tierRushFrom s: the completions the next tier lacks (tierStatus missing 'completed' → that tier's
+   *      research; missing 'flag' → a superweapon program or its prerequisites), up to maxTier;
+   *   2. otherwise every available research of tier ≥ 2 by tech.order.
+   * Goals that wait for another research (status 'research') bring their missing prerequisites in, ranked just after
+   * the goal's category (e.g. fusionPower for the program, reinforcedJoints for Mk II arms). Ties: cost, then id order.
+   * @returns {{ id, role } | null}
+   */
+  #techPick(options, now) {
+    const tech = this.plan.tech;
+    if (!tech) return null;
+    const r = this.research;
+    const team = this.ai.team;
+    const order = tech.order ?? [];
+    const mkOrder = tech.mkOrder ?? [];
+    const open = r.openTier(team);
+    const ok = new Set(options); // #choose filtered them (#techAllowed)
+    if (!ok.size) return null;
+    let wantTier = null; // tier whose research counts for the next tier
+    let wantFlag = false;
+    const next = open + 1;
+    if (now >= (tech.tierRushFrom ?? Infinity) && next <= (tech.maxTier ?? 0)) {
+      for (const m of r.tierStatus(team, next).missing) {
+        if (m.type === 'completed') wantTier = m.tier;
+        else if (m.type === 'flag') wantFlag = true;
+      }
+    }
+    const pick = this.#techScore(ok, open, wantTier, wantFlag, order, mkOrder)
+      ?? (open >= 2 && (wantTier !== null || wantFlag) ? this.#techScore(ok, open, null, false, order, mkOrder) : null);
+    if (!pick) return null;
+    const why = pick.rush ? (wantTier !== null ? `tier ${next}` : `tier ${next} program`) : this.#categoryOf(pick.id).cat ?? 'tech';
+    return { id: pick.id, role: why };
+  }
+
+  /** [A9-F4b] Best research of one #techPick pass ({ id, rush } or null); wantTier / wantFlag null / false = by category (open ≥ 2) */
+  #techScore(ok, open, wantTier, wantFlag, planOrder, mkOrder) {
+    // the next tier lacks a program: programs (and their prerequisites) come first
+    const order = wantFlag ? ['program', ...planOrder.filter((c) => c !== 'program')] : planOrder;
+    const r = this.research;
+    const team = this.ai.team;
+    const next = open + 1;
+    if (wantTier === null && !wantFlag && open < 2) return null; // tier 1: the phase roles decide (unchanged)
+    const scored = new Map(); // id -> rank
+    const consider = (id, rank) => { if (ok.has(id) && (!scored.has(id) || rank < scored.get(id))) scored.set(id, rank); };
+    const minTier = wantTier ?? (wantFlag ? 1 : 2);
+    for (const id of ok) {
+      const tier = r.defs[id]?.tier ?? 0;
+      if (wantTier !== null ? tier !== wantTier : tier < minTier) continue;
+      if (wantFlag && wantTier === null && this.#categoryOf(id).cat !== 'program') continue;
+      consider(id, this.#techRank(id, order, mkOrder));
+    }
+    // prerequisites of goals the team cannot research yet (only goals up to the next tier)
+    for (const id of r.available(team)) {
+      const def = r.defs[id];
+      if (!def || (def.tier ?? 0) > next || ok.has(id) || !this.#techAllowed(id)) continue;
+      const cat = this.#categoryOf(id).cat;
+      if (!cat || !order.includes(cat) || (wantFlag && wantTier === null && cat !== 'program')) continue;
+      if (r.isDone(team, id) || r.status(team, id).reason === 'disabled') continue;
+      const rank = this.#techRank(id, order, mkOrder, true);
+      const anyTier = wantFlag && cat === 'program'; // the missing program may pull research of any tier
+      // missing prerequisites, PREREQ_DEPTH levels down (a program → its faction research → that one's tier 1 research)
+      const pull = (goal, depth) => {
+        for (const p of [...r.missingResearch(team, goal), ...r.missingAnyResearch(team, goal)]) {
+          if (ok.has(p)) { if (wantTier === null || anyTier || r.defs[p]?.tier === wantTier) consider(p, rank); }
+          else if (depth > 0 && !r.isDone(team, p)) pull(p, depth - 1);
+        }
+      };
+      pull(id, PREREQ_DEPTH);
+    }
+    if (!scored.size) return null;
+    const costOf = (id) => Object.values(r.defs[id].cost ?? {}).reduce((s, v) => s + (v ?? 0), 0);
+    const keys = [...scored.keys()];
+    const ids = Object.keys(r.defs);
+    keys.sort((a, b) => scored.get(a) - scored.get(b) || costOf(a) - costOf(b) || ids.indexOf(a) - ids.indexOf(b));
+    return { id: keys[0], rush: wantTier !== null || wantFlag };
   }
 
   /**
@@ -238,7 +389,7 @@ export class ResearchManager {
       this.ai.budget?.record('research', res.cost);
       this.inflight.set(loot.key, now + AI.perceptionInterval * 2 + 2);
       this.ai.stats.analyses = (this.ai.stats.analyses ?? 0) + 1;
-      this.ai.note(`analyse captured ${loot.kind} (${loot.set})`);
+      this.ai.note(`analyse captured ${loot.kind} (${loot.vehicle ?? loot.set})`); // [A9-F4b] vehicle wrecks too
       return; // one per think
     }
   }

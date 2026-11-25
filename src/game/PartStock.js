@@ -3,7 +3,7 @@
 // (RobotPartFactory) fills and the assembly bay (RobotAssemblyBay) takes from. One stock lives in
 // world.economy.parts. Parts are counted by model path; an arm is universal: left and right models of one type share one stock entry.
 // Only the simulation changes the stock (Production.js, Repair.js); the UI reads it.
-import { partStats, canProduce, withModelRaceParts, SLOT_KIND } from '../data/Stats.js';
+import { partStats, canProduce, withModelRaceParts, withDataParts, SLOT_KIND } from '../data/Stats.js';
 import { ARMS } from '../config.js';
 
 export const MECH_SLOTS = ['legs', 'torso', 'leftArm', 'rightArm'];
@@ -36,7 +36,7 @@ export function loadPartCatalog(url = CATALOG_URL) {
   catalogPromise ??= fetch(url).then((res) => {
     if (!res.ok) throw new Error(`Part catalog ${url}: HTTP ${res.status}`);
     return res.json();
-  }).then(withModelRaceParts); // factions with stand-in models (stats.json races[*].modelRace) get the model race's parts
+  }).then(withDataParts).then(withModelRaceParts); // [A9] data-only parts; factions with stand-in models (stats.json races[*].modelRace) get the model race's parts
   return catalogPromise;
 }
 

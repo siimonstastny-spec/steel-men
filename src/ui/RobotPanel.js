@@ -8,7 +8,7 @@ import { t } from '../i18n/i18n.js';
 import { avatarHtml } from './Avatar.js';
 import { accuracyText } from './CenterPanel.js';
 import { pilotSlot } from '../units/ModularMech.js';
-import { esc, partLabel, mechState, teamTag, bonusText, weaponState, slimBar, pct, plainText } from './hudUtil.js';
+import { esc, partLabel, mechState, teamTag, bonusText, weaponState, weaponName, slimBar, pct, plainText } from './hudUtil.js';
 
 const R = HUD_PANELS.robot;
 // Panel side (pilot's view) -> input command (CommandInput maps dropLeft -> the pilot's left hand = slot rightArm)
@@ -83,13 +83,13 @@ export class RobotPanel {
     if (!ok) icon = `<span class="rp-glyph muted">${R.glyphs.empty}</span>`;
     else if (isCrew) {
       const index = nameHash(mech.crew.name) % HUD_PANELS.crewAvatarVariants;
-      icon = avatarHtml({ name: mech.crew.name, avatar: index, color: TEAMS[mech.team]?.color, size: R.crewAvatarSize });
+      icon = avatarHtml({ name: mech.crew.displayName, avatar: index, color: TEAMS[mech.team]?.color, size: R.crewAvatarSize });
     } else {
       const w = mech.parts[pilotSlot(c.slot)].weapons[0];
       icon = `<span class="rp-glyph">${w?.def.class === 'melee' ? R.glyphs.melee : R.glyphs.ranged}</span>`;
     }
     const name = isCrew ? t('rp.crew') : partLabel(pilotSlot(c.slot)); // labels are by mech slot (i18n swapped), c.slot is the pilot side
-    const weapon = !isCrew && ok ? mech.parts[pilotSlot(c.slot)].weapons.map((w) => w.def.id).join(SEP) : '';
+    const weapon = !isCrew && ok ? mech.parts[pilotSlot(c.slot)].weapons.map((w) => weaponName(w.def.id)).join(SEP) : '';
     const eject = own
       ? `<button class="rp-eject" data-eject="${isCrew ? 'eject' : DROP_COMMAND[c.slot]}" style="${rect({ ...c.ejectSlot, y: c.ejectSlot.y - R.ejectGrow, h: c.ejectSlot.h + R.ejectGrow })}"`
         + `${ok && cmds[isCrew ? 'eject' : DROP_COMMAND[c.slot]] ? '' : ' disabled'}>${esc(t('rp.eject'))}</button>`
@@ -121,7 +121,7 @@ export class RobotPanel {
     const bonus = bonusText(r.bonuses, undefined, true) || t('unit.noBonus');
     const xp = `${Math.floor(c.xp)}${r.next ? `/${r.next}` : ''} XP`;
     return [
-      esc([c.name, r.name, t('rp.members', { size: c.size })].join(SEP)),
+      esc([c.displayName, r.name, t('rp.members', { size: c.size })].join(SEP)),
       `${esc(xp)}${SEP}<span class="bonus" title="${esc(bonusFull)}"><span class="b-full">${esc(bonusFull)}</span>`
         + `<span class="b-short">${esc(bonus)}</span></span>`,
       bonusFull,
@@ -132,7 +132,7 @@ export class RobotPanel {
     const p = mech.parts[pilotSlot(slot)];
     if (!p) return [`<span class="muted">${esc(t('part.missing'))}</span>`, '', ''];
     const armor = p.stats.armor ?? {};
-    const accuracy = p.weapons.map((w) => `${w.def?.id ?? ''}: ${accuracyText(w)}`);
+    const accuracy = p.weapons.map((w) => `${weaponName(w.def?.id)}: ${accuracyText(w)}`);
     const tip = [t('part.armor', { physical: armor.physical ?? 0, energy: armor.energy ?? 0 }), ...accuracy].join('\n');
     const hp = `${esc(p.set)}${SEP}${Math.ceil(p.hp)}/${p.maxHp}${SEP}${pct(p.maxHp ? p.hp / p.maxHp : 0)} %`
       + ` ${slimBar(p.hp, p.maxHp)}`;

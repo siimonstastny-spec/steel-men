@@ -22,3 +22,9 @@
 .avatar-cropper canvas:active { cursor: grabbing; }
 .avatar-cropper input[type="range"] { width: var(--crop-size); accent-color: var(--menu-accent, #3ea6ff); }
 .avatar-cropper-actions { display: flex; gap: 10px; }
+/* [A5] small windows: the dialog scrolls instead of being clipped (crop size stays 256, see AvatarCropper.js VIEW_PX) */
+.avatar-cropper-box { box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; }
+.avatar-cropper-actions .menu-btn, .avatar-cropper-actions button { min-height: var(--ui-hit-target, 32px); }
+@media (max-height: 649px) { /* = UI_SCALE.breakpoints.tiny */
+  .avatar-cropper-box { padding: 10px 14px; gap: 6px; }
+}

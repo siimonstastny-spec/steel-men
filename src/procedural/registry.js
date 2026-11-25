@@ -25,6 +25,17 @@ import { WallSegmentProc } from './WallSegmentProc.js';
 import { MobileWallGunTurretProc, MobileWallLaserTurretProc } from './WallTurretProc.js';
 import { WallGateProc } from './WallGateProc.js';
 import { CrewQuartersProc } from './CrewQuartersProc.js';
+// [B3] research T2/T3 buildings
+import { OrbitalBombProc } from './OrbitalBombProc.js';
+import { TectonicTorpedoProc } from './TectonicTorpedoProc.js';
+import { PhaseChargeProc } from './PhaseChargeProc.js';
+import { NeutronBombProc } from './NeutronBombProc.js';
+import { AttackEnhancerProc } from './AttackEnhancerProc.js';
+import { DefenseEnhancerProc } from './DefenseEnhancerProc.js';
+import { ReconEnhancerProc } from './ReconEnhancerProc.js';
+import { ConstructionEnhancerProc } from './ConstructionEnhancerProc.js';
+import { ImagingPoleProc } from './ImagingPoleProc.js';
+import { ArcheologyStationProc } from './ArcheologyStationProc.js';
 
 export { loadBuildingStyles } from './BuildingStyle.js';
 
@@ -54,6 +65,16 @@ const PROCEDURAL_STRUCTURES = {
   mobileWallLaserTurret: (race, teamColor) => new MobileWallLaserTurretProc({ race, teamColor }),
   wallGate: (race, teamColor) => new WallGateProc({ race, teamColor }),
   crewQuarters: (race, teamColor) => new CrewQuartersProc({ race, teamColor }),
+  orbitalBomb: (race, teamColor) => new OrbitalBombProc({ race, teamColor }),
+  tectonicTorpedo: (race, teamColor) => new TectonicTorpedoProc({ race, teamColor }),
+  phaseCharge: (race, teamColor) => new PhaseChargeProc({ race, teamColor }),
+  neutronBomb: (race, teamColor) => new NeutronBombProc({ race, teamColor }),
+  attackEnhancer: (race, teamColor) => new AttackEnhancerProc({ race, teamColor }),
+  defenseEnhancer: (race, teamColor) => new DefenseEnhancerProc({ race, teamColor }),
+  reconEnhancer: (race, teamColor) => new ReconEnhancerProc({ race, teamColor }),
+  constructionEnhancer: (race, teamColor) => new ConstructionEnhancerProc({ race, teamColor }),
+  imagingPole: (race, teamColor) => new ImagingPoleProc({ race, teamColor }),
+  archeologyStation: (race, teamColor) => new ArcheologyStationProc({ race, teamColor }),
 };
 
 /** Structure ids that have a procedural model */

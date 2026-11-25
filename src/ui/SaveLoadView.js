@@ -4,7 +4,7 @@
 //   const view = new SaveLoadView({ store, saveGame, loading, mapName, onRestored });
 //   view.openList({ inGame });  // main menu: inGame false; in-game menu: inGame true (warns the running game is lost)
 //   view.openSaveDialog();      // asks for a name, saves, shows "saved"
-import { SAVE_UI, SAVE, SIM } from '../config.js';
+import { SAVE_UI, SAVE, SIM, LOBBY_CONTINUE } from '../config.js';
 import { getLanguage, t } from '../i18n/i18n.js';
 import { confirmDialog, isConfirmDialogOpen } from './ConfirmDialog.js';
 import { setHtmlKeepScroll } from './scrollKeep.js';
@@ -18,7 +18,7 @@ let openModals = 0;
 /** True while a save/load window or dialog is shown (game hotkeys ignore keys then) */
 export const isSaveLoadOpen = () => openModals > 0;
 
-function formatLength(ticks) {
+export function formatLength(ticks) { // [A2-ui] also used by the continue-lobby info
   if (!Number.isFinite(ticks)) return '–';
   const s = Math.floor(ticks / SIM.tickRate);
   const h = Math.floor(s / (SECONDS_PER_MINUTE * MINUTES_PER_HOUR));
@@ -64,6 +64,9 @@ export class SaveLoadView {
     this.onRestored = onRestored;
     this.items = [];
     this.inGame = false;
+    this.pickMode = false;       // [A2-ui] 'pick' mode: the row button returns the save instead of restoring it
+    this.pickFilter = null;      // [A2-ui] 'mp' = only multiplayer saves
+    this.pickResolve = null;     // [A2-ui] resolver of the openList promise in pick mode
     this.busy = false;
     this.listOpen = false;
     this.toastTimer = null;
@@ -100,6 +103,7 @@ export class SaveLoadView {
     clearTimeout(this.toastTimer);
     window.removeEventListener('keydown', this.keyHandler, true);
     for (const close of [...this.modals]) close();
+    this.#settlePick(null);
     if (this.listOpen) { this.listOpen = false; openModals--; }
     this.el.remove();
     this.toastEl.remove();
@@ -107,26 +111,49 @@ export class SaveLoadView {
 
   // ---------- list ----------
 
-  /** Opens the list of saved games; inGame = opened from a running game (loading discards it, a warning is shown) */
-  async openList({ inGame = false } = {}) {
-    this.inGame = inGame;
+  /**
+   * Opens the list of saved games; inGame = opened from a running game (loading discards it, a warning is shown).
+   * [A2-ui] mode 'pick' (+ filter 'mp' = multiplayer saves only): the row button picks a save; resolves with the
+   * chosen save object, or null when the window is closed. In the normal mode it resolves when the list is drawn.
+   */
+  async openList({ inGame = false, mode = null, filter = null } = {}) {
+    this.#settlePick(null); // a previous pick window that is still open is replaced
+    this.pickMode = mode === LOBBY_CONTINUE.pickMode;
+    this.pickFilter = this.pickMode ? filter : null;
+    this.inGame = inGame && !this.pickMode;
     this.#setTexts();
     if (!this.listOpen) { this.listOpen = true; openModals++; }
     this.el.hidden = false;
+    const picked = this.pickMode ? new Promise((resolve) => { this.pickResolve = resolve; }) : null;
     await this.#refresh();
     await this.#offerIncompatible();
+    return picked;
   }
 
   closeList() {
+    this.#settlePick(null);
     if (!this.listOpen) return;
     this.listOpen = false;
     openModals--;
     this.el.hidden = true;
   }
 
+  #settlePick(save) {
+    const resolve = this.pickResolve;
+    this.pickResolve = null;
+    this.pickMode = false;
+    resolve?.(save);
+  }
+
+  /** Pick mode: hands the save to the caller and closes the window */
+  #pick(save) {
+    this.#settlePick(save);
+    this.closeList();
+  }
+
   #setTexts() {
     const q = (r) => this.el.querySelector(`[data-role="${r}"]`);
-    q('title').textContent = t('save.list.title');
+    q('title').textContent = t(this.pickMode ? 'save.pick.title' : 'save.list.title');
     const warn = q('warn');
     warn.textContent = this.inGame ? t('save.list.loseWarning') : '';
     warn.hidden = !this.inGame;
@@ -158,28 +185,33 @@ export class SaveLoadView {
   }
 
   #renderList(errorText = '') {
-    const sorted = [...this.items].sort((a, b) =>
+    const pick = this.pickMode;
+    // [A2-ui] pick mode with filter 'mp' lists multiplayer saves only; the normal list shows them tagged and not loadable (single player)
+    const shown = pick && this.pickFilter === LOBBY_CONTINUE.pickFilter ? this.items.filter((i) => i.meta?.multiplayer === true) : this.items;
+    const sorted = [...shown].sort((a, b) =>
       (this.#isAuto(b) ? 1 : 0) - (this.#isAuto(a) ? 1 : 0)
       || (new Date(b.meta?.date).getTime() || 0) - (new Date(a.meta?.date).getTime() || 0));
     const rows = sorted.map((item) => {
       const meta = item.meta ?? {};
-      const compat = this.store.isCompatible(meta) ?? { ok: false };
+      const mp = meta.multiplayer === true;
+      let compat = this.store.isCompatible(meta) ?? { ok: false };
+      if (compat.ok && mp && !pick) compat = { ok: false, reason: 'multiplayer' };
       const parts = [meta.mapName ?? meta.map ?? '–', formatPlayers(meta.players), formatLength(meta.durationTicks), formatDate(meta.date)];
       const ver = meta.gameVersion != null ? t('save.version', { v: meta.gameVersion }) : '';
       return `<div class="save-row${compat.ok ? '' : ' bad'}${this.#isAuto(item) ? ' auto' : ''}" data-id="${esc(item.id)}">
         <div class="save-main">
-          <b class="save-name">${esc(meta.name ?? item.id)}</b>${this.#isAuto(item) ? `<span class="save-tag">${t('save.autosave')}</span>` : ''}
+          <div class="save-title"><b class="save-name">${esc(meta.name ?? item.id)}</b>${this.#isAuto(item) ? `<span class="save-tag">${t('save.autosave')}</span>` : ''}${mp ? `<span class="save-tag">${t('save.multiplayer')}</span>` : ''}</div>
           <small class="save-info">${parts.map(esc).join(' · ')}${ver ? ` · <span title="${esc(meta.simVersion ?? '')}">${esc(ver)}</span>` : ''}</small>
           ${compat.ok ? '' : `<small class="save-reason">${esc(this.#reasonText(compat.reason))}</small>`}
         </div>
         <div class="save-actions">
-          <button type="button" class="menu-btn primary" data-act="load"${compat.ok ? '' : ' disabled'}>${t('save.load')}</button>
+          <button type="button" class="menu-btn primary" data-act="${pick ? 'pick' : 'load'}"${compat.ok ? '' : ' disabled'}>${t(pick ? 'save.pick' : 'save.load')}</button>
           <button type="button" class="menu-btn" data-act="export">${t('save.export')}</button>
           <button type="button" class="menu-btn danger" data-act="delete">${t('save.delete')}</button>
         </div>
       </div>`;
     });
-    const empty = errorText || (rows.length ? '' : t('save.list.empty'));
+    const empty = errorText || (rows.length ? '' : t(pick ? 'save.pick.empty' : 'save.list.empty'));
     setHtmlKeepScroll(this.listEl, empty ? `<p class="menu-muted">${esc(empty)}</p>${rows.join('')}` : rows.join(''));
   }
 
@@ -198,7 +230,9 @@ export class SaveLoadView {
   }
 
   #incompatible() {
-    return this.items.filter((i) => !(this.store.isCompatible(i.meta ?? {})?.ok));
+    // [A2-ui] pick mode with filter 'mp' lists multiplayer saves only: notices about the hidden ones would confuse
+    const mpOnly = this.pickMode && this.pickFilter === LOBBY_CONTINUE.pickFilter;
+    return this.items.filter((i) => (!mpOnly || i.meta?.multiplayer === true) && !(this.store.isCompatible(i.meta ?? {})?.ok));
   }
 
   async #offerIncompatible() {
@@ -247,6 +281,7 @@ export class SaveLoadView {
     const id = btn.closest('.save-row')?.dataset.id;
     if (id == null) return;
     if (act === 'load') await this.#loadFromList(id);
+    else if (act === 'pick') await this.#pickFromList(id);
     else if (act === 'export') await this.#export(id);
     else if (act === 'delete') await this.#delete(id);
   }
@@ -279,7 +314,11 @@ export class SaveLoadView {
       return;
     }
     // Without IndexedDB nothing can be stored: the imported file is loaded straight away
-    if (!await this.store.isAvailable?.()) { await this.#loadFromList(null, save); return; }
+    if (!await this.store.isAvailable?.()) {
+      if (this.pickMode) { if (save?.meta?.multiplayer === true) this.#pick(save); else await this.#notice(t('save.error.import')); return; } // [A2-ui]
+      await this.#loadFromList(null, save);
+      return;
+    }
     try { await this.store.put(save); } catch (err) {
       console.error(err);
       await this.#notice(t('save.error.import'));
@@ -288,6 +327,14 @@ export class SaveLoadView {
   }
 
   // ---------- load + progress ----------
+
+  // [A2-ui] pick mode: the stored save object goes to the caller (the lobby creates the continue game from it)
+  async #pickFromList(id) {
+    let save = null;
+    try { save = await this.store.get(id); } catch (err) { console.error(err); }
+    if (!save) { await this.#notice(t('save.reason.corrupt')); await this.#refresh(); return; }
+    this.#pick(save);
+  }
 
   // `id` of a stored save, or null with `direct` = a save object (import without storage)
   async #loadFromList(id, direct = null) {

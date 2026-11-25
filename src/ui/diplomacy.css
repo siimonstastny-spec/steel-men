@@ -41,3 +41,19 @@
 #diplomacy-view .dip-hint { margin: 10px 0 0; font-size: 12px; opacity: 0.65; }
 /* back / close on the left (project rule: left returns, right continues) */
 #diplomacy-view .dip-actions { display: flex; justify-content: flex-start; margin-top: 12px; }
+
+/* [A5] dialog font 14 px (UI_SCALE.dialogFont, never scaled), hit targets, same breakpoints as the HUD (UI_SCALE) */
+#diplomacy-view { font-size: var(--ui-font-dialog, 14px); }
+#diplomacy-view button { min-height: var(--ui-hit-target, 32px); }
+#diplomacy-view .dip-amount input { min-height: var(--ui-hit-target, 32px); box-sizing: border-box; }
+#diplomacy-view .dip-panel { min-width: min(560px, calc(100vw - 32px)); }
+@media (max-height: 799px), (max-width: 1099px) { /* = UI_SCALE.breakpoints.compact, UI_SCALE.narrowWidth */
+  #diplomacy-view .dip-panel { max-height: calc(100vh - 24px); padding: 10px 14px; }
+  #diplomacy-view h2 { margin-bottom: 4px; }
+  #diplomacy-view td { padding-top: 2px; padding-bottom: 2px; }
+  #diplomacy-view .dip-hint { margin-top: 6px; }
+  #diplomacy-view .dip-actions { margin-top: 8px; }
+}
+@media (max-height: 649px) { /* = UI_SCALE.breakpoints.tiny */
+  #diplomacy-view .dip-panel { max-height: calc(100vh - 12px); padding: 8px 12px; }
+}

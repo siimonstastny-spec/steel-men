@@ -3,8 +3,9 @@
 // never shrinks; it dies as a whole at 0 HP. Experience belongs to the squad, not the mech.
 import * as THREE from 'three';
 import { loadModel, loadGltf } from '../core/AssetLoader.js';
-import { loadStats, getStats, crewStats, rankFor, applyArmor } from '../data/Stats.js';
-import { TEAMS, PLAYER_TEAM, MOVEMENT, RINGS, CREW, ARRIVE_DISTANCE, BEHAVIOUR, CREW_EVAC, MECH_COLLISION_H2, CREW_ANIM } from '../config.js';
+import { loadStats, getStats, crewStats, rankFor, applyArmor, raceName } from '../data/Stats.js';
+import { t } from '../i18n/i18n.js';
+import { TEAMS, PLAYER_TEAM, MOVEMENT, RINGS, CREW, ARRIVE_DISTANCE, BEHAVIOUR, CREW_EVAC, MECH_COLLISION_H2, CREW_ANIM, BLOOD_STAINS } from '../config.js';
 import { isLocal } from '../core/LocalPlayer.js';
 import { blockedOnTheWay, followPath, contactDistance } from '../game/Movement.js';
 import { isTargetable, areEnemies, edgeDistance } from '../game/Combat.js';
@@ -12,6 +13,8 @@ import { applyTeamColor } from '../core/TeamColor.js';
 import { play } from '../audio/Sound.js';
 import { advanceQueue, clearQueue } from './OrderQueue.js';
 import { isCrewBay, approachCrewBay } from '../game/BayCrew.js';
+import { hasProcCrew, createProcCrewMember } from '../procedural/crew/ProcCrew.js'; // [B5] procedural crew (visual only)
+import { loadBuildingStyles } from '../procedural/registry.js';
 
 const DEG = Math.PI / 180;
 const NO_IGNORE = Object.freeze([]); // [I2] #move: no obstacle ignored
@@ -33,9 +36,15 @@ function formation(n, spacing) {
 }
 
 export class Crew extends THREE.Group {
-  constructor(race, { name = 'Crew', team = PLAYER_TEAM } = {}) {
+  /** Name for the UI in the current language (a generated name is built from nameIndex + race on every read) */
+  get displayName() {
+    return this.nameIndex == null ? this.name : t('unit.crewName', { n: this.nameIndex, race: raceName(this.race) });
+  }
+
+  constructor(race, { name = 'Crew', team = PLAYER_TEAM, nameIndex = null } = {}) {
     super();
     this.name = name;
+    this.nameIndex = nameIndex; // number: the generated name 'Crew {n} ({race})' is translated when shown (displayName)
     this.race = race;
     this.team = team;
     this.radius = 3;       // set from the formation in load()
@@ -64,9 +73,13 @@ export class Crew extends THREE.Group {
     this.stats = crewStats(this.race, this.team);
     this.behaviour ??= getStats().rules.crew.defaultBehaviour;
     const n = this.stats.squadSize;
+    // [B5] Procedural figures (visual only): one GLB is still loaded – it alone gives bodyHeight / aimHeight below,
+    // so the simulation is the same with procedural models on or off
+    const procOn = hasProcCrew(this.race);
+    if (procOn) await loadBuildingStyles();
     const [animSource, ...objects] = await Promise.all([
       loadGltf(this.stats.animationSource),
-      ...Array.from({ length: n }, () => loadModel(this.stats.model)),
+      ...Array.from({ length: procOn ? 1 : n }, () => loadModel(this.stats.model)),
     ]);
     this.maxHp = this.hp = this.stats.hp;
     this.rank = rankFor(this.xp);
@@ -74,7 +87,19 @@ export class Crew extends THREE.Group {
     const offsets = formation(n, this.stats.formationSpacing);
     for (const object of objects) object.scale.setScalar(this.stats.modelScale ?? 1);
     const lift = this.#groundOffset(objects[0]);
-    objects.forEach((object, i) => {
+    if (procOn) {
+      const color = TEAMS[this.team].color;
+      for (let i = 0; i < n; i++) {
+        const object = createProcCrewMember(this.race, color, i);
+        object.scale.setScalar(this.stats.modelScale ?? 1);
+        object.userData.crew = this;
+        object.position.copy(offsets[i]); // y = 0: the procedural figure stands on its feet
+        this.add(object);
+        object.enableBatching();
+        this.members.push({ object, mixer: null, actions: {}, current: null, phase: ((i + 1) * CREW_ANIM.phaseStep) % 1, proc: true });
+      }
+    }
+    if (!procOn) objects.forEach((object, i) => {
       object.userData.crew = this;
       object.position.copy(offsets[i]).setY(lift);
       object.traverse((o) => {
@@ -134,7 +159,10 @@ export class Crew extends THREE.Group {
   /** Paints the figures (and team ring) in the team's current colour */
   refreshTeamColor() {
     const color = TEAMS[this.team].color;
-    for (const m of this.members) applyTeamColor(m.object, color);
+    for (const m of this.members) {
+      if (m.proc) m.object.setTeamColor(color);
+      else applyTeamColor(m.object, color);
+    }
     this.teamRing?.material.color.set(color);
   }
 
@@ -267,6 +295,7 @@ export class Crew extends THREE.Group {
     clearQueue(this); // orders queued after boarding are dropped (the mech has its own)
     this.speed = 0;
     this.setSelected(false);
+    this.#hideProc(true);
     this.removeFromParent();
   }
 
@@ -277,6 +306,7 @@ export class Crew extends THREE.Group {
     this.position.y = this.world.heightAt(position.x, position.z);
     this.rotation.y = yaw;
     this.world.scene.add(this);
+    this.#hideProc(false);
     this.#play('idle');
   }
 
@@ -287,6 +317,7 @@ export class Crew extends THREE.Group {
     clearQueue(this);
     this.speed = 0;
     this.setSelected(false);
+    this.#hideProc(true);
     this.removeFromParent();
   }
 
@@ -298,7 +329,9 @@ export class Crew extends THREE.Group {
 
   update(dt) {
     if (this.dead || this.inside) return;
-    for (const m of this.members) m.mixer.update(dt);
+    for (const m of this.members) {
+      if (m.proc) { m.object.setMotion(this.speed); m.object.tick(dt); } else m.mixer.update(dt); // [B5] visual only
+    }
     // Stunned or being thrown back (StatusEffects): the squad stands
     if (this.status?.disabled || this.status?.knockedBack) { this.speed = 0; this.#play('idle'); return; }
     advanceQueue(this); // orders given with Shift (OrderQueue.js)
@@ -487,6 +520,19 @@ export class Crew extends THREE.Group {
     this.order = null;
     this.setSelected(false);
     this.removed = true; // World removes the unit
+    // Display only: BloodStains (src/game/BloodStains.js) leaves a stain per member where they fell
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(BLOOD_STAINS.event, { detail: { crew: this } }));
+    // [B5] procedural figures release their batched far instances (shared geometry is ref-counted)
+    for (const m of this.members) if (m.proc) m.object.dispose();
+  }
+
+  // [B5] Procedural figures hidden while the squad is inside a mech / bay (the batcher would keep drawing far instances)
+  #hideProc(hidden) {
+    for (const m of this.members) {
+      if (!m.proc) continue;
+      m.object.visible = !hidden;
+      if (hidden) m.object.tick(0);
+    }
   }
 
   // Model origin may not be at the feet – how much to lift it so the feet stand on y = 0

@@ -284,6 +284,16 @@ export async function takeScheduledRestore() {
   }
 }
 
+/** [A2-net] Save → bytes as stored (gzip JSON when CompressionStream exists) – the multiplayer transfer sends these */
+export const packSave = (save) => pack(save);
+
+/** [A2-net] Bytes of packSave → save; throws code 'corrupt' (unreadable or not a complete save) */
+export async function unpackSave(bytes) {
+  const save = await unpack(bytes);
+  if (!saveLooksValid(save)) throw storeError('not a saved game', 'corrupt');
+  return save;
+}
+
 /** The whole store as one object (main.js: new SaveLoadView({ store: saveStore, … })) */
 export const saveStore = {
   list, put, get, remove, exportFile, importFile, isCompatible, isAvailable, ensureFingerprint, currentFingerprint,

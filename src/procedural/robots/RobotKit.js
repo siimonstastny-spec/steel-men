@@ -19,9 +19,18 @@ import { smootherstep, place } from '../ProcKit.js';
 import { UnitBuilder, ProcUnit, createUnitCache, UNIT_KIT } from '../units/UnitKit.js';
 import { chamferBox } from '../ProcShapes.js';
 import { SOCKETS } from '../../config.js';
+import { applyRobotLod } from './RobotLod.js';
 
 const TAU = Math.PI * 2;
 const HALF_PI = Math.PI / 2;
+
+// Gun-type arm attack clips (rig.attack): forearm held forward, raised to aim; timeline shares of the attack time:
+// raise → charge (tremble, optional charge glow) → burst of `shots` over `share`; every shot kicks the arm back (shotKick
+// shoulder / kickElbow elbow, rad, decaying with `decay` 1/s); jitter kick = elbow recoil sine while firing (rad, Hz)
+const GUN_BASE = {
+  holdElbow: -1.45, holdShoulder: -0.08, aimShoulder: -0.3, aimElbow: -1.5, raise: 0.15, charge: 0, share: 0.75,
+  kick: 0, kickHz: 0, shotKick: 0, kickElbow: 0, decay: 10, tremble: 0, trembleHz: 0, defaultShots: 1, swing: 0.35,
+};
 
 /** Kit tuning (raw GLB model units like RobotPartsBasic: a basic robot ≈ 31 high; seconds, radians) */
 export const ROBOT_KIT = {
@@ -89,13 +98,34 @@ export const ROBOT_KIT = {
     burst: { defaultShots: 4, share: 0.7 },   // a torso attack fires its burst in the first share of the attack time
     // gun arms (attack 'gun'): forearm held forward (elbow), raised to aim during an attack; burst of `shots` spread over
     // `share` of the attack time after the `raise` share; kick = elbow recoil jitter while firing (rad, Hz)
-    gun: { holdElbow: -1.45, holdShoulder: -0.08, aimShoulder: -0.3, aimElbow: -1.5, raise: 0.15, share: 0.75, kick: 0.035, kickHz: 11, defaultShots: 16, swing: 0.35 },
+    gun: { ...GUN_BASE, kick: 0.035, kickHz: 11, shotKick: 0.03, kickElbow: 0.05, decay: 14, defaultShots: 16 },
+    // rocket arm: barrel pitched up, each missile pushes the arm back hard
+    launcher: { ...GUN_BASE, aimShoulder: -0.75, aimElbow: -1.1, raise: 0.2, share: 0.7, shotKick: 0.22, kickElbow: 0.3, decay: 7, defaultShots: 4 },
+    // energy blaster: quick raise, sharp small recoil per bolt
+    blaster: { ...GUN_BASE, raise: 0.2, share: 0.6, shotKick: 0.1, kickElbow: 0.2, decay: 12, defaultShots: 1 },
+    // laser / plasma: raise, charge (arm trembles, optional rig.charge glow grows), flash, slow settle
+    beam: { ...GUN_BASE, raise: 0.2, charge: 0.35, share: 0.3, shotKick: 0.06, kickElbow: 0.1, decay: 5, tremble: 0.05, trembleHz: 23, defaultShots: 1 },
+    // contact weapon with a swing (axe, hammer, blade, sword): arm up over the head, chop down, hold, recover
+    swing: {
+      windup: 0.38, strike: 0.55, hold: 0.7,
+      backShoulder: -2.5, backElbow: -0.5, strikeShoulder: -0.9, strikeElbow: -0.15, twist: 0.3, fistRoll: 0.5,
+    },
+    // torso weapons without a turret (rig.weapon = { kind, muzzles, shots }): chest attitude + impulse per shot
+    //   lean = chest pitch while raised (− = back), dip = crouch while charging, release = share after the charge it fades in
+    chest: {
+      launch: { raise: 0.2, charge: 0, share: 0.7, lean: -0.1, dip: 0, release: 0.1, shotKick: -0.05, decay: 6, tremble: 0, trembleHz: 0, defaultShots: 4 },
+      pulse: { raise: 0.1, charge: 0.5, share: 0.1, lean: 0.12, dip: 0.9, release: 0.15, shotKick: -0.16, decay: 5, tremble: 0.03, trembleHz: 21, defaultShots: 1 },
+      artillery: { raise: 0.3, charge: 0.3, share: 0.1, lean: -0.1, dip: 0.3, release: 0.2, shotKick: -0.22, decay: 3, tremble: 0, trembleHz: 0, defaultShots: 1 },
+    },
     visor: { idle: 0.75, depth: 0.25, hz: 0.6 },
   },
 };
 
 const E = ROBOT_KIT.edges;
 const A = ROBOT_KIT.anim;
+const GUN_KINDS = { gun: true, launcher: true, blaster: true, beam: true };   // gun-type arm attacks (burst + aim)
+const MELEE_KINDS = { punch: true, swing: true };
+const KICK_EPS = 0.002;   // shot impulse below this snaps to 0
 const HIDDEN = UNIT_KIT.hiddenScale;
 
 // ---------------------------------------------------------------- part registry
@@ -406,10 +436,13 @@ export function lightLine(b, kit, len, axis, t = {}) {
   return b.box(w, h, d, kit.S.neon, { detail: 0, ...t });
 }
 
+// flags the last part of a builder as a light marking (RobotLod keeps it in the far LODs)
+const markPart = (b) => { b.parts[b.parts.length - 1].marking = true; return b; };
+
 /** Hazard / light marking strip facing +Z, only where the style has markings (style.markings) */
 export function markingStrip(b, kit, len, h, t = {}) {
   const m = kit.style.markings;
-  if (m === 'hazard') return b.hazardStrip(len, h, h, kit.S.accent, kit.S.dark, { detail: 0, ...t });
+  if (m === 'hazard') return markPart(b.hazardStrip(len, h, h, kit.S.accent, kit.S.dark, { detail: 0, ...t }));
   if (m === 'light') return lightLine(b, kit, len, 'x', t);
   return b;
 }
@@ -448,6 +481,7 @@ function buildRobot(styleKitIn, variant) {
   }
   ub.socket(S.aim, 'chest', torso.aim);
   ub.socket(S.smoke, 'chest', torso.smoke ?? torso.aim);
+  applyRobotLod(ub, kit);   // explicit far-LOD detail of every part (RobotLod.js)
   const data = ub.build();
   robot.teamShare = teamShareOf(data.paint);
   checkBudget(kit, variant, data, robot.teamShare);
@@ -484,8 +518,12 @@ const plateauEase = (u, edge) => (u < edge ? smootherstep(u / edge) : u > 1 - ed
 /**
  * Procedural robot model (THREE.Group, forward +Z, origin on the ground between the feet). Owner API, all visual:
  *   setGait(speed, turn)        units/s (signed) and yaw rate rad/s – drives the walk cycle (= ProcUnit.setMotion)
- *   playAttack(slot, duration, shots)  'leftArm' | 'rightArm' → arm attack (fist: punch, gun arm: raise + burst with
- *                               spinning barrels), 'torso' → turret burst
+ *   playAttack(slot, duration, shots, kind?)  'leftArm' | 'rightArm' → arm attack by the part's rig.attack: 'punch' (fist),
+ *                               'swing' (overhead chop: axe / hammer / blade), 'gun' (barrels + burst), 'launcher'
+ *                               (rockets: pitch up, kick per missile), 'blaster' (bolt recoil), 'beam' (charge, tremble,
+ *                               flash; optional rig.charge glow bone); 'torso' → turret burst, or rig.weapon
+ *                               { kind: 'launch' | 'pulse' | 'artillery', muzzles, shots, charge? } chest attack.
+ *                               `kind` (optional) forces another clip – preview / tests; muzzles missing = motion only
  *   setAim(yaw, pitch) / clearAim()   torso turret aim relative to the chest (rad)
  *   setPowered(on)              crew on board: stand ready / crewless: power-down crouch, visor off
  *   hit(direction)              'front' | 'back' | 'left' | 'right' – chest jolt
@@ -577,11 +615,24 @@ export class ProcRobot extends ProcUnit {
         slot, side: ROBOT_KIT.sides[slot].sign, shoulder: bone(a.shoulder), elbow: bone(a.elbow), fist: bone(a.fist),
         attack: a.attack, fire: a.fire, timer: 0, duration: 1, struck: false,
         legPhase: ROBOT_KIT.sides[slot].sign > 0 ? Math.PI : 0,   // swings with the opposite leg
-        // gun arms ('gun'): muzzle sockets, default burst, burst state (fired from update, also while clip driven)
-        gun: a.attack === 'gun', muzzles: a.muzzles ?? [], shots: a.shots ?? A.gun.defaultShots,
-        burstLeft: 0, burstTimer: 0, burstInterval: 0, burstIndex: 0,
+        // attack kind of the current attack (rig.attack, or the playAttack override): 'punch' | 'swing' (melee),
+        // 'gun' | 'launcher' | 'blaster' | 'beam' (gun-type, ROBOT_KIT.anim[kind]); cfg = its tuning
+        kind: a.attack, cfg: A[a.attack] ?? A.punch, gun: !!GUN_KINDS[a.attack],
+        // gun-type: muzzle sockets (none = motion only), default burst, burst state (fired from update, also while clip
+        // driven), kick = shot impulse (1 → 0), charge glow bone (rig.charge, optional) and charge progress
+        muzzles: a.muzzles ?? [], shots: a.shots ?? A[a.attack]?.defaultShots ?? 1,
+        hold: a.hold ?? null,   // optional rest pose { elbow, shoulder } of a gun-type arm (default GUN_BASE hold)
+        burstLeft: 0, burstTimer: 0, burstInterval: 0, burstIndex: 0, kick: 0,
+        chargeBone: a.charge ? bone(a.charge) : null, charge: 0,
       });
     }
+    // torso weapon without a turret (rig.weapon) or an override attack: one reusable state object
+    const W = T.weapon;
+    this.tw = {
+      kind: W?.kind ?? '', cfg: A.chest[W?.kind] ?? null, muzzles: W?.muzzles ?? this.turret?.muzzles ?? [], shots: W?.shots ?? 0,
+      timer: 0, duration: 1, burstLeft: 0, burstTimer: 0, burstInterval: 0, burstIndex: 0, kick: 0, lean: 0, dip: 0,
+      chargeBone: W?.charge ? bone(W.charge) : null,
+    };
     // pick proxy per slot: the coarsest far LOD of the slot's far group, invisible, child of the slot wrapper bone –
     // Raycaster hits it (ignores `visible`) and findMechPart climbs from it to the slot (MechPart.object = wrapper)
     this.partProxies = {};
@@ -614,9 +665,19 @@ export class ProcRobot extends ProcUnit {
    * ROBOT_KIT.anim.burst.share of the duration, each from the next socket_Launch_n). Returns false when the slot has none.
    * duration and shots should come from the weapon data (stats.json attackTime / burst); the defaults are visual only.
    */
-  playAttack(slot = 'rightArm', duration = A.punch.defaultTime, shots = 0) {
+  playAttack(slot = 'rightArm', duration = A.punch.defaultTime, shots = 0, kind = null) {
     if (!this.shared) return false;
     if (slot === 'torso') {
+      const tw = this.tw;
+      const cfg = kind ? A.chest[kind] : this.turret ? null : tw.cfg;
+      if (cfg) {                                       // chest attack (weapon without a turret, or `kind` override)
+        const n = shots > 0 ? shots : tw.shots > 0 && !kind ? tw.shots : cfg.defaultShots;
+        tw.cfg = cfg; tw.timer = duration; tw.duration = duration;
+        tw.burstLeft = n;
+        tw.burstInterval = (duration * cfg.share) / n;
+        tw.burstTimer = duration * (cfg.raise + cfg.charge);   // first shot once raised / charged
+        return true;
+      }
       if (!this.turret) return false;
       const n = shots > 0 ? shots : this.turret.shots;
       this.burstLeft = n;
@@ -627,13 +688,16 @@ export class ProcRobot extends ProcUnit {
     for (let i = 0; i < this.arms.length; i++) {
       const a = this.arms[i];
       if (a.slot !== slot) continue;
+      // `kind` overrides the part's own clip (preview / tests): 'punch' | 'swing' | 'gun' | 'launcher' | 'blaster' | 'beam'
+      const k = kind && (GUN_KINDS[kind] || MELEE_KINDS[kind]) ? kind : a.attack;
+      a.kind = k; a.cfg = A[k] ?? A.punch; a.gun = !!GUN_KINDS[k];
       a.timer = duration; a.duration = duration; a.struck = false;
-      if (a.gun && a.muzzles.length) {
-        const G = A.gun;
-        const n = shots > 0 ? shots : a.shots;
+      if (a.gun) {
+        const C = a.cfg;
+        const n = shots > 0 ? shots : kind ? C.defaultShots : a.shots;
         a.burstLeft = n;
-        a.burstInterval = (duration * G.share) / n;
-        a.burstTimer = duration * G.raise;   // first shot once the gun is up
+        a.burstInterval = (duration * C.share) / n;
+        a.burstTimer = duration * (C.raise + C.charge);   // first shot once the gun is up / charged
       }
       return true;
     }
@@ -712,7 +776,12 @@ export class ProcRobot extends ProcUnit {
     // turret: aim (or idle scan), burst
     if (this.turret) this.#turret(dt, t, pw);
     // gun arm bursts (muzzle flash + barrel spin via the ProcUnit fire map), also while GLB clips drive the body
-    for (let i = 0; i < this.arms.length; i++) if (this.arms[i].burstLeft > 0) this.#gunBurst(this.arms[i], dt);
+    for (let i = 0; i < this.arms.length; i++) {
+      const a = this.arms[i];
+      if (a.kick > 0) a.kick = a.kick < KICK_EPS ? 0 : a.kick * Math.exp(-(a.cfg.decay ?? GUN_BASE.decay) * dt);
+      if (a.burstLeft > 0) this.#gunBurst(a, dt);
+    }
+    this.#chestAttack(dt);
 
     // sensors / antennas
     const spin = this.kit.style.anim.spin ?? 1;
@@ -792,6 +861,13 @@ export class ProcRobot extends ProcUnit {
     this.chest.rotation.x = A.lean * w + P.slump * pw + this.hitPitch * hitK;
     this.chest.rotation.z = -G.sway * A.rollFollow * w * s + this.hitRoll * hitK;
     this.chest.position.y = this.chestY + A.breath * idle * Math.sin(TAU * A.breathHz * t + this.phase);
+    // torso weapon attack (launch / pulse / artillery): attitude, charge crouch + tremble, impulse per shot
+    const tw = this.tw;
+    if (tw.timer > 0 || tw.kick > 0) {
+      const C = tw.cfg;
+      this.chest.rotation.x += tw.lean + C.shotKick * tw.kick + C.tremble * tw.dip * Math.sin(TAU * C.trembleHz * t);
+      this.chest.position.y -= C.dip * tw.dip;
+    }
     if (this.head) {
       this.head.rotation.y = A.look * idle * Math.sin(TAU * A.lookHz * t + this.phase);
       this.head.rotation.x = P.headDroop * pw;
@@ -806,21 +882,27 @@ export class ProcRobot extends ProcUnit {
     for (let i = 0; i < this.arms.length; i++) this.#arm(this.arms[i], dt, phase, w, pw);
   }
 
+  // One shot of a gun-type arm: muzzle flash / spin via the fire map (none = motion only), impulse kick, charge released
   #gunBurst(a, dt) {
     a.burstTimer -= dt;
     if (a.burstTimer > 0) return;
-    this.fire(a.muzzles[a.burstIndex % a.muzzles.length]);
-    a.burstIndex = (a.burstIndex + 1) % a.muzzles.length;
+    if (a.muzzles.length) {
+      this.fire(a.muzzles[a.burstIndex % a.muzzles.length]);
+      a.burstIndex = (a.burstIndex + 1) % a.muzzles.length;
+    }
+    a.kick = 1;
     a.burstLeft--;
     a.burstTimer += a.burstInterval;
   }
 
-  // Gun arm: forearm held forward (swinging a little with the walk), raised to aim during an attack, recoil jitter
+  // Gun-type arm (a.cfg = ROBOT_KIT.anim[kind]): forearm held forward (swinging a little with the walk), raised to aim
+  // during an attack, charge tremble, jitter + impulse recoil per shot; the charge glow bone grows while charging
   #gunArm(a, dt, phase, w, pw) {
-    const G = A.gun;
+    const G = a.cfg;
     const swing = Math.sin(phase + a.legPhase);
-    let shoulder = G.holdShoulder - A.armSwing * G.swing * swing * w;
-    let elbow = lerp(G.holdElbow, -A.power.elbow, pw);
+    let shoulder = (a.hold?.shoulder ?? G.holdShoulder) - A.armSwing * G.swing * swing * w;
+    let elbow = lerp(a.hold?.elbow ?? G.holdElbow, -A.power.elbow, pw);
+    let charge = 0;
     if (a.timer > 0) {
       a.timer = Math.max(0, a.timer - dt);
       const u = 1 - a.timer / a.duration;
@@ -828,15 +910,58 @@ export class ProcRobot extends ProcUnit {
       shoulder = lerp(shoulder, G.aimShoulder, k);
       elbow = lerp(elbow, G.aimElbow, k);
       if (a.burstLeft > 0) elbow += G.kick * Math.sin(TAU * G.kickHz * this.time);
+      if (G.charge > 0 && u > G.raise && u < G.raise + G.charge) {   // charging: before the first shot
+        charge = smootherstep(clamp01((u - G.raise) / G.charge));
+        shoulder += G.tremble * charge * Math.sin(TAU * G.trembleHz * this.time);
+      }
     }
+    shoulder += G.shotKick * a.kick;
+    elbow += G.kickElbow * a.kick;
     a.shoulder.rotation.x = shoulder;
     a.elbow.rotation.x = elbow;
     a.fist.rotation.z = 0;
+    if (a.chargeBone) {
+      a.chargeBone.scale.setScalar(charge > 0 ? Math.max(HIDDEN, charge) : HIDDEN);
+    }
+  }
+
+  // Torso weapon without a turret (tw.cfg = ROBOT_KIT.anim.chest[kind]): timer, impulse decay and the shots (update – also
+  // while clip driven); the chest pose comes from tw.lean / tw.dip, written here, applied in #body
+  #chestAttack(dt) {
+    const tw = this.tw;
+    if (tw.kick > 0) tw.kick = tw.kick < KICK_EPS ? 0 : tw.kick * Math.exp(-(tw.cfg?.decay ?? 1) * dt);
+    if (tw.timer <= 0) {
+      tw.lean = 0; tw.dip = 0;
+      if (tw.chargeBone) tw.chargeBone.scale.setScalar(HIDDEN);
+      return;
+    }
+    const C = tw.cfg;
+    tw.timer = Math.max(0, tw.timer - dt);
+    const u = 1 - tw.timer / tw.duration;
+    const lead = C.raise + C.charge;
+    tw.lean = C.lean * plateauEase(u, C.raise);
+    // crouch while charging, released over `release` after the first shot
+    tw.dip = C.dip > 0 && u > C.raise
+      ? (u < lead ? smootherstep((u - C.raise) / C.charge) : Math.max(0, 1 - (u - lead) / C.release))
+      : 0;
+    if (tw.burstLeft > 0) {
+      tw.burstTimer -= dt;
+      if (tw.burstTimer <= 0) {
+        if (tw.muzzles.length) { this.fire(tw.muzzles[tw.burstIndex % tw.muzzles.length]); tw.burstIndex = (tw.burstIndex + 1) % tw.muzzles.length; }
+        tw.kick = 1;
+        tw.burstLeft--;
+        tw.burstTimer += tw.burstInterval;
+      }
+    }
+    if (tw.chargeBone) {
+      const charging = C.charge > 0 && u > C.raise && u < lead;
+      tw.chargeBone.scale.setScalar(charging ? Math.max(HIDDEN, smootherstep((u - C.raise) / C.charge)) : HIDDEN);
+    }
   }
 
   #arm(a, dt, phase, w, pw) {
     if (a.gun) { this.#gunArm(a, dt, phase, w, pw); return; }
-    const K = A.punch;
+    const K = a.cfg;
     const swing = Math.sin(phase + a.legPhase);
     let shoulder = -A.armSwing * swing * w;
     let elbow = -A.elbowSwing * (0.5 + 0.5 * swing) * w - A.power.elbow * pw;

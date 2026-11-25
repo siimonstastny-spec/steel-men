@@ -21,6 +21,9 @@ const ICON_LETTERS = 3;          // letters of a building name used as its icon 
 const ENERGY_ICON = '⚡';
 const STATS_ID = 'player-stats-bar';
 
+/** `<img class="ico-img">` of a rendered icon URL, '' when it is not ready (the caller keeps its emoji) */
+const iconImg = (url) => (url ? `<img class="ico-img" src="${esc(url)}" alt="">` : '');
+
 export class QueueFrame {
   /**
    * @param {object} deps  world; queue (ProductionQueue view); parent (element, default #hud-root);
@@ -114,7 +117,7 @@ export class QueueFrame {
       const left = Math.max(0, it.total - it.elapsed).toFixed(Q.progressDecimals);
       const tip = [it.label, `${left} s`, waiting ? t('econ.waitingEnergy') : '', t('hud.queue.hint')].filter(Boolean).join(' – ');
       cells += `<div class="qf-item ${head ? 'active' : ''} ${waiting ? 'energy' : ''}" data-q="${it.id}" title="${esc(tip)}">`
-        + `<span class="ico">${esc(it.icon)}</span>${waiting ? `<span class="wait">${ENERGY_ICON}</span>` : ''}`
+        + `<span class="ico">${iconImg(it.iconUrl) || esc(it.icon)}</span>${waiting ? `<span class="wait">${ENERGY_ICON}</span>` : ''}`
         + `<span class="bar" style="width:${pct}%"></span></div>`;
     }
     flush();

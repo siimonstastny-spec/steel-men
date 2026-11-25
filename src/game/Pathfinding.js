@@ -22,9 +22,17 @@
 //                landing waypoint `hop = true`.
 // When the landing is the goal itself, findPath returns `goalFly` / `goalHop`. Smoothing never skips a crossing: the
 // obstacle between takeoff and landing blocks the line of sight.
+//
+// [A14-terrain] Terrain cost (setTerrain, findPath opts.terrainClass): per chassis class a grid of cell costs
+// 1 / speed factor (resampled from the map's terrain type grid at the nav cell centres; factor 0 = impassable = blocked
+// like BLOCK_SOLID). A step costs length × mean cost of its two cells; the heuristic is scaled by the cheapest cell of
+// the grid (admissible). With a cost grid the straight line skips A* only when it costs no more than the cheapest
+// possible walk, and line-of-sight smoothing only shortcuts when the straight leg costs no more than the planned cells
+// (TERRAIN_COST.shortcutTolerance). A class whose cells all cost 1 has no grid (= old behaviour).
 import * as THREE from 'three';
-import { PATHFINDING, MECH_COLLISION } from '../config.js';
+import { PATHFINDING, MECH_COLLISION, TERRAIN_COST } from '../config.js';
 import { areAllies } from './Alliances.js';
+import { terrainFactorByIndex, terrainRulesReady } from './TerrainTypes.js';
 
 const SQRT2 = Math.SQRT2;
 const EPSILON = 1e-9; // numeric guard against division by zero (not a tuning value)
@@ -59,6 +67,10 @@ export class NavGrid {
   #centre = new THREE.Vector3();
   #sigValues = [];       // refresh(): rounded obstacle values of the last layout (SIG_VALUES per shape)
   #sigCount = 0;
+  // [A14-terrain] per weighted class name: { cost: Float32Array (Infinity = impassable), minCost, impassable: Int32Array }
+  // or absent (all cells cost 1). Built by setTerrain, read only by queries.
+  #terrain = {};
+  #pathG = [];           // [A14-terrain] findPath scratch: A* cost of each path point (smoothing)
 
   /**
    * @param {object} opts
@@ -94,6 +106,103 @@ export class NavGrid {
   }
 
   obstacles() { return this._snapshot?.shapes ?? this.sources.flatMap((fn) => fn()); }
+
+  /**
+   * [A14-terrain] Builds the cost grids of the weighted classes (TERRAIN_COST.weightedClasses) from a terrain type grid
+   * (TerrainTypes.TerrainTypeGrid, any cellSize / cols: sampled at the nav cell centres) and the current speed factors.
+   * null = no terrain (every class uniform). Bumps `version` (units re-plan). Call at map load / after the rules changed.
+   * @param {import('./TerrainTypes.js').TerrainTypeGrid|null} typeGrid
+   */
+  setTerrain(typeGrid) {
+    this.#terrain = {};
+    this.#typeGrid = typeGrid ?? null;
+    this.#terrainBuilt = false;
+    this.version++;
+    this.#ensureTerrain();
+  }
+
+  #typeGrid = null;
+  #terrainBuilt = false;
+
+  // Grids are built on the first chance once stats.json is loaded (World.loadMap may run before loadStats in startGame);
+  // every query goes through here, so the first query of the match builds them at the latest
+  #ensureTerrain() {
+    if (this.#terrainBuilt || !terrainRulesReady()) return this.#terrain;
+    this.#terrainBuilt = true;
+    const typeGrid = this.#typeGrid;
+    if (!typeGrid) return this.#terrain;
+    const n = this.cols;
+    const cells = n * n;
+    const c = this.cellSize;
+    const types = new Uint8Array(cells);
+    for (let i = 0; i < cells; i++) {
+      types[i] = typeGrid.typeAt(((i % n) + 0.5) * c - this.half, (Math.floor(i / n) + 0.5) * c - this.half);
+    }
+    for (const cls of TERRAIN_COST.weightedClasses) {
+      const cost = new Float32Array(cells);
+      let minCost = Infinity;
+      let uniform = true;
+      let blockedCount = 0;
+      for (let i = 0; i < cells; i++) {
+        const f = terrainFactorByIndex(types[i], cls);
+        const v = f > 0 ? 1 / f : Infinity;
+        cost[i] = v;
+        if (v !== 1) uniform = false;
+        if (v === Infinity) blockedCount++;
+        else if (v < minCost) minCost = v;
+      }
+      if (uniform) continue;
+      const impassable = new Int32Array(blockedCount);
+      for (let i = 0, k = 0; i < cells; i++) if (cost[i] === Infinity) impassable[k++] = i;
+      this.#terrain[cls] = { cost, minCost: minCost === Infinity ? 1 : minCost, impassable };
+    }
+    return this.#terrain;
+  }
+
+  // Cost grid of a class for a query (undefined = uniform; TERRAIN_COST.weightedPath off = always uniform)
+  #terrainOf(terrainClass) {
+    if (!terrainClass || !TERRAIN_COST.weightedPath) return undefined;
+    return this.#ensureTerrain()[terrainClass];
+  }
+
+  /**
+   * [A14-terrain] Terrain cost of the straight segment a -> b for a class, in world units (length × sampled cell cost);
+   * the plain length without a cost grid (or with TERRAIN_COST.weightedPath off). Infinity = crosses impassable terrain.
+   */
+  terrainSegmentCost(a, b, terrainClass) {
+    const t = this.#terrainOf(terrainClass);
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    return t ? this.#segmentCost(a, b, t.cost) * this.cellSize : len;
+  }
+
+  /**
+   * [A14-terrain] May a unit at `p` head straight to `next`, skipping the waypoint `via`? True without a cost grid;
+   * otherwise when the straight leg costs no more than the walk over `via` (+ TERRAIN_COST.shortcutTolerance).
+   * Obstacles are not checked here (segmentClear). No allocation.
+   */
+  shortcutOk(p, via, next, terrainClass) {
+    const t = this.#terrainOf(terrainClass);
+    if (!t) return true;
+    const direct = this.#segmentCost(p, next, t.cost);
+    if (direct === Infinity) return false;
+    return direct <= (this.#segmentCost(p, via, t.cost) + this.#segmentCost(via, next, t.cost)) * (1 + TERRAIN_COST.shortcutTolerance);
+  }
+
+  // Cost of a -> b in cells: the segment cut into equal pieces of at most TERRAIN_COST.sampleStep cells, each weighted
+  // by the cost of the cell under its middle
+  #segmentCost(a, b, cost) {
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const len = Math.hypot(dx, dz) / this.cellSize;
+    if (len <= 0) return 0;
+    const steps = Math.ceil(len / TERRAIN_COST.sampleStep);
+    const piece = len / steps;
+    let sum = 0;
+    for (let k = 0; k < steps; k++) {
+      const t = (k + 0.5) / steps;
+      sum += cost[this.#col(a.z + dz * t) * this.cols + this.#col(a.x + dx * t)];
+    }
+    return sum * piece;
+  }
 
   /**
    * Runs `fn` with a frozen obstacle list: obstacles() is built once and reused by every query inside (e.g. hundreds
@@ -155,6 +264,8 @@ export class NavGrid {
    * @param {number} [opts.hopPenalty] [R2] extra cost of one hop (units)
    * @param {object} [opts.body]  [W7] the moving unit itself: its collision circles replace `radius` (see #inflated)
    * @param {number} [opts.team]  [H1] team of the moving unit (default body.team): own / allied gates do not block (passTeam)
+   * @param {string} [opts.terrainClass]  [A14-terrain] chassis class (TerrainTypes.terrainClassOf): weights the path by
+   *   that class's terrain cost grid (see file header); missing / unweighted class = uniform cost
    * @returns {{ waypoints: THREE.Vector3[], goal: THREE.Vector3, direct: boolean, goalFly: boolean, goalHop: boolean }}
    *   waypoints = intermediate points (without the goal); goal = where the unit can actually get –
    *   the target itself, or the nearest free spot when the target lies inside an obstacle.
@@ -162,13 +273,16 @@ export class NavGrid {
    */
   findPath(from, to, {
     radius = 0, ignore = [], crossRift = false, flyRange = 0, flyPenalty = 0, hopRange = 0, hopPenalty = 0, body = null, team = body?.team,
+    terrainClass = null,
   } = {}) {
     const shapes = this.#inflated(radius, ignore, crossRift, body, team);
+    // [A14-terrain] cost grid of the query's class (null = uniform, the code below then runs exactly as before A14)
+    const terrain = this.#terrainOf(terrainClass) ?? null;
     const goal = new THREE.Vector3(to.x, 0, to.z);
     const none = (g) => ({ waypoints: [], goal: g, direct: true, goalFly: false, goalHop: false });
-    if (!shapes.length || this.segmentClear(from, goal, shapes)) return none(goal);
+    if ((!shapes.length || this.segmentClear(from, goal, shapes)) && (!terrain || this.#cheapest(from, goal, terrain))) return none(goal);
 
-    const blocked = this.#rasterize(shapes);
+    const blocked = this.#rasterize(shapes, terrain);
     const start = this.#cellOf(from);
     let end = this.#cellOf(goal);
     if (blocked[end] || insideAny(goal, shapes)) {
@@ -189,14 +303,17 @@ export class NavGrid {
     };
     // [R2] how each cell was entered: CROSS_FLY / CROSS_HOP, 0 = walked
     if (jets.fly || jets.hop) jets.entry = this.#entry.fill(0);
-    const cells = this.#astar(free, end, blocked, jets);
+    const cells = this.#astar(free, end, blocked, jets, terrain);
     if (free !== start) cells.unshift(start);
     const reachedEnd = cells[cells.length - 1] === end;
     const entry = jets.entry;
+    const pathG = this.#pathG;
+    pathG.length = 0;
     const points = cells.slice(1).map((c) => {
       const p = this.#cellCentre(c, new THREE.Vector3());
       if (entry?.[c] === CROSS_FLY) p.fly = true;
       else if (entry?.[c] === CROSS_HOP) p.hop = true;
+      if (terrain) pathG.push(this.#g[c]); // [A14-terrain] A* cost to this point (cells), for the smoothing check
       return p;
     });
     const takeFlags = (src) => { if (src.fly) goal.fly = true; if (src.hop) goal.hop = true; };
@@ -211,7 +328,8 @@ export class NavGrid {
       } else goal.set(from.x, 0, from.z);
     }
     if (!points.length) return none(goal);
-    const smooth = this.#smooth(from, points, shapes);
+    const smooth = this.#smooth(from, points, shapes, terrain);
+    pathG.length = 0;
     smooth.pop(); // the last point is the goal
     return { waypoints: smooth, goal, direct: smooth.length === 0, goalFly: goal.fly === true, goalHop: goal.hop === true };
   }
@@ -220,6 +338,25 @@ export class NavGrid {
   segmentClear(a, b, shapes) {
     for (let i = 0; i < shapes.length; i++) if (segmentHits(a, b, shapes[i])) return false;
     return true;
+  }
+
+  /** [A7b] True when the point (x, z) lies outside every shape (shapes from shapesFor) */
+  pointClear(p, shapes) { return !insideAny(p, shapes); }
+
+  /**
+   * [A7b] Free distance from p along the unit direction (dx, dz) to the first shape (shapes from shapesFor), at most
+   * maxDist; 0 when p lies inside a shape. Corridor width across a path = rayClearance(+side) + rayClearance(-side).
+   * Read-only query, no allocation.
+   */
+  rayClearance(p, dx, dz, maxDist, shapes) {
+    let best = maxDist;
+    for (let i = 0; i < shapes.length; i++) {
+      const s = shapes[i];
+      if (inside(p, s)) return 0;
+      const t = rayEntry(p.x, p.z, dx, dz, s);
+      if (t < best) best = t;
+    }
+    return best;
   }
 
   /**
@@ -272,7 +409,8 @@ export class NavGrid {
   }
 
   // Cell values: 0 free, BLOCK_SOLID (any obstacle but a rift), BLOCK_RIFT (only rifts) – [R2] hops cross BLOCK_RIFT only
-  #rasterize(shapes) {
+  // [A14-terrain] terrain (or null): its impassable cells (speed factor 0) are BLOCK_SOLID too
+  #rasterize(shapes, terrain = null) {
     const n = this.cols;
     const blocked = this.#blocked.fill(0);
     const c = this.cellSize;
@@ -292,23 +430,36 @@ export class NavGrid {
         }
       }
     }
+    if (terrain) {
+      const list = terrain.impassable;
+      for (let k = 0; k < list.length; k++) if (!blocked[list[k]]) blocked[list[k]] = BLOCK_SOLID;
+    }
     return blocked;
+  }
+
+  // [A14-terrain] Does the straight segment cost no more than walking it on the cheapest cells of the grid?
+  #cheapest(a, b, terrain) {
+    const len = Math.hypot(b.x - a.x, b.z - a.z) / this.cellSize;
+    return this.#segmentCost(a, b, terrain.cost) <= len * terrain.minCost * (1 + TERRAIN_COST.shortcutTolerance);
   }
 
   // A* over the grid; returns the cell path (start first). Never enters a blocked cell.
   // Unreachable goal -> path to the reachable cell closest to it.
   // [R2] jets (or null): { fly, flyPenalty, hop, hopPenalty, entry } – crossing edges (see file header); entry marks
   // how each cell on the best path so far was entered.
-  #astar(start, end, blocked, jets = null) {
+  // [A14-terrain] terrain (or null): step cost × mean cell cost, heuristic × the grid's cheapest cell (stays admissible)
+  #astar(start, end, blocked, jets = null, terrain = null) {
     const entry = jets?.entry ?? null;
     const n = this.cols;
     const g = this.#g.fill(Infinity);
     const from = this.#from.fill(-1);
     const closed = this.#closed.fill(0);
     const ex = end % n, ez = Math.floor(end / n);
+    const cellCost = terrain ? terrain.cost : null;
+    const hScale = terrain ? terrain.minCost : 1;
     const h = (i) => {
       const dx = Math.abs((i % n) - ex), dz = Math.abs(Math.floor(i / n) - ez);
-      return Math.max(dx, dz) + (SQRT2 - 1) * Math.min(dx, dz);
+      return (Math.max(dx, dz) + (SQRT2 - 1) * Math.min(dx, dz)) * hScale;
     };
     const open = this.#heap;
     open.clear();
@@ -333,7 +484,7 @@ export class NavGrid {
         if (blocked[ni] || closed[ni]) continue;
         // No corner cutting past a blocked cell
         if (dx && dz && (blocked[cz * n + nx] || blocked[nz * n + cx])) continue;
-        const ng = g[cur] + cost;
+        const ng = g[cur] + (cellCost ? cost * (cellCost[cur] + cellCost[ni]) * 0.5 : cost);
         if (ng < g[ni]) { g[ni] = ng; from[ni] = cur; if (entry) entry[ni] = 0; open.push(ni, ng + h(ni)); }
       }
       if (jets?.fly) this.#crossEdges(cur, cx, cz, blocked, closed, g, from, entry, open, h, jets.fly, jets.flyPenalty, false);
@@ -376,13 +527,20 @@ export class NavGrid {
   }
 
   // Greedy line-of-sight smoothing: from each anchor jump to the farthest visible point
-  #smooth(from, points, shapes) {
+  // [A14-terrain] with terrain: …whose straight leg costs no more than the planned cells (this.#pathG = A* cost per point)
+  #smooth(from, points, shapes, terrain = null) {
     const out = [];
+    const pathG = this.#pathG;
+    const tol = 1 + TERRAIN_COST.shortcutTolerance;
     let anchor = from;
+    let anchorG = 0;
     let i = 0;
     while (i < points.length) {
       let j = points.length - 1;
-      while (j > i && !this.segmentClear(anchor, points[j], shapes)) j--;
+      while (j > i && (!this.segmentClear(anchor, points[j], shapes)
+        || (terrain && this.#segmentCost(anchor, points[j], terrain.cost)
+          > (pathG[j] - anchorG) * tol + TERRAIN_COST.shortcutSlack * terrain.minCost))) j--;
+      if (terrain) anchorG = pathG[j];
       // [R2] a flight / hop landing seen in plain sight from the anchor is simply walked to
       if ((points[j].fly || points[j].hop) && (j > i || this.segmentClear(anchor, points[j], shapes))) {
         points[j].fly = false;
@@ -482,6 +640,33 @@ function insideXZ(px, pz, s) {
 function insideAny(p, shapes) {
   for (let i = 0; i < shapes.length; i++) if (inside(p, shapes[i])) return true;
   return false;
+}
+
+// [A7b] Distance along the ray (px, pz) + t·(dx, dz) (unit direction, start outside s) where it enters s; Infinity = never
+function rayEntry(px, pz, dx, dz, s) {
+  if (s.radius !== undefined) {
+    const fx = px - s.x, fz = pz - s.z;
+    const b = fx * dx + fz * dz;
+    const c = fx * fx + fz * fz - s.radius * s.radius;
+    const disc = b * b - c;
+    if (disc < 0) return Infinity;
+    const t = -b - Math.sqrt(disc);
+    return t >= 0 ? t : Infinity;
+  }
+  let t0 = 0, t1 = Infinity;
+  if (Math.abs(dx) < EPSILON) { if (Math.abs(px - s.x) >= s.halfX) return Infinity; } else {
+    let ta = (s.x - s.halfX - px) / dx, tb = (s.x + s.halfX - px) / dx;
+    if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+    if (t0 >= t1) return Infinity;
+  }
+  if (Math.abs(dz) < EPSILON) { if (Math.abs(pz - s.z) >= s.halfZ) return Infinity; } else {
+    let ta = (s.z - s.halfZ - pz) / dz, tb = (s.z + s.halfZ - pz) / dz;
+    if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+    if (t0 >= t1) return Infinity;
+  }
+  return t0;
 }
 
 /**

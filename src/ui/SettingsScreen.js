@@ -2,7 +2,7 @@
 // the Save button writes them to the player profile (src/core/Profile.js) and applies them. Leaving with unsaved
 // changes asks: Save / Discard / Back (ChoiceDialog.js). Works the same when opened from the game menu.
 import { graphicsPresetOf, graphicsPresetOptions } from '../core/Profile.js';
-import { AUTO_ASSIST, GAME_CLOCK, GRAPHICS, I18N, KEYBINDINGS, KEY_CATEGORIES, MOUSE, PROFILE, SELECTION, UI_SMALL } from '../config.js';
+import { AUTO_ASSIST, GAME_CLOCK, GRAPHICS, I18N, KEYBINDINGS, KEY_CATEGORIES, MOUSE, PROFILE, SELECTION, UI_SCALE, UI_SMALL } from '../config.js';
 import { cleanAvatarImage } from '../core/PlayerLabels.js';
 import { pickAvatarData, humanAvatarHtml } from './Avatar.js';
 import { onLanguageChange, t } from '../i18n/i18n.js';
@@ -43,6 +43,12 @@ export class SettingsScreen {
       Promise.resolve(result).catch(() => { this.fullscreenRefused = true; this.render(); });
     };
     window.addEventListener('keydown', this.onFullscreenKey);
+    // [A5] the "window is small" hint of the Game tab follows the window size
+    this.onResize = () => {
+      const hint = this.el?.querySelector('[data-role="small-window-hint"]');
+      if (hint) hint.hidden = !this.#windowIsSmall();
+    };
+    window.addEventListener('resize', this.onResize);
     this.offLanguage = onLanguageChange(() => this.render());
     this.onElClick = (e) => this.#onClick(e);
     this.onElInput = (e) => this.#onInput(e);
@@ -87,6 +93,7 @@ export class SettingsScreen {
   dispose() {
     document.removeEventListener('fullscreenchange', this.onFullscreenChange);
     window.removeEventListener('keydown', this.onFullscreenKey);
+    window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keydown', this.onCaptureKey, true);
     if (typeof this.offLanguage === 'function') this.offLanguage();
     this.#detach();
@@ -191,6 +198,7 @@ export class SettingsScreen {
     return `
       ${this.#slider('audio.master', t('settings.audio.master'), a.master, opts)}
       ${this.#slider('audio.effects', t('settings.audio.effects'), a.effects, opts)}
+      ${this.#slider('audio.ui', t('settings.audio.ui'), a.ui, opts)}
       ${this.#slider('audio.music', t('settings.audio.music'), a.music, opts)}
       <p class="menu-muted small">${t('settings.audio.note')}</p>
       <div class="menu-actions left"><button class="menu-btn" data-action="reset-audio">${t('common.reset')}</button></div>`;
@@ -227,6 +235,28 @@ export class SettingsScreen {
       <div class="gfx-advanced">${advRows}</div>`;
   }
 
+  /** [A5] True when the window is smaller than UI_SCALE.fullscreenOffer in either direction */
+  #windowIsSmall() {
+    return window.innerWidth < UI_SCALE.fullscreenOffer.width || window.innerHeight < UI_SCALE.fullscreenOffer.height;
+  }
+
+  /** [A5] HUD size select + full-screen button + small-window hint (Game tab) */
+  #hudScaleRows() {
+    const current = String(this.draft.settings.ui.hudScale ?? UI_SCALE.userScaleDefault);
+    const options = UI_SCALE.userScales.map((v) => {
+      const text = v === UI_SCALE.userScaleDefault ? t('settings.game.hudScale.auto') : t('settings.game.hudScale.pct', { pct: Math.round(Number(v) * PERCENT) });
+      return `<option value="${v}" ${v === current ? 'selected' : ''}>${esc(text)}</option>`;
+    }).join('');
+    const fsOn = isFullscreen();
+    return `
+      <label class="setting-row"><span>${t('settings.game.hudScale')}</span>
+        <select data-path="ui.hudScale" data-type="string">${options}</select></label>
+      <div class="setting-row"><span>${t('settings.game.fullscreen')}</span>
+        <button class="menu-btn" data-action="fullscreen-toggle" ${fullscreenAvailable() ? '' : 'disabled'}>${t(fsOn ? 'settings.game.fullscreenOff' : 'settings.game.fullscreenOn')}</button></div>
+      <p class="menu-warn" role="alert" ${this.fullscreenRefused ? '' : 'hidden'}>${t('settings.graphics.fullscreen.refused')}</p>
+      <p class="menu-warn small" data-role="small-window-hint" ${!fsOn && this.#windowIsSmall() ? '' : 'hidden'}>${t('settings.game.smallWindowHint')}</p>`;
+  }
+
   #game() {
     const s = this.draft.settings;
     const lang = this.draft.language;
@@ -249,6 +279,7 @@ export class SettingsScreen {
       ${this.#check('ui.edgeScroll', t('settings.game.edgeScroll'), s.ui.edgeScroll)}
       ${this.#check('ui.autoAssist', t('settings.game.autoAssist'), s.ui.autoAssist ?? AUTO_ASSIST.defaultOn)}
       ${this.#check('ui.showClock', t('settings.game.showClock'), s.ui.showClock ?? GAME_CLOCK.defaultVisible)}
+      ${this.#hudScaleRows()}
       ${this.#check('ui.preferCombatOnDrag', t('settings.game.preferCombatOnDrag'), s.ui.preferCombatOnDrag ?? SELECTION.preferCombatDefault)}
       <p class="menu-muted small">${t('settings.game.profileNote')}</p>`;
   }
@@ -263,7 +294,12 @@ export class SettingsScreen {
     else if (d.keyCat) { this.keyCat = d.keyCat; this.listening = null; this.message = ''; this.render(); }
     else if (d.action === 'back') this.requestLeave();
     else if (d.action === 'save') this.save();
-    else if (d.keyAction !== undefined) {
+    else if (d.action === 'fullscreen-toggle') {
+      // a click is a user gesture: applied at once (not through the draft); fullscreenchange re-renders the button
+      this.fullscreenRefused = false;
+      const result = isFullscreen() ? document.exitFullscreen?.() : document.documentElement.requestFullscreen?.();
+      Promise.resolve(result).catch(() => { this.fullscreenRefused = true; this.render(); });
+    } else if (d.keyAction !== undefined) {
       this.listening = { action: d.keyAction, slot: Number(d.slot) };
       this.message = '';
       this.render();

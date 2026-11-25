@@ -26,3 +26,9 @@
   background: rgba(8, 12, 16, 0.85); border: 1px solid var(--hud-border, #3d4650);
 }
 .chat-input:focus { border-color: var(--menu-accent, #3ea6ff); }
+/* [A5] hit target of the input line; font stays 14 px (UI_SCALE.dialogFont) at every size */
+.chat-input, .chat-target { min-height: var(--ui-hit-target, 32px); box-sizing: border-box; }
+.chat-target { display: inline-flex; align-items: center; }
+@media (max-height: 799px), (max-width: 1099px) { /* = UI_SCALE.breakpoints.compact, UI_SCALE.narrowWidth */
+  .chat-box { width: min(420px, 46vw); }
+}

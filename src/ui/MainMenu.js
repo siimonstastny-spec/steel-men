@@ -142,6 +142,7 @@ export class MainMenu {
       friendlyFire: Object.fromEntries(Object.entries(FRIENDLY_FIRE_DEFAULTS).map(([k, def]) =>
         [k, typeof saved.friendlyFire?.[k] === 'boolean' ? saved.friendlyFire[k] : def])),
       fogOfWar: MENU.fogModes.includes(saved.fogOfWar) ? saved.fogOfWar : MENU.defaultFogMode,
+      superweapons: saved.superweapons !== false, // [A9-F4a] superweapon buildings and programs allowed (missing = on)
       victory: validConditionForSet(saved.victory, saved.startSet, getStats()), // VICTORY.conditions id the start set can play
       speed: GAME_SPEED.options.includes(saved.speed) ? saved.speed : GAME_SPEED.default, // [N4] game speed multiplier
       prebuild: validPrebuild(saved.prebuild), // [N8] pre-build phase in minutes (PREBUILD.options, 0 = off)
@@ -447,6 +448,7 @@ export class MainMenu {
       multiplayer: this.multiplayer,
       races: this.races,
       teams: this.teams,
+      saveLoad: this.saveLoad, // [A2-ui] "Load game" in the multiplayer menu (host picks a saved MP game)
       onStart: (info, net) => { this.#launch(() => this.onMultiplayerStart?.(info, net)); },
       onBack: () => this.show('home'),
       onUnavailable: () => { this.mpUnavailable = true; this.#refreshMultiplayerButton(); if (this.screen === 'lobby') this.show('home'); },
@@ -596,6 +598,7 @@ export class MainMenu {
       avatars: this.settings.seats.slice(0, n).map((s, i) => (s === 'ai' ? (this.#aiIdentity(i)?.avatar ?? null) : null)),
       friendlyFire: { ...this.settings.friendlyFire },
       fogOfWar: this.settings.fogOfWar,
+      superweapons: this.settings.superweapons !== false, // [A9-F4a]
       victory: this.settings.victory,
       speed: this.settings.speed, // [N4] game speed multiplier (GAME_SPEED.options)
       prebuild: this.settings.prebuild, // [N8] pre-build minutes (PREBUILD.options, 0 = off)

@@ -33,6 +33,8 @@ export class Perception {
     this.peak = { strength: 0, time: 0 };
     // R3: enemy aircraft intel – when one was last seen and the most seen at once since (anti-air wishes)
     this.air = { lastSeen: -Infinity, peak: 0 };
+    // [A9-F4b] sim time a cloaked or cloak-capable enemy was last seen (detection buildings, Tech.js)
+    this.cloakLastSeen = -Infinity;
   }
 
   // ---------- refresh ----------
@@ -83,6 +85,7 @@ export class Perception {
     for (const v of w.vehicles) {
       if (v.team !== team || !alive(v) || !v.stats) continue;
       own.vehicles.push(v);
+      if (v.crewless) { own.crewlessVehicles.push(v); continue; } // [A9-F4b] neutron bomb: stands until a crew boards
       if (v.canConstruct) own.builders.push(v);
       else if (v.harvester) own.harvesters.push(v);
       else if ((v.stats.weapons ?? []).length) own.combatVehicles.push(v);
@@ -120,6 +123,7 @@ export class Perception {
       if (!this.#canSee(u)) continue;
       seen.push(u);
       const strength = strengthOf(u);
+      if (u.cloaked || this.world.stealth?.canCloak?.(u)) this.cloakLastSeen = now; // [A9-F4b]
       this.memory.set(u.eid, {
         eid: u.eid, team: u.team, isStructure: Boolean(u.isStructure), unitId: u.unitId ?? null,
         hq: Boolean(u.isStructure && u.stats.hq), armed: strength > 0, harvester: Boolean(u.harvester),
@@ -308,6 +312,9 @@ export class Perception {
     return Math.max(known, this.air.peak);
   }
 
+  /** [A9-F4b] Was a cloaked / cloak-capable enemy seen within AI.air.forgetSeconds (same memory as enemy aircraft)? */
+  cloakSeen(now = this.ai.now) { return now - this.cloakLastSeen <= AI.air.forgetSeconds; }
+
   /** Remembered enemy harvesters (memory entries) */
   knownHarvesters() { return this.known().filter((m) => m.harvester); }
 
@@ -329,5 +336,6 @@ function emptyOwn() {
     army: [], armyStrength: 0, anchor: null,
     bayCrews: [],       // v3: own crews waiting in a bay queue
     allyStructures: [], // v3: buildings of allied teams (allies are seen anyway: shared fog)
+    crewlessVehicles: [], // [A9-F4b] own vehicles without a crew (Military boards them, Production makes crews)
   };
 }

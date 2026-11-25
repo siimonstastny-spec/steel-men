@@ -2,11 +2,12 @@
 // All numbers come from data/stats.json (weapon stats and rules.combat).
 import * as THREE from 'three';
 import { getStats, applyArmor, teamRule } from '../data/Stats.js';
-import { VFX, GENERATOR_BLAST, AUDIO, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY, LOS } from '../config.js';
-import { play } from '../audio/Sound.js';
+import { VFX, GENERATOR_BLAST, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY, LOS } from '../config.js';
+import { play, weaponSoundEvent } from '../audio/Sound.js';
 import { applyWeaponEffects } from './StatusEffects.js';
 import { areAllies } from './Alliances.js';
 import { attacksAllowed } from './PreBuild.js';
+import { dealtFactor, takenFactor, isDesignatedFor, auraRule } from './Auras.js'; // [A9-buildings] (call-time only: Auras imports Combat)
 
 const DEG = Math.PI / 180;
 const BURST_INTERVAL = 0.08;          // s between shots of one burst (visual spacing)
@@ -220,6 +221,7 @@ export function inWeaponRange(unit, weapon, target) {
 
 export function canFireAt(unit, weapon, target) {
   return attacksAllowed(unit.world) && isTargetable(target) && areEnemies(unit, target)
+    && !unit.world?.stealth?.hiddenFrom(unit.team, target) // [A9-buildings] an undetected cloaked unit cannot be targeted
     && inWeaponRange(unit, weapon, target) && inFireArc(unit, weapon, target);
 }
 
@@ -346,15 +348,16 @@ export function releaseAttack(world, attacker, weapon, target, { hit = 'single' 
   if (!isTargetable(target) || (attacker.destroyed && s.class === 'melee')) return;
   // A swing misses a target that got pushed / walked out of reach since the attack started
   if (s.class === 'melee' && !meleeReaches(attacker, s, target)) return;
-  const color = (s.damage.energy ?? 0) > (s.damage.physical ?? 0) ? COLOR_ENERGY : COLOR_PHYSICAL;
+  world.stealth?.noteFired(attacker); // [A9-buildings] firing reveals a cloaked unit (Stealth.js)
+  const color =(s.damage.energy ?? 0) > (s.damage.physical ?? 0) ? COLOR_ENERGY : COLOR_PHYSICAL;
 
   for (let i = 0; i < s.burst; i++) {
     world.schedule(i * BURST_INTERVAL, () => {
       if (!isTargetable(target)) return;
-      if (s.class === 'melee') { play(AUDIO.shotEvents.melee, { position: attacker.position }); resolveMelee(world, attacker, s, target, hit); return; }
+      if (s.class === 'melee') { play('meleeHit', { position: attacker.position }); resolveMelee(world, attacker, s, target, hit); return; }
       const aim = aimPoint(target);
       const from = weapon.part.muzzlePoint(i); // launch socket of the weapon part, not the part origin
-      play(shotEvent(s), { position: from });
+      play(weaponSoundEvent(s), { position: from }); // [A6] presentation only: never read back
       // [N7-los] a tall map obstacle in the way: the shot hits it and does nothing (no damage, no splash)
       if (!attacker.airborne && !target.airborne && losImpact(world, from, aim)) { // aircraft fly over obstacles (as clearShot)
         const stop = _losHit.clone(); // allocation only on a blocked shot
@@ -389,12 +392,6 @@ export function releaseAttack(world, attacker, weapon, target, { hit = 'single' 
       }
     });
   }
-}
-
-// Sound event of a ranged shot (AUDIO.shotEvents): energy weapons, projectile weapons, the rest
-function shotEvent(s) {
-  if ((s.damage.energy ?? 0) > (s.damage.physical ?? 0)) return AUDIO.shotEvents.energy;
-  return s.projectileSpeed > 0 ? AUDIO.shotEvents.projectile : AUDIO.shotEvents.hitscan;
 }
 
 // Size and shape of a weapon's projectile (weapon data; shape falls back to the dominant damage type)
@@ -439,7 +436,8 @@ const rollHit = (world, attacker, s, unit) => world.rng.next() < hitChance(s, at
  */
 export function hitChance(s, attacker, unit) {
   const rules = getStats().rules.combat;
-  const evasion = unit.evasion ?? 0;
+  // [A9-buildings] a target designated for the attacker's alliance (Auras.js, targetingVehicle) is easier to hit
+  const evasion = (unit.evasion ?? 0) - (attacker && isDesignatedFor(unit, attacker.team) ? auraRule('designationAccuracy') : 0);
   if (!ACCURACY.enabled) return THREE.MathUtils.clamp(s.accuracy - evasion, rules.minHitChance, 1);
   const a = rules.accuracy;
   if (s.class === 'melee') return THREE.MathUtils.clamp(s.accuracy * a.meleeAccuracyFactor - evasion, rules.minHitChance, 1);
@@ -541,7 +539,8 @@ function hitTarget(world, attacker, s, unit, factor, source, score) {
 
 // Damage × factor, weapon effects × effectFactor, score for XP (enemies only)
 function applyHit(world, attacker, s, unit, factor, source, effectFactor, score) {
-  const r = damageUnit(unit, scaleDamage(s.damage, factor), source, getStats().rules.combat);
+  const aura = dealtFactor(attacker) * takenFactor(unit); // [A9-buildings] attack / defense enhancer auras (Auras.js)
+  const r = damageUnit(unit, scaleDamage(s.damage, factor * aura), source, getStats().rules.combat);
   if (areEnemies(attacker, unit)) { score.dealt += r.dealt; score.kills += r.killed ? 1 : 0; }
   if (isTargetable(unit)) applyWeaponEffects(world, attacker, s, unit, source, effectFactor);
 }
@@ -587,7 +586,7 @@ function explode(world, attacker, s, point, exclude, score) {
  */
 export function structureBlast(world, source, origin, ex) {
   world.effects.burst(GENERATOR_BLAST.layers, groundPoint(world, origin), {
-    size: ex.radius * GENERATOR_BLAST.visualSizePerRadius, heightUnit: GENERATOR_BLAST.heightUnit,
+    size: ex.radius * GENERATOR_BLAST.visualSizePerRadius, heightUnit: GENERATOR_BLAST.heightUnit, sound: 'explosionBuilding',
   });
   const type = ex.damageType ?? 'energy';
   const chained = ex.chainsToGenerators ? [] : null;
@@ -631,7 +630,8 @@ function sweep(world, attacker, s, target, wide, score) {
   const near = SWEEP_NEAR;
   for (const wreck of world.damageableWrecks) {
     wreck.bounds().clampPoint(attacker.position, near);
-    const d = Math.hypot(near.x - attacker.position.x, near.z - attacker.position.z);
+    // from the attacker's edge, like units (edgeDistance): a big mech's reach starts at its body, not its centre
+    const d = Math.hypot(near.x - attacker.position.x, near.z - attacker.position.z) - (attacker.radius ?? 0);
     if (d > radius || Math.abs(angleTo(attacker, near)) > arc / 2) continue;
     damageWreck(world, wreck, s, factor);
   }
@@ -822,7 +822,9 @@ function scaleDamage(damage, k) {
  */
 export function dealDamage(attacker, unit, damage, source) {
   if (!isTargetable(unit)) return { dealt: 0, killed: false };
-  const r = damageUnit(unit, damage, source, getStats().rules.combat);
+  // [A9-buildings] enhancer auras: defense of the victim, attack of the attacker (when there is one)
+  const aura = takenFactor(unit) * (attacker ? dealtFactor(attacker) : 1);
+  const r = damageUnit(unit, aura === 1 ? damage : scaleDamage(damage, aura), source, getStats().rules.combat);
   if (attacker && areEnemies(attacker, unit)) awardXp(attacker, r.dealt, r.killed ? 1 : 0);
   return r;
 }

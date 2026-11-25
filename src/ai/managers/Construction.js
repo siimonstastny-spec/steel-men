@@ -4,7 +4,7 @@
 // free gap around every building; the cone in front of the HQ stays free for the army and the defences.
 // Buildings are ordered with placeStructure / placeWall / placeTurret commands; their result comes back through a
 // ticket (buildCommands.newTicket), a refused spot is avoided for a while.
-import { AI, WALL, CMD_WALL, PATHFINDING } from '../../config.js';
+import { AI, AI_RESUME, WALL, CMD_WALL, PATHFINDING } from '../../config.js';
 import { getStats, unitStats } from '../../data/Stats.js';
 import { cachedFootprint, modelFootprint } from '../../units/Structure.js';
 import { canPlace, placementBox, terrainFit } from '../../game/Construction.js';
@@ -14,6 +14,7 @@ import { planWallLine, wallCommandOf, checkWallCommand } from '../../game/Walls.
 import { PRIORITY, dist, posOf, rotate, add, isIdle, nearest, quarterYaw, yawOf, sumCost, affordsAbove } from '../util.js';
 import { resolveStructure, structureMatches, buildableStructures, STRUCTURE_ROLES } from '../AiData.js';
 import { plannedPower, powerGap } from '../power.js';
+import { TECH_BACK_ROLES } from './Tech.js';
 
 let segmentIds = null;
 /** Wall posts, wall segments and turrets on posts (built as chains; they take no parallel build slot) */
@@ -22,7 +23,9 @@ function isWallPiece(s) {
   const p = s?.stats?.placement;
   return p === 'wall' || p === 'post' || segmentIds.has(s?.unitId);
 }
-const BACK_ROLES = ['power', 'supply', 'storage', 'deepMining']; // [H5] deep extractors behind the HQ too
+const BACK_ROLES = ['power', 'supply', 'storage', 'deepMining', ...TECH_BACK_ROLES]; // [H5] deep extractors behind the HQ too; [A9-F4b] superweapon, archeology
+/** [A1-5 r2] #start result: the building waits for a requirement that is being built (think tries the next task) */
+const REQUIREMENT_BUILDING = 'requirementBuilding';
 
 export class ConstructionManager {
   constructor(ai) {
@@ -65,7 +68,11 @@ export class ConstructionManager {
     this.noSpot.set(id, e);
   }
 
-  /** Search limits of a building after earlier failures: farther out, the front cone allowed from the 2nd failure */
+  /**
+   * Search limits of a building after earlier failures: farther out, the front cone allowed from the 2nd failure,
+   * [A1-5] rings sampled densely (AI.placement.denseSpacing) from the 1st failure – 24 angles leave ~80 u gaps at
+   * r 300, where only small flat pockets between the hills (terrainFit) are left once the base plateau is full
+   */
   #searchOf(id) {
     const cfg = AI.noSpot;
     const e = this.noSpot.get(id);
@@ -73,6 +80,7 @@ export class ConstructionManager {
     return {
       maxRadius: Math.min(cfg.maxRadiusLimit, AI.placement.maxRadius + fails * cfg.radiusGrowth),
       keepFront: fails < 2,
+      dense: fails > 0,
     };
   }
 
@@ -91,7 +99,11 @@ export class ConstructionManager {
     if (task && prevWait) this.waiting = prevWait; // #start sets it again (keeps `since` while the reason stays)
     if (!task) { this.#defense(now); return; }
     if (!this.defense.done) this.defenseWhy = `after ${task.value}`; // [v20] status(): other builds come first
-    const short = this.#start(task, now);
+    let short = this.#start(task, now);
+    // [A1-5 r2] the first task waits for its requirement to finish (assembly bay → part factory being built): the
+    // next task may start meanwhile – before, nothing else was built while the part factory went up
+    for (let i = 1; short === REQUIREMENT_BUILDING && i < tasks.length; i++) short = this.#start(tasks[i], now);
+    if (short === REQUIREMENT_BUILDING) short = undefined;
     // v4: the first build waits for energy only (ore is there) – a power plant first, or the wait never ends
     if (short?.length === 1 && short[0] === 'energy') {
       const power = tasks.find((t) => t !== task && structureMatches('@power', resolveStructure(t.value, this.ai.race, this.ai.teamUnlocks) ?? ''));
@@ -143,7 +155,8 @@ export class ConstructionManager {
   idleBuilders(near) {
     const alone = Boolean(getStats().races?.[this.ai.race]?.construction?.continuesWithoutBuilder);
     const started = (b) => alone && b.order?.type === 'build' && (b.order.structure?.progress ?? 0) > 0 && !(b.orderQueue?.length);
-    const list = this.own.builders.filter((b) => (isIdle(b) || started(b)) && !this.busyBuilders.has(b.eid));
+    const evac = this.ai.bb.evacuating; // [A9-F4b] running from a superweapon strike
+    const list = this.own.builders.filter((b) => (isIdle(b) || started(b)) && !this.busyBuilders.has(b.eid) && !evac?.has(b.eid));
     return near ? list.sort((a, b) => dist(posOf(a), near) - dist(posOf(b), near)) : list;
   }
 
@@ -185,6 +198,87 @@ export class ConstructionManager {
     }
   }
 
+  // ---------- takeover of a game in progress (A2-ai) ----------
+
+  /**
+   * [A2-ai] The AI took over a running base (src/ai/Resume.js): build order steps whose buildings stand already
+   * (finished or under construction) are passed at once – the same count test as every think – and defence plan
+   * items whose towers / wall lines stand near their planned spots are skipped. Nothing is placed here.
+   * @returns {{ step: number, defence: number }} build order step reached, defence items skipped
+   */
+  resume(now) {
+    this.#advanceBuildOrder(now);
+    return { step: this.step, defence: this.#resumeDefense(now) };
+  }
+
+  /** [A2-ai] Turret job for the posts (planned spots) of a wall that stands already; null when it has no turrets to add */
+  #standingWallTurrets(job, now) {
+    if (job.kind !== 'wall' || !job.turrets?.length) return null;
+    const points = job.turrets.filter((i) => i < (job.posts ?? Infinity)).map((i) => add(job.start, job.along, WALL.postSpacing * i));
+    return points.length ? { kind: 'turrets', points, since: now } : null;
+  }
+
+  #resumeDefense(now) {
+    const plan = this.ai.defensePlan;
+    const d = this.defense;
+    if (!plan?.items?.length || !this.own.anchor) return 0;
+    let skipped = 0;
+    const claimed = new Set(); // towers / posts already matched to an earlier job (one-off, not in a loop of update())
+    const extra = []; // turret jobs of walls that stand already (their turrets may be missing)
+    while (d.index < plan.items.length) {
+      const jobs = this.#expand(plan.items[d.index]);
+      const left = jobs.filter((job) => !this.#jobStands(job, claimed));
+      if (left.length === jobs.length) break; // nothing of this item stands: #defense builds it as usual
+      for (const job of jobs) {
+        if (left.includes(job)) continue;
+        const turrets = this.#standingWallTurrets(job, now);
+        if (turrets) extra.push(turrets);
+      }
+      d.index++;
+      if (left.length) { d.jobs = left; break; } // partly there: only the missing pieces
+      skipped++;
+    }
+    d.jobs.push(...extra); // after the missing pieces: #turrets skips posts that carry a turret and drops posts that are not there
+    if (d.index >= plan.items.length && !d.jobs.length) d.done = true;
+    return skipped;
+  }
+
+  /**
+   * [A2-ai] Does an own tower / wall line stand where this defence job would put it? A tower counts within the
+   * search radius the plan places it in (each tower matches one job only: close towers of two items are told apart);
+   * a straight wall when a post stands within half its length of its centre; an edge wall (running outwards) when a
+   * post stands AI_RESUME.defense.edgeProbePosts posts out along it – a side wall near its start does not count.
+   * Matched pieces go to `claimed`.
+   */
+  #jobStands(job, claimed) {
+    const R = AI_RESUME.defense;
+    let point;
+    let reach;
+    let match;
+    if (job.kind === 'tower') {
+      point = job.point;
+      reach = AI.placement.defenseSearchRadius;
+      match = '@tower';
+    } else if (job.kind === 'wall' && job.edge) {
+      point = add(job.start, job.along, WALL.postSpacing * R.edgeProbePosts);
+      reach = AI.wallShiftStep * Math.ceil(AI.wallTries / 2) + R.slack;
+      match = '@wallPost';
+    } else if (job.kind === 'wall') {
+      const half = WALL.postSpacing * (job.posts - 1) / 2;
+      point = add(job.start, job.along, half);
+      reach = half + R.slack;
+      match = '@wallPost';
+    } else return false;
+    let found = false;
+    for (const s of this.own.structures) {
+      if (claimed.has(s.eid) || !structureMatches(match, s.unitId) || dist(posOf(s), point) > reach) continue;
+      claimed.add(s.eid);
+      found = true;
+      if (job.kind === 'tower') break; // one tower per job; a wall line takes all its posts
+    }
+    return found;
+  }
+
   // ---------- build order ----------
 
   #advanceBuildOrder(now) {
@@ -198,7 +292,9 @@ export class ConstructionManager {
         continue;
       }
       const id = resolveStructure(s.build, ai.race, ai.teamUnlocks);
-      if (!id || (this.skips.get(id) ?? 0) >= 3) { this.step++; continue; } // nothing fits this race / no room
+      // nothing fits this race / no room even with the widest search ([A1-5 r2] was 3 failures: a step could be dropped
+      // before its widest search, and nothing wanted e.g. the assembly bay again until a later step)
+      if (!id || (this.skips.get(id) ?? 0) >= AI.noSpot.giveUpAfter) { this.step++; continue; }
       if (this.ownedCount(s.build) >= (s.count ?? 1)) {
         this.step++;
         this.stepAt = now + (ai.diff.buildStepDelay ?? 0);
@@ -228,7 +324,8 @@ export class ConstructionManager {
     const hold = ai.bb.openingDone && ai.bb.econ?.hold;
     for (const w of ai.bb.wantStructures ?? []) {
       if (hold && !(ai.bb.econ.structures ?? []).includes(w.value)) continue;
-      if (this.ownedCount(w.value) < w.count && !blocked(w.value)) tasks.push({ value: w.value, priority: w.priority ?? PRIORITY.normal });
+      // [A9-F4b] `near`: the wish names its spot (enhancer at the rally point, imaging pole at a deposit…)
+      if (this.ownedCount(w.value) < w.count && !blocked(w.value)) tasks.push({ value: w.value, priority: w.priority ?? PRIORITY.normal, near: w.near ?? null });
     }
     tasks.sort((a, b) => b.priority - a.priority || Number(Boolean(b.order)) - Number(Boolean(a.order)));
     return tasks;
@@ -244,15 +341,17 @@ export class ConstructionManager {
     const { race, team } = ai;
     let id = resolveStructure(task.value, race, ai.teamUnlocks);
     if (!id) return;
+    let near = task.near ?? null; // [A9-F4b] spot named by the wish (dropped when another building is swapped in)
     const econ = this.#isEcon(id); // v4: a requirement swapped in below is part of the economy build too
     let stats = unitStats('structures', id, race, team);
     const rule = checkRules(this.world, team, race, id, stats);
     if (rule === 'requires') {
       // Build the missing requirement first (e.g. a part factory before the assembly bay)
       const missing = (stats.requires ?? []).find((r) => this.ownedCount(r) === 0);
-      if (!missing) return; // the requirement is being built – wait
+      if (!missing) return REQUIREMENT_BUILDING; // the requirement is being built – wait (think tries the next task)
       id = resolveStructure(missing, race, ai.teamUnlocks);
       if (!id) return;
+      near = null;
       stats = unitStats('structures', id, race, team);
       if (checkRules(this.world, team, race, id, stats)) return;
     } else if (rule) {
@@ -262,7 +361,7 @@ export class ConstructionManager {
     // D3: a consumer the energy plan does not cover – a power plant goes first (Economy also raises its target)
     if (!keepReserve && (stats.energyUse ?? 0) > 0 && !this.powerCovers(stats.energyUse, now)) {
       const plant = this.#plantInstead(now);
-      if (plant) { id = plant; stats = unitStats('structures', id, race, team); }
+      if (plant) { id = plant; near = null; stats = unitStats('structures', id, race, team); }
     }
     const eco = this.world.economy;
     const need = sumCost(stats.cost, this.#pendingCost()); // v4: money of unpaid placements is taken
@@ -274,7 +373,7 @@ export class ConstructionManager {
     }
     if (!keepReserve) this.#reserve({});
     const anchor = this.own.anchor;
-    const builder = this.idleBuilders(anchor)[0];
+    const builder = this.idleBuilders(near ?? anchor)[0];
     if (!builder) {
       this.builderWantedAt = now;
       if (econ && !keepReserve) this.#reserve(stats.cost, true); // v4: keep the money of an economy build until a builder is free
@@ -283,8 +382,21 @@ export class ConstructionManager {
     }
     if (this.#spotBlocked(id, now)) { if (!keepReserve) this.#wait(id, econ, 'no spot', now); return; } // a requirement swapped in above may be waiting for room
     if (!keepReserve) this.waiting = null;
+    // [A1-5 r2] footprint not loaded yet: load it and wait – not a failed search (it widened the search, counted a
+    // skip and delayed the retry)
+    if (!cachedFootprint(id, race)) {
+      this.world.trackLoad(modelFootprint(id, race)).catch(() => {}); // [I1] the next tick waits for it
+      if (!keepReserve) this.#wait(id, econ, 'footprint', now);
+      return;
+    }
     const back = BACK_ROLES.some((r) => STRUCTURE_ROLES[r](stats, id));
-    const spot = this.findSpot(id, { near: anchor, builders: [builder], prefer: back ? 'back' : 'sides', gap: this.#passageGap(), ...this.#searchOf(id) });
+    // [A9-F4b] a wish with its own spot: rings around that point (no front cone – it may stand in front on purpose),
+    // reaching AI.placement.defenseSearchRadius farther with every failure
+    const search = this.#searchOf(id);
+    const spot = near
+      ? this.findSpot(id, { near, builders: [builder], prefer: 'any', gap: this.#passageGap(), keepFront: false, minRadius: 0,
+        maxRadius: AI.placement.defenseSearchRadius * (1 + (this.noSpot.get(id)?.count ?? 0)), dense: search.dense })
+      : this.findSpot(id, { near: anchor, builders: [builder], prefer: back ? 'back' : 'sides', gap: this.#passageGap(), ...search });
     if (!spot) {
       this.skips.set(id, (this.skips.get(id) ?? 0) + 1);
       this.#spotFailed(id, now);
@@ -408,7 +520,7 @@ export class ConstructionManager {
     return nav?.withObstacleSnapshot ? nav.withObstacleSnapshot(() => this.#search(id, opts)) : this.#search(id, opts);
   }
 
-  #search(id, { near, builders = [], prefer = 'any', keepFront = true, minRadius = AI.placement.minRadius, maxRadius = AI.placement.maxRadius, gap = AI.placement.gap }) {
+  #search(id, { near, builders = [], prefer = 'any', keepFront = true, minRadius = AI.placement.minRadius, maxRadius = AI.placement.maxRadius, gap = AI.placement.gap, dense = false }) {
     const cfg = AI.placement;
     this.searchStats.searches++;
     const fp = cachedFootprint(id, this.ai.race);
@@ -419,26 +531,33 @@ export class ConstructionManager {
     const anchor = this.own.anchor ?? near;
     const prefDirs = prefer === 'back' ? [rotate(front, Math.PI)]
       : prefer === 'sides' ? [rotate(front, Math.PI / 2), rotate(front, -Math.PI / 2)] : null;
-    const angles = [];
-    for (let k = 0; k < cfg.angles; k++) {
-      const a = (k / cfg.angles) * Math.PI * 2;
-      const d = { x: Math.cos(a), z: Math.sin(a) };
-      const score = prefDirs ? Math.max(...prefDirs.map((p) => p.x * d.x + p.z * d.z)) : this.ai.rng.next();
-      angles.push({ d, score });
-    }
-    angles.sort((a, b) => b.score - a.score);
+    // [A1-5 r2] the 24 base angles live in a recycled module list (same rng draws, same order as before)
+    const angles = baseAngles(cfg.angles, prefDirs, this.ai.rng);
+    // [A1-5 r2] 'any': the dense ring starts at the best base angle (drawn above) – it always started at +x
+    const phase = prefDirs ? 0 : (angles[0].k / cfg.angles) * Math.PI * 2;
     for (let r = minRadius; r <= maxRadius; r += cfg.step) {
-      for (const { d } of angles) {
-        const x = near.x + d.x * r;
-        const z = near.z + d.z * r;
+      // [A1-5] dense: as many angles as fit the ring at denseSpacing (preferred side first; no rng – 'any' keeps
+      // the natural order from `phase`, so a dense search draws no more random numbers than a normal one)
+      const n = dense ? Math.ceil((2 * Math.PI * r) / cfg.denseSpacing) : 0;
+      const useDense = n > cfg.angles;
+      if (useDense) ringAngles(n, prefDirs, phase);
+      const count = useDense ? n : cfg.angles;
+      for (let i = 0; i < count; i++) {
+        let dx, dz;
+        if (useDense) { const k = RING.order[i]; dx = RING.x[k]; dz = RING.z[k]; } else { dx = angles[i].x; dz = angles[i].z; }
+        const x = near.x + dx * r;
+        const z = near.z + dz * r;
         if (this.#nearFailed(x, z)) continue;
         if (keepFront) {
-          const off = { x: x - anchor.x, z: z - anchor.z };
-          const len = Math.hypot(off.x, off.z);
-          if (len > cfg.frontClearFrom && (off.x * front.x + off.z * front.z) / len > cfg.frontConeDot) continue;
+          const ox = x - anchor.x;
+          const oz = z - anchor.z;
+          const len = Math.hypot(ox, oz);
+          if (len > cfg.frontClearFrom && (ox * front.x + oz * front.z) / len > cfg.frontConeDot) continue;
         }
         const box = placementBox(fp, x, z, yaw);
-        const padded = { ...box, halfX: box.halfX + gap, halfZ: box.halfZ + gap };
+        const padded = Object.assign(PADDED, box);
+        padded.halfX = box.halfX + gap;
+        padded.halfZ = box.halfZ + gap;
         this.searchStats.tests++;
         // v4: the same tests as the placeStructure command (buildCommands.checkPlace) – without the slope (R6) and
         // pre-build square (N8) checks the game refused the spot as 'blocked' again and again (vehicle factory never built)
@@ -689,6 +808,61 @@ export class ConstructionManager {
 function missingText(eco, team, cost = {}) {
   return Object.entries(cost).filter(([r, v]) => eco.amount(team, r) < (v ?? 0))
     .map(([r, v]) => `${r} ${Math.round(eco.amount(team, r))}/${v}`).join(' ');
+}
+
+/** Best of the preferred directions for (x, z) (dot product) */
+function prefScore(prefDirs, x, z) {
+  let best = -Infinity;
+  for (const p of prefDirs) best = Math.max(best, p.x * x + p.z * z);
+  return best;
+}
+
+// [A1-5 r2] Recycled spot-search lists (no allocation per search; the AI thinks between ticks, never re-entrantly)
+/** Padded placement box handed to canPlace */
+const PADDED = { x: 0, z: 0, halfX: 0, halfZ: 0 };
+/** Base angles of the ring search: { k, x, z, score } */
+const BASE = [];
+const byBaseScore = (a, b) => b.score - a.score || a.k - b.k; // ties: natural order (as the stable sort of a fresh list)
+
+/**
+ * The `count` base directions, best first: closest to the preferred ones, or ([no preference]) by one rng draw each
+ * in k order – the same draws and order as before A1-5 r2. Returns the recycled module list.
+ */
+function baseAngles(count, prefDirs, rng) {
+  while (BASE.length < count) BASE.push({ k: 0, x: 0, z: 0, score: 0 });
+  BASE.length = count;
+  for (let k = 0; k < count; k++) {
+    const e = BASE[k];
+    const a = (k / count) * Math.PI * 2;
+    e.k = k;
+    e.x = Math.cos(a);
+    e.z = Math.sin(a);
+    e.score = prefDirs ? prefScore(prefDirs, e.x, e.z) : rng.next();
+  }
+  BASE.sort(byBaseScore);
+  return BASE;
+}
+
+/** Dense ring: directions x[k], z[k], their score and the visiting order (indices) */
+const RING = { x: [], z: [], score: [], order: [] };
+const byRingScore = (a, b) => RING.score[b] - RING.score[a] || a - b;
+
+/**
+ * [A1-5] n directions around a ring, closest to the preferred ones first; no preference: natural order from `phase`
+ * (rad – [A1-5 r2] the best base angle, the dense ring started at +x every time). Fills the recycled RING.
+ */
+function ringAngles(n, prefDirs, phase) {
+  RING.order.length = n;
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2 + phase;
+    const x = Math.cos(a);
+    const z = Math.sin(a);
+    RING.x[k] = x;
+    RING.z[k] = z;
+    RING.score[k] = prefDirs ? prefScore(prefDirs, x, z) : 0;
+    RING.order[k] = k;
+  }
+  if (prefDirs) RING.order.sort(byRingScore);
 }
 
 function normalize(d) {

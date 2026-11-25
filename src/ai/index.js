@@ -1,5 +1,7 @@
 // Steel Men AI – entry point for main.js: the list of computer players of the running match.
 //   createAi({ world, commandBus, team, race, difficulty, unlocks, allies }) – adds one AI team (AiPlayer)
+//     [A2-ai] also during the match (tick > 0, e.g. a loaded MP game at tick T): it continues the base it finds
+//     (src/ai/Resume.js); opts.resumed forces / disables that (debugging)
 //   updateAis(simTimeSeconds)  – after each simulation tick (host / single player only)
 //   clearAis()                  – new match / back to the menu
 import { AiPlayer } from './AiPlayer.js';

@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import { FOG, TEAMS } from '../config.js';
 import { localTeam } from '../core/LocalPlayer.js';
 import { areAllies, allianceLeader } from './Alliances.js';
+import { sightFactor } from './Auras.js'; // [A9-buildings]
 
 const BYTE = 255;
 
@@ -84,7 +85,7 @@ export class FogOfWar {
       for (const unit of this.world.allUnits) {
         if (!Number.isInteger(unit.team) || !this.#sees(unit)) continue;
         this.#stamp(this.#grid(unit.team).visible, unit.position.x, unit.position.z,
-          Math.max(FOG.minSight, unit.stats?.sightRange ?? 0));
+          Math.max(FOG.minSight, (unit.stats?.sightRange ?? 0) * sightFactor(unit))); // [A9-buildings] recon enhancer aura
       }
       this.grids.forEach((g) => {
         for (let i = 0; i < g.visible.length; i++) if (g.visible[i]) g.explored[i] = 1;
@@ -95,8 +96,10 @@ export class FogOfWar {
 
   /** Can `team` see this unit? Own team and allies: always; others: only in a cell visible to that team (sim-safe) */
   canTeamSee(team, unit) {
-    if (!unit || areAllies(unit.team, team) || this.mode === 'off') return true;
+    if (!unit || !unit.position || areAllies(unit.team, team)) return true; // no position (not a unit): nothing to hide
     if (unit.destroyed) return true; // wrecks stay visible in the fog
+    if (unit.cloaked && this.world.stealth?.hiddenFrom(team, unit)) return false; // [A9-buildings] undetected cloak, any fog mode
+    if (this.mode === 'off') return true;
     return this.isPointVisibleTo(team, unit.position.x, unit.position.z);
   }
 

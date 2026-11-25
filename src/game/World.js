@@ -7,8 +7,12 @@ import { isTargetable, areEnemies, edgeDistance, dealDamage } from './Combat.js'
 import { updateStatusEffects } from './StatusEffects.js';
 import { resolveCollisions, isStatic } from './Movement.js';
 import { NavGrid } from './Pathfinding.js';
+import { refreshTerrainRules, unitTerrainFactor } from './TerrainTypes.js'; // [A14-terrain]
 import { GameMap } from './Map.js';
 import { FogOfWar } from './FogOfWar.js';
+import { Auras } from './Auras.js'; // [A9-buildings]
+import { Stealth } from './Stealth.js'; // [A9-buildings]
+import { Superweapons } from './Superweapons.js'; // [A9-superweapons]
 import { buildTerrainGeometry, sampleHeightField } from '../core/SceneSetup.js';
 import { Rng } from '../core/Rng.js';
 import { TEAMS, VFX, FOG, SIM } from '../config.js';
@@ -55,15 +59,24 @@ export class World {
     // (readyForTick) – nothing ever enters the world "when its model happens to be loaded".
     this.loadsInFlight = 0;    // trackLoad promises not settled yet
     this.warnedLateSpawn = false; // #applySpawns reported a tick run without readyForTick (once)
-    this.networked = false;    // [I1] a lockstep match is running (set through the waitForSpawns setter by Lockstep.js)
+    this.networked = false;    // [I1] a lockstep match is running (Lockstep.js start / stop → setNetworked)
+    // [A1-3] lockstep only: loads the watchdog saw hanging, or that failed for good, while the match waits for them.
+    // > 0 = the match is held on this client (Lockstep.status.loadStall → "loading stuck" notice). Not simulation state.
+    this.stalledLoads = 0;
     // [I1] true = the game loop (main.js advanceSimulation) runs no ticks; a harness ticks by itself (world.update,
     // ai.fastForward, steelMen.det). Not part of the simulation state; startSimulation leaves it as it is.
     this.paused = false;
     this.production = null;    // production system ticked with the simulation (Production.js, agent PROD)
+    this.superweapons = new Superweapons(this); // [A9-superweapons] charge, strikes, impacts (src/game/Superweapons.js)
+    // [A9-buildings] enhancer auras / designation / building self-repair and cloak / detection; their state lives on the
+    // units and is recomputed on tick-modulo cadences, so one instance serves every match
+    this.auras = new Auras(this);
+    this.stealth = new Stealth(this);
     this._ray = new THREE.Raycaster();
     this._origin = new THREE.Vector3();
     this.map = null;   // GameMap after loadMap (start positions, super node, obstacles)
     this.fog = null;   // FogOfWar after loadMap
+    this.terrainTypes = null; // [A8-terrain] TerrainTypeGrid after loadMap ([A14-terrain] Movement speed + nav cost grids)
     ground.geometry.computeBoundingBox();
     const box = ground.geometry.boundingBox;
     this.#createNav(Math.max(box.max.x - box.min.x, box.max.z - box.min.z));
@@ -86,6 +99,21 @@ export class World {
   }
 
   /**
+   * [A14-terrain] Speed factor of the terrain under a unit for its chassis class (1 = full speed, 0 = impassable;
+   * 1 without a terrain layer). For UI / tests; Movement applies it by itself.
+   */
+  terrainSpeedAt(unit) { return unitTerrainFactor(unit); }
+
+  /**
+   * [A14-terrain] Re-reads stats.json rules.terrain (after changing it in memory) and rebuilds the path cost grids;
+   * units re-plan (nav.version). Tests / tools only – in a multiplayer match every client would have to do the same.
+   */
+  applyTerrainRules() {
+    refreshTerrainRules();
+    this.nav.setTerrain(this.terrainTypes);
+  }
+
+  /**
    * Loads data/maps/<name>.json: reshapes the terrain, builds rocks / super node, re-creates the
    * pathfinding grid for the map size and starts the fog of war. Call before spawning units.
    * @returns {Promise<GameMap>}  also available as world.map (world.map.startPositions)
@@ -94,10 +122,12 @@ export class World {
     const map = await GameMap.load(name);
     this.map?.dispose();
     this.map = map;
+    this.terrainTypes = map.terrainTypes; // [A8-terrain] TerrainTypeGrid built by GameMap (A14 reads it)
     this.ground.geometry.dispose();
     this.ground.geometry = buildTerrainGeometry(map.terrainOptions);
     map.build(this.scene, (x, z) => this.heightAt(x, z));
     this.#createNav(map.size);
+    this.nav.setTerrain(this.terrainTypes); // [A14-terrain] path cost grids per chassis class
     this.fog = new FogOfWar(this, map.size, { teamCount: this.settings.playerCount }); // [N5] missing = TEAMS.length
     for (const m of [this.ground.material, ...map.materials]) this.fog.patchMaterial(m);
     return map;
@@ -124,11 +154,19 @@ export class World {
   }
 
   /**
-   * [I1] Always true: every match waits for due spawns (readyForTick). src/net/Lockstep.js writes true on start and
-   * false on stop – the write only marks a running lockstep match (`networked`, read by the load watchdog).
+   * [I1] Every match waits for due spawns (readyForTick). [A1-3] src/net/Lockstep.js calls setNetworked(true) on start
+   * and setNetworked(false) on stop: it marks a running lockstep match (read by the load watchdog). Leaving the lockstep
+   * also ends `multiplayer` (set by main.js startGame), so the watchdog of a later single-player phase may give up again.
+   * @param {boolean} on
    */
+  setNetworked(on) {
+    this.networked = Boolean(on);
+    if (!this.networked) this.multiplayer = false;
+  }
+
+  /** [A1-3] Kept for older callers (consoles, old notes): same as setNetworked(v); always reads true */
   get waitForSpawns() { return true; }
-  set waitForSpawns(v) { this.networked = Boolean(v); }
+  set waitForSpawns(v) { this.setNetworked(v); }
 
   /**
    * [I1] May the load watchdog give up a load? Only in single player. In a lockstep match a local real-time timeout
@@ -136,34 +174,79 @@ export class World {
    */
   #watchdogMayGiveUp() { return !this.multiplayer && !this.networked; }
 
+  /** [A1-3] Lockstep watchdog notice; silent once the match has a result (nobody waits for the load any more) */
+  #reportStillWaiting(what) {
+    if (this.match?.result) return;
+    console.error(`[World] ${what} still pending after ${SIM.loadTimeoutMs} ms – lockstep match keeps waiting`);
+  }
+
   /**
    * [I1] An async load the simulation depends on (a building's model, AI data, a footprint the AI asked for):
    * no tick runs until it settles (readyForTick), so its result is there at the same tick on every machine,
    * however fast it loads. Call it from simulation code / AI, never for purely visual loads.
+   * [A1-3] holdOnFailure: the simulation differs when the load fails (e.g. a building without its model). In a lockstep
+   * match a rejection then keeps the tick held (stalledLoads) instead of going on without it on this client only;
+   * single player is unchanged (a rejection releases the tick).
    * @param {Promise<any>} promise
+   * @param {{holdOnFailure?: boolean}} [opts]
    * @returns {Promise<any>} the same promise
    */
-  trackLoad(promise) {
+  trackLoad(promise, { holdOnFailure = false } = {}) {
     this.loadsInFlight++;
     let timer = 0;
+    let stalled = false;
     const done = () => {
       if (!timer) return; // settled already (or given up by the watchdog)
       clearTimeout(timer);
       timer = 0;
       this.loadsInFlight--;
+      if (stalled) { stalled = false; this.stalledLoads--; }
+    };
+    const failed = (err) => {
+      if (!timer || !holdOnFailure || this.#watchdogMayGiveUp()) { done(); return; }
+      clearTimeout(timer);
+      timer = 0; // loadsInFlight stays: the lockstep match is held on purpose (going on would desync)
+      if (!stalled) { stalled = true; this.stalledLoads++; }
+      console.error('[World] tracked load failed – lockstep match held (going on without it would desync)', err);
     };
     // Watchdog (SIM.loadTimeoutMs): in single player a request that never answers must not freeze the match (real time
     // only ends the stall); in a lockstep match it only reports – giving up on one client would desync
     timer = setTimeout(() => {
       if (!this.#watchdogMayGiveUp()) {
-        console.error(`[World] tracked load still pending after ${SIM.loadTimeoutMs} ms – lockstep match keeps waiting`);
+        if (!stalled) { stalled = true; this.stalledLoads++; }
+        this.#reportStillWaiting('tracked load');
         return;
       }
       console.error(`[World] tracked load still pending after ${SIM.loadTimeoutMs} ms – no longer waiting`);
       done();
     }, SIM.loadTimeoutMs);
-    Promise.resolve(promise).then(done, done);
+    Promise.resolve(promise).then(done, failed);
     return promise;
+  }
+
+  /**
+   * [A1-3] Runs `load()` now; in a lockstep match a rejection is retried (SIM.lockstepLoadRetries × lockstepLoadRetryMs,
+   * real time only), like #defer does. Single player: the first rejection is passed on unchanged. Meant for
+   * trackLoad(world.retryLoad(() => x.load()), { holdOnFailure: true }); `load` must be re-runnable.
+   * @param {() => Promise<any>} load
+   * @returns {Promise<any>}
+   */
+  retryLoad(load) {
+    return new Promise((resolve, reject) => {
+      let attempts = 0;
+      const fail = (err) => {
+        if (this.#watchdogMayGiveUp() || attempts >= SIM.lockstepLoadRetries) { reject(err); return; }
+        attempts++;
+        console.error(`[World] tracked load failed – retry ${attempts}/${SIM.lockstepLoadRetries}, lockstep match waits`, err);
+        setTimeout(attempt, SIM.lockstepLoadRetryMs);
+      };
+      const attempt = () => {
+        let p;
+        try { p = load(); } catch (err) { fail(err); return; }
+        Promise.resolve(p).then(resolve, fail);
+      };
+      attempt();
+    });
   }
 
   /**
@@ -215,38 +298,60 @@ export class World {
   }
 
   #defer(load, apply, eid) {
-    const entry = { eid, due: this.tick + SIM.spawnDelayTicks, ready: false, result: null, failed: false, error: null, apply };
+    const entry = { eid, due: this.tick + SIM.spawnDelayTicks, ready: false, result: null, failed: false, error: null, apply, attempts: 0, stalled: false };
     const done = new Promise((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; });
     if (eid != null) done.eid = eid;
     this.pendingSpawns.push(entry);
-    // Watchdog (SIM.loadTimeoutMs): a load that never answers fails the spawn instead of freezing the match
-    // Watchdog: single player fails the spawn; a lockstep match only reports and keeps waiting (see trackLoad)
+    const stall = () => { if (!entry.stalled) { entry.stalled = true; this.stalledLoads++; } };
+    const unstall = () => { if (entry.stalled) { entry.stalled = false; this.stalledLoads--; } };
+    // Watchdog (SIM.loadTimeoutMs): single player fails the spawn instead of freezing the match; a lockstep match only
+    // reports and keeps waiting (see trackLoad)
     const timer = setTimeout(() => {
       if (entry.ready) return;
       if (!this.#watchdogMayGiveUp()) {
-        console.error(`[World] deferred load still pending after ${SIM.loadTimeoutMs} ms – lockstep match keeps waiting`);
+        stall();
+        this.#reportStillWaiting('deferred load');
         return;
       }
       entry.error = new Error(`deferred load still pending after ${SIM.loadTimeoutMs} ms`);
       entry.failed = true;
       entry.ready = true;
     }, SIM.loadTimeoutMs);
-    Promise.resolve().then(load).then(
-      (result) => {
-        clearTimeout(timer);
-        if (entry.ready) { // given up by the watchdog (single player): the late unit never enters the world
-          console.error('[World] deferred load finished after the watchdog gave up – result dropped');
-          // released like a removed unit in update() (units have no dispose(); GLB clones share the cached assets)
-          try {
-            if (typeof result?.dispose === 'function') result.dispose();
-            else { result?.procVisual?.dispose?.(); result?.procModel?.dispose?.(); }
-          } catch (err) { console.error(err); }
+    // [A1-3] K3-1: a rejected load fails the spawn only in single player. In a lockstep match failing it on this client
+    // alone would desync (the others place the unit): the load is retried (SIM.lockstepLoadRetries × lockstepLoadRetryMs,
+    // real time only delays it – the spawn still happens in its due tick, which waits), then the match stays held.
+    const failed = (err) => {
+      if (entry.ready) return;
+      if (!this.#watchdogMayGiveUp()) {
+        if (entry.attempts < SIM.lockstepLoadRetries) {
+          entry.attempts++;
+          console.error(`[World] deferred load failed – retry ${entry.attempts}/${SIM.lockstepLoadRetries}, lockstep match waits`, err);
+          setTimeout(attempt, SIM.lockstepLoadRetryMs);
           return;
         }
-        entry.result = result; entry.ready = true;
-      },
-      (err) => { clearTimeout(timer); if (entry.ready) return; entry.error = err; entry.failed = true; entry.ready = true; },
-    );
+        clearTimeout(timer);
+        stall();
+        console.error('[World] deferred load failed for good – lockstep match held (dropping the spawn would desync)', err);
+        return;
+      }
+      clearTimeout(timer); entry.error = err; entry.failed = true; entry.ready = true;
+    };
+    const loaded = (result) => {
+      clearTimeout(timer);
+      unstall();
+      if (entry.ready) { // given up by the watchdog (single player): the late unit never enters the world
+        console.error('[World] deferred load finished after the watchdog gave up – result dropped');
+        // released like a removed unit in update() (units have no dispose(); GLB clones share the cached assets)
+        try {
+          if (typeof result?.dispose === 'function') result.dispose();
+          else { result?.procVisual?.dispose?.(); result?.procModel?.dispose?.(); }
+        } catch (err) { console.error(err); }
+        return;
+      }
+      entry.result = result; entry.ready = true;
+    };
+    const attempt = () => { Promise.resolve().then(load).then(loaded, failed); };
+    attempt();
     return done;
   }
 
@@ -476,17 +581,21 @@ export class World {
     }
     this.nav.refresh(); // obstacle layout changed (crew boarded / left a mech) -> units re-plan
     for (const mech of this.mechs) mech.update(dt);
-    for (const mech of this.mechs.filter((m) => m.removed)) { this.scene.remove(mech); mech.procVisual?.dispose(); } // [proc-robot]
+    for (const mech of this.mechs.filter((m) => m.removed)) { this.scene.remove(mech); mech.procVisual?.dispose(); mech.attackFx?.dispose(); } // [proc-robot] [B5 glb-fx]
     this.mechs = this.mechs.filter((m) => !m.removed);
     for (const crew of this.crews) crew.update(dt);
     for (const crew of this.crews.filter((c) => c.removed)) this.scene.remove(crew);
     this.crews = this.crews.filter((c) => !c.removed);
     for (const v of this.vehicles) v.update(dt);
     for (const s of this.structures) s.update(dt); // after the vehicles: builders registered this frame
+    this.research?.noteDestroyedVehicles?.(this.vehicles); // [A9-buildings] vehicle wrecks for archeology (before removal)
     for (const u of [...this.vehicles, ...this.structures].filter((x) => x.removed)) { this.scene.remove(u); u.procModel?.dispose(); u.procDriver?.dispose(); }
     this.vehicles = this.vehicles.filter((v) => !v.removed);
     this.structures = this.structures.filter((s) => !s.removed);
     this.economy?.update(dt); // income, deposit slots
+    this.superweapons.update(dt); // [A9-superweapons] after Economy: charge energy, phase power-off overrides structure.powered
+    this.auras.update(dt); // [A9-buildings] after Economy (structure.powered), before Production (aura production speed)
+    this.stealth.update(dt); // [A9-buildings] cloak / detection, before the fog recompute
     this.production?.update(dt); // production queues (Production.js) – part of the simulation, not the UI
     this.research?.update(dt); // captured parts delivered to research facilities (Research.js)
     updateStatusEffects(this, [...this.mechs, ...this.crews, ...this.vehicles], dt); // stun, knockback slide, burning

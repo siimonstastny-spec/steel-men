@@ -8,10 +8,11 @@
 // (src/game/Production.js); buttons only submit commands (src/game/commands/productionCommands.js) after
 // world.production.check(cmd) – a refusal is shown as a message. Hud.js asks view() first and falls back to its
 // own pages when it returns null.
-import { getBuildingIconUrl } from './IconRenderer.js';
-import { TEAMS, HUD, ECONOMY,ECONOMY_ALERTS, KEYBINDINGS, BUILD_GRID, RALLY, BEHAVIOUR, SHIFT_BATCH } from '../config.js';
+import { getBuildingIconUrl, unitIconUrl } from './IconRenderer.js';
+import { TEAMS, HUD, ECONOMY,ECONOMY_ALERTS, KEYBINDINGS, BUILD_GRID, RALLY, BEHAVIOUR, SHIFT_BATCH, SOUND_HOOKS } from '../config.js';
+import { play } from '../audio/Sound.js';
 import { keyLabel } from '../input/CommandInput.js';
-import { getStats, unitStats, canProduce } from '../data/Stats.js';
+import { getStats, unitStats, canProduce, superweaponLimit } from '../data/Stats.js';
 import { t } from '../i18n/i18n.js';
 import { createPlacement, wallTip } from '../game/Walls.js'; // walls / turrets have their own placement
 import { localTeam } from '../core/LocalPlayer.js';
@@ -62,6 +63,11 @@ export class BuildMenu {
     const own = this.world.structures.filter((s) => s.team === localTeam() && s.unitId === id && !s.destroyed).length
       + (this.ordering.get(id) ?? 0);
     if (stats.maxPerTeam && own >= stats.maxPerTeam) return t('build.limit', { max: stats.maxPerTeam });
+    if (stats.superweapon) { // [A9-F4a] one superweapon per team in total, whatever its id (buildCommands.checkRules)
+      const swOwn = this.world.structures.filter((s) => s.team === localTeam() && s.stats?.superweapon && !s.destroyed).length
+        + [...this.ordering].reduce((n, [oid, c]) => n + (unitStats('structures', oid, this.race)?.superweapon ? c : 0), 0);
+      if (swOwn >= superweaponLimit()) return t('build.superweaponLimit');
+    }
     const research = this.world.research;
     if (stats.requiresTier && research && research.openTier(localTeam()) < stats.requiresTier) {
       return t('build.requiresTier', { tier: stats.requiresTier });
@@ -78,7 +84,9 @@ export class BuildMenu {
 
   // ---------- messages ----------
 
-  notify(text) {
+  /** Refusal notice in the HUD message line; [A6] with its sound (SOUND_HOOKS.refusalSound unless given) */
+  notify(text, sound = SOUND_HOOKS.refusalSound) {
+    if (sound) play(sound);
     this.hud.message(text);
     this.messageTimer = ECONOMY.messageTime;
   }
@@ -130,7 +138,7 @@ export class BuildMenu {
     this.hud.refresh?.();
     if (n < count) { // why the next copy was not queued (one message)
       if (n >= space) this.notifyRefusal({ reason: REASON.full });
-      else if (!eco.canAfford(team, scaled(n + 1))) this.notify(this.#missingText(scaled(n + 1)));
+      else if (!eco.canAfford(team, scaled(n + 1))) this.notify(this.#missingText(scaled(n + 1)), SOUND_HOOKS.fundsSound);
       else this.notifyRefusal({ reason: REASON.population });
     }
     return n;
@@ -138,7 +146,7 @@ export class BuildMenu {
 
   /** Message for a refused production command (Production.check result) */
   notifyRefusal({ reason, cost }) {
-    if (reason === REASON.resources) this.notify(this.#missingText(cost ?? {}));
+    if (reason === REASON.resources) this.notify(this.#missingText(cost ?? {}), SOUND_HOOKS.fundsSound);
     else if (reason === REASON.population) this.notify(this.#populationText());
     else if (reason === REASON.full) this.notify(t('hud.queue.full', { max: HUD.production.maxQueue }));
     else if (reason === REASON.service) this.notify(t('assembly.blockedByService'));
@@ -309,7 +317,7 @@ export class BuildMenu {
     const stats = unitStats('structures', id, this.race);
     const limit = this.limitText(id, stats);
     if (limit) { this.notify(limit); return; }
-    if (!this.economy.canAffordUpfront(localTeam(), stats.cost)) { this.notify(this.#missingText(stats.cost)); return; }
+    if (!this.economy.canAffordUpfront(localTeam(), stats.cost)) { this.notify(this.#missingText(stats.cost), SOUND_HOOKS.fundsSound); return; }
     // Rotation turns smoothly: the next building keeps the last angle, the first one faces the map centre in a quarter turn
     const yaw = this.placedYaw ?? snapYaw(this.placementYaw?.() ?? 0);
     const ghost = createPlacement(stats, {
@@ -320,7 +328,7 @@ export class BuildMenu {
       onPlaced: (res) => {
         if (res.error === 'limit') { this.notify(res.reason); return; }
         this.ordering.set(id, Math.max(0, (this.ordering.get(id) ?? 0) - 1));
-        if (res.error === 'resources') this.notify(this.#missingText(res.cost ?? stats.cost));
+        if (res.error === 'resources') this.notify(this.#missingText(res.cost ?? stats.cost), SOUND_HOOKS.fundsSound);
         else if (res.error === 'noPost') this.notify(t('wall.noPost'));
         else if (res.error) this.notify(t('build.blocked'));
       },
@@ -395,16 +403,19 @@ export class BuildMenu {
   /** Grid buttons for what a finished building can produce */
   #productionOptions(s) {
     const options = this.production?.unitOptions(s) ?? [];
+    const color = TEAMS[localTeam()]?.color;
     return options.map(({ kind, unitId, stats }) => (kind === 'crew'
-      ? this.#option(t('grid.training'), ICONS.crew, stats, { producer: s.eid, kind }, t('grid.training.tip', { size: stats.squadSize }))
-      : this.#option(unitName('vehicles', unitId), ICONS.vehicle, stats, { producer: s.eid, kind, unitId })));
+      ? this.#option(t('grid.training'), ICONS.crew, stats, { producer: s.eid, kind }, t('grid.training.tip', { size: stats.squadSize }),
+        unitIconUrl('crew', this.race, color))
+      : this.#option(unitName('vehicles', unitId), ICONS.vehicle, stats, { producer: s.eid, kind, unitId }, '',
+        unitIconUrl(unitId, this.race, color))));
   }
 
-  #option(label, icon, stats, payload, desc = '') {
+  #option(label, icon, stats, payload, desc = '', iconUrl = null) {
     const req = this.#requiresText(stats.requires);
     const supply = stats.supply ?? 0;
     return {
-      icon, label, disabled: Boolean(req),
+      icon, iconUrl: iconUrl ?? undefined, label, disabled: Boolean(req),
       tip: [label, desc, ...this.#costTip(stats), supply ? `${t('hud.population')}: ${supply}` : '', req,
         t('grid.shiftBatch', { n: SHIFT_BATCH.count })].filter(Boolean).join('\n'),
       onClick: (e) => (e?.shift ? this.submitBatch({ type: 'queueUnit', ...payload }) : this.submit({ type: 'queueUnit', ...payload })),

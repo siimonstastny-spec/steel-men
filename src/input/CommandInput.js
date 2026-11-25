@@ -37,6 +37,7 @@ function applyMineCursor() {
 const CURSOR_MINE = 'var(--cursor-mine, copy)';
 const CURSOR_ATTACK = 'var(--cursor-attack, crosshair)';
 import { commandBus } from '../game/commands/CommandBus.js';
+import { SuperweaponTargeting } from '../ui/SuperweaponUi.js'; // [A9-F4a] superweapon launch targeting
 import { canUpgradeToGate, newTicket } from '../game/commands/buildCommands.js'; // [H1] gates (also registers upgradeGate)
 import { canGather } from '../game/Production.js';
 import '../game/commands/productionCommands.js'; // setRally registers even before BuildMenu loads
@@ -62,6 +63,17 @@ const MINIMAP_ORDER_EVENT = 'steelmen:minimapOrder'; // same name in ui/Minimap.
 const pt = (v) => ({ x: Math.round(v.x * COORD_DECIMALS) / COORD_DECIMALS, z: Math.round(v.z * COORD_DECIMALS) / COORD_DECIMALS });
 /** Entity ids of units */
 const ids = (units) => units.map((u) => u.eid);
+
+/** Formation mode of the majority of the units (a tie goes to the earlier mode, as in unitCommands groupMode) */
+function majorityFormation(units) {
+  const modes = FORMATION.modes;
+  const fallback = modes.indexOf(FORMATION.defaultMode);
+  const counts = modes.map(() => 0);
+  for (const u of units) { const k = modes.indexOf(u.formation); counts[k < 0 ? fallback : k]++; }
+  let best = 0;
+  for (let k = 1; k < counts.length; k++) if (counts[k] > counts[best]) best = k;
+  return modes[best];
+}
 
 /** Short key name for a button hint: 'KeyQ' -> 'Q', 'Digit1' -> '1' */
 export const keyLabel = (code = '') => code.replace(/^Key|^Digit|^Numpad/, '');
@@ -192,8 +204,9 @@ export class CommandInput {
   setSelection(units, add = false) {
     if (units.length && this.selectedWreck) this.selectWreck(null);
     const next = add ? [...new Set([...this.selection, ...units])] : units;
-    for (const u of this.selection) u.setSelected(false);
-    this.selection = next.filter((u) => u && !u.destroyed && !u.inside);
+    for (const u of this.selection) u.setSelected?.(false);
+    // Only objects with setSelected can be selected (stray placeholders / non-unit objects are dropped)
+    this.selection = next.filter((u) => u && typeof u.setSelected === 'function' && !u.destroyed && !u.inside);
     for (const u of this.selection) u.setSelected(true);
   }
 
@@ -320,16 +333,23 @@ export class CommandInput {
     this.#submit('upgradeGate', { segments: ids(segments), ticket });
   }
 
-  /** Formation key: the next mode (after the majority mode of the units) for all of them (same as the HUD button) */
+  /**
+   * Formation key / HUD button: the next mode (after the majority mode of the units) for all of them.
+   * [A7b] Only for a group (>= FORMATION.minGroupSize own units): with one unit the key does nothing.
+   */
   #cycleFormation(units) {
-    if (!units.length) return;
+    if (units.length < FORMATION.minGroupSize) return;
     const modes = FORMATION.modes;
-    const fallback = modes.indexOf(FORMATION.defaultMode);
-    const counts = modes.map(() => 0);
-    for (const u of units) { const k = modes.indexOf(u.formation); counts[k < 0 ? fallback : k]++; }
-    let best = 0;
-    for (let k = 1; k < counts.length; k++) if (counts[k] > counts[best]) best = k;
+    const best = modes.indexOf(majorityFormation(units));
     this.#submit('setFormation', { units: ids(units), mode: modes[(best + 1) % modes.length] });
+  }
+
+  /** [A7b] Own units a move would take, when they form a shaped group (right-drag sets its front); else null */
+  #shapedGroup() {
+    if (!FORMATION.dragFacing) return null;
+    const units = [...this.selectedVehicles, ...this.selectedMechs, ...this.selectedCrews];
+    if (units.length < FORMATION.minGroupSize || majorityFormation(units) === FORMATION.defaultMode) return null;
+    return units;
   }
 
   /**
@@ -386,10 +406,13 @@ export class CommandInput {
   }
 
   /** The one place where a targeted order meets a ground point (terrain click and minimap click alike) */
-  #pointOrder(name, point, queued, withVehicles = true) {
+  #pointOrder(name, point, queued, withVehicles = true, facing = null) {
     if (name === 'move') {
       const units = [...(withVehicles ? this.selectedVehicles : []), ...this.selectedMechs, ...this.selectedCrews];
-      if (units.length) this.#submit('move', { units: ids(units), point: pt(point), queued });
+      if (!units.length) return;
+      // [A7b] the front (right-drag) only travels with a group; a single unit's move carries no formation data
+      if (facing && units.length >= FORMATION.minGroupSize) this.#submit('move', { units: ids(units), point: pt(point), queued, facing });
+      else this.#submit('move', { units: ids(units), point: pt(point), queued });
       return;
     }
     const fighters = this.selectedFighters; // attackMove / patrol: active mechs + armed vehicles
@@ -413,6 +436,7 @@ export class CommandInput {
       if (nothingToCancel) this.onGameMenu?.();
     }
     if (matches(MATCH_UI.menuKeys, e.code)) this.onGameMenu?.();
+    if (!e.repeat && matches(kb.launchSuperweapon ?? [], e.code)) this.startSuperweaponTargeting(); // [A9-F4a] empty by default
     if (this.placement && matches(kb.rotateBuilding ?? [], e.code)) { this.placement.rotate?.(e.shiftKey ? -1 : 1); e.preventDefault(); }
     // Idle crew / builder hotkeys (empty by default; the Hud supplies the callbacks, same as its buttons)
     if (!e.repeat && matches(kb.idleCrew ?? [], e.code)) this.onIdleCrew?.();
@@ -487,6 +511,20 @@ export class CommandInput {
     this.placement?.cancel();
     this.placement = placement;
     this.#setPending(null);
+  }
+
+  /**
+   * [A9-F4a] Superweapon launch targeting (button "Launch" in the centre panel, KEYBINDINGS.launchSuperweapon): the cursor shows the
+   * blast circle, left click launches (launchSuperweapon command), right click / Esc cancels (same path as building placement).
+   * @param {object} [building]  the own superweapon building; default = the team's one. @returns {boolean} targeting started
+   */
+  startSuperweaponTargeting(building = null) {
+    const sw = this.world.superweapons;
+    const team = localTeam();
+    const target = building ?? sw?.buildingOf(team);
+    if (!target || target.team !== team || !sw?.canLaunch(target)) return false;
+    this.setPlacement(new SuperweaponTargeting({ world: this.world, input: this, building: target, team }));
+    return true;
   }
 
   /** First targetable enemy among all hits of the current ray (call after #pick / #setPointer) */
@@ -611,8 +649,20 @@ export class CommandInput {
       if (this.placement) { this.placement.cancel(); return; } // right click aborts building placement
       if (this.pending) { this.#setPending(null); return; } // right click aborts a targeted order
       // The order waits for the release: holding and dragging pans the map instead (#onRightDrag)
-      this.rightDown = { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, time: performance.now() / 1000, event: e, dragging: false };
+      this.rightDown = { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, time: performance.now() / 1000, event: e, dragging: false,
+        facing: this.#facingStart(e), facingEnd: null };
     }
+  }
+
+  /**
+   * [A7b] Right press on bare ground with a shaped group selected (FORMATION.dragFacing): the drag sets the front of the
+   * formation at the press point instead of panning. Returns the ground point, or null (the drag pans as before).
+   */
+  #facingStart(e) {
+    if (!this.#shapedGroup()) return null;
+    if (this.#pick(e).unit) return null; // a press on a unit / building is an order on it, never a facing drag
+    const point = this.#pickGround();
+    return point ? point.clone() : null;
   }
 
   /** Right button held: past CAMERA.rightDragThreshold the drag pans the camera over the ground */
@@ -623,7 +673,14 @@ export class CommandInput {
     if (!r.dragging) {
       if (Math.hypot(e.clientX - r.x, e.clientY - r.y) <= CAMERA.rightDragThreshold) return;
       r.dragging = true;
-      this.dom.style.cursor = 'grabbing';
+      this.dom.style.cursor = r.facing ? ORDER_BUTTONS.pendingCursor : 'grabbing';
+    }
+    if (r.facing) { // [A7b] facing drag: remember the ground point under the cursor (the release orders the move)
+      if (e.target !== this.dom) return;
+      this.#setPointer(e);
+      const point = this.#pickGround();
+      if (point) r.facingEnd = (r.facingEnd ?? new THREE.Vector3()).copy(point);
+      return;
     }
     this.#pan(e.clientX - r.lastX, e.clientY - r.lastY);
     r.lastX = e.clientX;
@@ -657,10 +714,25 @@ export class CommandInput {
     const r = this.rightDown;
     this.rightDown = null;
     if (!r) return;
+    if (r.dragging && r.facing) { this.suppressContextMenu = true; this.dom.style.cursor = ''; this.#facingOrder(r); return; }
     if (r.dragging) { this.suppressContextMenu = true; this.dom.style.cursor = ''; return; }
     if (performance.now() / 1000 - r.time > CAMERA.rightClickMaxTime) return;
     if (e.target !== this.dom) return; // released over a HUD panel
     this.#order(r.event);
+    this.#orderAck();
+  }
+
+  /**
+   * [A7b] End of a facing drag: one move of the whole group to the press point, front = the drag direction on the
+   * ground. A drag shorter than FORMATION.dragFacingMinDistance is a plain right click at the press point.
+   */
+  #facingOrder(r) {
+    const from = r.facing;
+    const to = r.facingEnd;
+    const len = to ? Math.hypot(to.x - from.x, to.z - from.z) : 0;
+    if (len < FORMATION.dragFacingMinDistance) { this.#order(r.event); this.#orderAck(); return; }
+    const facing = pt({ x: (to.x - from.x) / len, z: (to.z - from.z) / len });
+    this.#pointOrder('move', from, r.event.shiftKey, true, facing);
     this.#orderAck();
   }
 

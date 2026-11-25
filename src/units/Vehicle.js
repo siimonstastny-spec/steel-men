@@ -12,6 +12,7 @@ import { blockedOnTheWay, followPath } from '../game/Movement.js';
 import { applyTeamColor } from '../core/TeamColor.js';
 import { canRepairTarget, vehicleRepairStep } from '../game/Repair.js';
 import { issueOrder, advanceQueue, clearQueue } from './OrderQueue.js';
+import { statusOf } from '../game/StatusEffects.js'; // [A9-F3] crewless vehicle
 import { continuesAlone } from '../game/Construction.js';
 import { createVehicleProc, socketHeight, ProcDriver, PROC_VEHICLE } from './ProcVehicle.js';
 
@@ -199,6 +200,34 @@ export class Vehicle extends THREE.Group {
     this.hp -= dealt;
     if (this.hp <= 0) this.destroy();
     return dealt;
+  }
+
+  // ---------- [A9-F3] crew killed by a neutron bomb ----------
+
+  /** The crew is dead: the vehicle stands idle (status.disabled) until an own crew boards it */
+  get crewless() { return this.status?.crewless === true; }
+
+  /** An own crew squad may board it (Crew.board / Crew movement call canBoard and boardCrew like on a mech) */
+  get canBoard() { return !this.dead && this.crewless; }
+
+  /** Neutron bomb: the crew dies, orders end; the vehicle keeps its team and HP. @returns {boolean} */
+  loseCrew() {
+    if (this.dead || !this.world) return false;
+    clearQueue(this);
+    this.order = null;
+    this.speed = 0;
+    this.activity = null;
+    statusOf(this, this.world).crewless = true;
+    return true;
+  }
+
+  /** A crew squad becomes the new crew: it leaves the world (its population is the vehicle's now). @returns {boolean} */
+  boardCrew(crew) {
+    if (!this.canBoard || !crew || crew.team !== this.team) return false;
+    crew.enter(this);
+    crew.removed = true; // World drops it from world.crews
+    this.status.crewless = false;
+    return true;
   }
 
   /** Explodes and disappears (also the "delete unit" command) */

@@ -17,9 +17,10 @@
 .save-row.bad { opacity: 0.6; }
 .save-row.bad .save-name { color: var(--menu-muted, #8f9aa5); }
 .save-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.save-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-title { display: flex; align-items: center; min-width: 0; }
+.save-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .save-tag {
-  display: inline-block; margin-left: 8px; padding: 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+  flex: 0 0 auto; display: inline-block; margin-left: 8px; padding: 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
   color: var(--menu-accent, #3ea6ff); border: 1px solid var(--menu-accent, #3ea6ff);
 }
 .save-info { color: var(--menu-muted, #8f9aa5); }
@@ -44,6 +45,19 @@
 }
 .saveload-name-input:focus { outline: none; border-color: var(--menu-accent, #3ea6ff); box-shadow: var(--menu-neon-glow, none); }
 .saveload-modal .confirm-buttons button[data-role="confirm"] { background: linear-gradient(180deg, rgba(14, 32, 52, 0.92), rgba(8, 18, 30, 0.92)); border-color: var(--menu-accent, #3ea6ff); }
+
+/* [A5] hit targets and the same breakpoints as the HUD (UI_SCALE): compact = height < 800 or width < 1100, tiny = height < 650 */
+.saveload-card .menu-btn, .saveload-name-input { min-height: var(--ui-hit-target); box-sizing: border-box; }
+.saveload-card { max-width: calc(100vw - 24px); }
+@media (max-height: 799px), (max-width: 1099px) { /* = UI_SCALE.breakpoints.compact, UI_SCALE.narrowWidth */
+  .saveload-card { max-height: 94vh; gap: 6px; }
+  .saveload-list { min-height: 80px; gap: 4px; }
+  .save-row { padding: 4px 8px; }
+}
+@media (max-height: 649px) { /* = UI_SCALE.breakpoints.tiny */
+  .saveload-card { max-height: 97vh; }
+  .saveload-list { min-height: 56px; }
+}
 
 .saveload-toast {
   position: fixed; left: 50%; bottom: 12%; transform: translateX(-50%); z-index: 45; padding: 8px 18px; pointer-events: none;

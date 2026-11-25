@@ -52,9 +52,13 @@
 //  - Retire: a team that is out of the match (world.match.eliminated: surrendered / eliminated observer) is not
 //    needed from turn K = (turn it was seen out at a turn boundary) + D + 1 – sim state, same tick everywhere – so
 //    an observer closing its tab never stops the match. Its pause requests no longer count.
-import { NET, NET_LEAVE, NET_LEAVE_WIN, SIM, PAUSE, GAME_SPEED } from '../config.js';
+// Continued match [A2-net] (docs/notes/a2-net.md): option startTick = the saved tick every client replayed to; the
+// turn of startTick + 1 and the D - 1 after it are empty (like turns 0..D-1). Long stall: onStallLong / status.stuckMs;
+// the host may endMatch() (header-only message { z: 1 }) → status.ended + onEnded on every client.
+import { NET, NET_LEAVE, NET_LEAVE_WIN, SIM, PAUSE, GAME_SPEED, NET_CONTINUE } from '../config.js';
 import { gameSpeed } from '../game/GameSpeed.js';
 import { NET_SECURITY, wellFormedCommand, jsonLength } from './netSecurity.js'; // [MP-SEC]
+import { splitCommand } from '../game/commands/CommandBus.js'; // [A1-3] big selections travel as chunks
 
 const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
 /** UTF-8 byte length of a string (upper bound without TextEncoder) */
@@ -68,7 +72,7 @@ export class Lockstep {
   /**
    * @param {object} o
    * @param {object} o.channel      transport channel of the match room (Lobby onStart `channel`)
-   * @param {object} o.world        World (tick, stateHash, waitForSpawns)
+   * @param {object} o.world        World (tick, stateHash, readyForTick, setNetworked?, stalledLoads?)
    * @param {object} o.commandBus   the CommandBus (schedule, enqueue, clientId, log)
    * @param {{team: number, playerId: string}[]} o.players  human seats (Lobby onStart `players`)
    * @param {number|null} o.localTeam  this client's team (null = spectator: receives, never sends)
@@ -81,7 +85,7 @@ export class Lockstep {
    * @param {object} [o.leaveWinConfig] [B6] overrides of NET_LEAVE_WIN (selftest)
    * players[].name = lobby nickname (optional, nameOf)
    */
-  constructor({ channel, world, commandBus, players, localTeam, hostId = null, timers = true, now = null, config = null, aiTeams = [], leaveConfig = null, leaveWinConfig = null }) {
+  constructor({ channel, world, commandBus, players, localTeam, hostId = null, timers = true, now = null, config = null, aiTeams = [], leaveConfig = null, leaveWinConfig = null, startTick = 0, continueConfig = null }) {
     this.cfg = { ...NET, ...(config ?? {}) };
     this.lcfg = { ...NET_LEAVE, ...(leaveConfig ?? {}) };
     this.wcfg = { ...NET_LEAVE_WIN, ...(leaveWinConfig ?? {}) }; // [B6]
@@ -117,16 +121,23 @@ export class Lockstep {
     this.isPlayer = this.localTeam !== null && byTeam.has(this.localTeam);
     this.remoteTeams = this.teams.filter((team) => team !== this.localTeam);
 
-    const D = this.D;
+    // [A2-net] continued match (saved game): the lockstep starts after tick startTick instead of tick 0. The turn of
+    // tick startTick + 1 (baseTurn) and the D - 1 turns after it are empty by definition, exactly like turns 0..D-1 of a
+    // new match (base 0). Every client of the match must pass the same startTick.
+    this.ccfg = { ...NET_CONTINUE, ...(continueConfig ?? {}) };
+    this.startTick = Number.isInteger(startTick) && startTick > 0 ? startTick : 0;
+    this.baseTurn = this.turnOf(this.startTick + 1);
+    this.emptyUpTo = this.baseTurn + this.D - 1;
+    const E = this.emptyUpTo;
     this.localPending = new Map();  // turn -> [cmd]  still open (commands being collected)
     this.localTurns = new Map();    // turn -> [cmd]  finalized, kept until acknowledged by all AND enqueued
-    this.finalizedUpTo = D - 1;     // turns 0..D-1 are empty by definition
+    this.finalizedUpTo = E;         // turns baseTurn..emptyUpTo are empty by definition
     this.recv = new Map(this.remoteTeams.map((team) => [team, new Map()]));      // team -> turn -> [cmd]
-    this.recvContig = new Map(this.remoteTeams.map((team) => [team, D - 1]));    // highest contiguous turn received
+    this.recvContig = new Map(this.remoteTeams.map((team) => [team, E]));        // highest contiguous turn received
     this.partials = new Map(this.remoteTeams.map((team) => [team, new Map()]));  // team -> turn -> { parts, got[] }
-    this.ackFrom = new Map(this.remoteTeams.map((team) => [team, D - 1]));       // highest of OUR turns they have
+    this.ackFrom = new Map(this.remoteTeams.map((team) => [team, E]));           // highest of OUR turns they have
     this.echo = new Map();          // team -> { ts, at }  their last send time, our receive time (ping)
-    this.enqueuedUpTo = D - 1;      // highest turn handed to the CommandBus
+    this.enqueuedUpTo = E;          // highest turn handed to the CommandBus
     this.history = [];              // [{ n, cmds: [[team, cmd]…] }] executed turns (desyncReport)
     this.hashes = new Map();        // turn -> Map(team -> hash)
     this.ownHashes = [];            // our recent [turn, hash] (piggybacked)
@@ -158,8 +169,15 @@ export class Lockstep {
      * without (drop pending, or an observer); dropped: teams dropped (their units idle); selfDropped: the others
      * dropped THIS client (its commands are ignored from then on); lastLeft: null | { team, name, continues, at (now()) }
      * = the latest player who vanished (notice)
+     * [A1-3] loadStall: a simulation load hangs (watchdog) or failed for good on THIS client (world.stalledLoads > 0):
+     * the match is held on purpose, going on without it would desync
      */
-    this.status = { waitingFor: [], ping: null, desync: false, stalledMs: 0, left: [], leaving: [], dropped: [], selfDropped: false, lastLeft: null, paused: null, speed: gameSpeed.value };
+    this.status = { waitingFor: [], ping: null, desync: false, stalledMs: 0, left: [], leaving: [], dropped: [], selfDropped: false, lastLeft: null, paused: null, speed: gameSpeed.value, loadStall: false, stuckMs: 0, ended: null };
+    // [A2-net] long stall (status.stuckMs, onStallLong) and the host ending the match (endMatch, status.ended, onEnded)
+    this.stuckSince = null;
+    this.stallOffered = false;
+    this.stallListeners = new Set();
+    this.endListeners = new Set();
 
     // Listen right away: turns that arrive while this client is still loading the match are kept
     this.unsubs = [
@@ -185,7 +203,8 @@ export class Lockstep {
     this.prevClientId = this.bus.clientId;
     this.bus.clientId = this.selfId;
     this.bus.schedule = (cmd) => this.#schedule(cmd);
-    this.world.waitForSpawns = true;
+    if ((this.world.tick ?? 0) !== this.startTick) console.warn(`[net] lockstep starts at world tick ${this.world.tick}, expected ${this.startTick} (startTick)`); // [A2-net]
+    this.world.setNetworked?.(true); // [A1-3] the load watchdog only reports from now on (World.#watchdogMayGiveUp)
     if (SIM.spawnDelayTicks < this.TT * this.D) {
       console.warn(`[net] SIM.spawnDelayTicks (${SIM.spawnDelayTicks}) < turnTicks × inputDelayTurns (${this.TT * this.D}): produced units may stall the game while their model loads`);
     }
@@ -204,11 +223,14 @@ export class Lockstep {
     for (const u of this.unsubs) { try { u(); } catch { /* gone */ } }
     this.unsubs = [];
     this.leftListeners.clear();
+    this.stallListeners.clear(); // [A2-net]
+    this.endListeners.clear();
     if (this.started) {
       this.bus.schedule = this.prevSchedule;
       this.bus.clientId = this.prevClientId;
-      this.world.waitForSpawns = false;
     }
+    this.world.setNetworked?.(false); // [A1-3] also ends world.multiplayer (no false lockstep watchdog notices afterwards)
+    this.status.loadStall = false;
     this.started = false;
   }
 
@@ -294,7 +316,7 @@ export class Lockstep {
    * handed to the CommandBus (once). Call it with world.tick + 1 right before each simulation tick.
    */
   canAdvance(tick) {
-    if (!this.started || this.stopped) return false;
+    if (!this.started || this.stopped || this.status.ended) return false; // [A2-net] ended by the host: frozen
     const turn = this.turnOf(tick);
     while (this.enqueuedUpTo < turn) {
       const n = this.enqueuedUpTo + 1;
@@ -389,7 +411,7 @@ export class Lockstep {
 
   /** The first pause request in turn n (team order), or null. Every team's turn n is here when this is called. */
   #pauseAt(n) {
-    if (n < this.D) return null;
+    if (n <= this.emptyUpTo) return null; // [A2-net] the first D turns after the start tick are empty
     for (const team of this.teams) {
       if (this.#isExempt(team, n)) continue; // [MP-LEAVE] dropped / observer
       const cmds = team === this.localTeam ? this.localTurns.get(n) : this.recv.get(team)?.get(n);
@@ -419,9 +441,11 @@ export class Lockstep {
   pump(now = this.now()) {
     if (!this.started || this.stopped) return;
     if (this.stalledSince !== null) this.status.stalledMs = now - this.stalledSince;
+    this.status.loadStall = (this.world.stalledLoads ?? 0) > 0; // [A1-3] a load hangs / failed here: the match is held
     this.#updateLeft(now); // [MP-LEAVE] also polled: a missed peer event must not stall the match for ever
     this.#maybeDrop(now);
     this.#confirmDesync(now); // [MP-LEAVE QA]
+    this.#trackStall(now); // [A2-net]
     if (now - this.lastSendAt >= this.cfg.resendMs) this.#send(now);
   }
 
@@ -436,6 +460,54 @@ export class Lockstep {
    * (local event for a notice; continues = the match will go on without it). Returns unsubscribe.
    */
   onPlayerLeft(fn) { this.leftListeners.add(fn); return () => this.leftListeners.delete(fn); }
+
+  // ---------- long stall / host ends the match [A2-net] ----------
+
+  /**
+   * fn({ stuckMs, loadStall, waitingFor }) once the match has stood still (own load stall, or waiting for a player's
+   * turns – not a pause) for NET_CONTINUE.stallOfferMs; again after it moved and got stuck once more. Every client gets
+   * it; only the host may act on it (canEndMatch → a dialog, endMatch()). Returns unsubscribe.
+   */
+  onStallLong(fn) { this.stallListeners.add(fn); return () => this.stallListeners.delete(fn); }
+
+  /** fn({ byHost, self }) once when the match was ended by the host (self = this client ended it). Returns unsubscribe. */
+  onEnded(fn) { this.endListeners.add(fn); return () => this.endListeners.delete(fn); }
+
+  /** May this client end the match for everybody? (the host; also before start(), e.g. while a continued match replays) */
+  get canEndMatch() { return !this.stopped && !this.status.ended && this.hostId !== null && this.selfId === this.hostId; }
+
+  /**
+   * Host: ends the match for everybody (stuck loading / replay). Header-only 'turn' message { z: 1 } sent
+   * NET_CONTINUE.endRepeat times; every client sets status.ended, stops simulating (canAdvance false) and fires onEnded.
+   * No simulation command: the match simply stops on every client (main.js leaves to the menu). Returns false when refused.
+   */
+  endMatch() {
+    if (!this.canEndMatch) return false;
+    const send = () => { if (!this.stopped) this.channel.send('turn', { a: {}, p: Math.round(this.now()), z: 1 }); };
+    send();
+    for (let i = 1; i < this.ccfg.endRepeat; i++) setTimeout(send, i * this.ccfg.endRepeatMs);
+    this.#markEnded(true);
+    return true;
+  }
+
+  #markEnded(self) {
+    if (this.status.ended || this.stopped) return;
+    this.status.ended = { byHost: true, self };
+    for (const fn of [...this.endListeners]) { try { fn(this.status.ended); } catch (err) { console.error(err); } }
+  }
+
+  /** status.stuckMs + onStallLong (pump) */
+  #trackStall(now) {
+    const st = this.status;
+    const stuck = !st.ended && !st.paused && (st.loadStall || st.waitingFor.length > 0);
+    if (!stuck) { this.stuckSince = null; st.stuckMs = 0; this.stallOffered = false; return; }
+    if (this.stuckSince === null) this.stuckSince = now;
+    st.stuckMs = now - this.stuckSince;
+    if (this.stallOffered || st.stuckMs < this.ccfg.stallOfferMs) return;
+    this.stallOffered = true;
+    const info = { stuckMs: st.stuckMs, loadStall: st.loadStall, waitingFor: [...st.waitingFor] };
+    for (const fn of [...this.stallListeners]) { try { fn(info); } catch (err) { console.error(err); } }
+  }
 
   /** Everything needed to find a desync: hashes, executed turns, CommandBus log. Also printed to the console. */
   desyncReport() {
@@ -466,18 +538,30 @@ export class Lockstep {
     if (!this.#mayCommand(this.selfId, this.localTeam, cmd.team)) { console.warn('[net] command for a foreign team dropped', cmd); return; }
     let text;
     try { text = JSON.stringify(cmd); } catch { console.warn('[net] command is not JSON', cmd); return; }
-    if (byteLength(text) > this.cfg.maxCommandBytes) { console.warn(`[net] command '${cmd.type}' too big (> ${this.cfg.maxCommandBytes} B), dropped`); return; }
+    let texts = [text];
+    if (byteLength(text) > this.cfg.maxCommandBytes) {
+      // [A1-3] big selection: chunks of the units list in one turn; the CommandBus joins them back before they run
+      const max = this.cfg.maxCommandBytes;
+      const parts = splitCommand(cmd, (part) => jsonBytes(part) <= max, this.cfg.maxCommandChunks);
+      if (!parts) { console.warn(`[net] command '${cmd.type}' too big (> ${max} B), dropped`); return; }
+      texts = parts.map((part) => JSON.stringify(part));
+    }
     // JSON round trip: this client executes exactly what the others receive (no undefined, -0, Vector3…)
-    const plain = JSON.parse(text);
+    const plains = texts.map((s) => JSON.parse(s));
     // [MP-SEC] the very check the receivers apply: a command they would reject must not run here either (desync)
-    if (!wellFormedCommand(plain, this.cfg.maxCommandBytes)) { console.warn(`[net] malformed command '${cmd.type}' dropped`, plain); return; }
+    for (const plain of plains) {
+      if (!wellFormedCommand(plain, this.cfg.maxCommandBytes)) { console.warn(`[net] malformed command '${cmd.type}' dropped`, plain); return; }
+    }
     const turn = Math.max(this.turnOf(this.world.tick + 1) + this.D, this.finalizedUpTo + 1);
     if (!this.localPending.has(turn)) this.localPending.set(turn, []);
     const list = this.localPending.get(turn);
-    if (list.length >= NET_SECURITY.maxCommandsPerTurn - NET_SECURITY.controlSlots) { console.warn(`[net] too many commands in one turn, '${cmd.type}' dropped`); return; }
+    // all chunks or nothing, consecutive in one turn (a half command must never travel)
+    if (list.length + plains.length > NET_SECURITY.maxCommandsPerTurn - NET_SECURITY.controlSlots) { console.warn(`[net] too many commands in one turn, '${cmd.type}' dropped`); return; }
     // [MP-SEC] the turn must fit into NET_SECURITY.maxParts message parts, else every receiver refuses it (stall)
-    if (jsonBytes(list) + byteLength(text) > this.maxTurnBytes) { console.warn(`[net] turn too big, '${cmd.type}' dropped`); return; }
-    list.push(plain);
+    let bytes = jsonBytes(list);
+    for (const s of texts) bytes += byteLength(s) + 1;
+    if (bytes > this.maxTurnBytes) { console.warn(`[net] turn too big, '${cmd.type}' dropped`); return; }
+    for (const plain of plains) list.push(plain);
   }
 
   /** Same rule on sender and receivers: own team, or the host commanding a team nobody plays (AI) */
@@ -489,7 +573,7 @@ export class Lockstep {
   // ---------- turn bookkeeping ----------
 
   #hasTurn(team, n) {
-    if (n < this.D) return true;
+    if (n <= this.emptyUpTo) return true; // [A2-net] empty by definition
     if (this.#isExempt(team, n)) return true; // [MP-LEAVE] dropped / observer: not needed any more
     if (team === this.localTeam) return n <= this.finalizedUpTo;
     return this.recv.get(team)?.has(n) ?? false;
@@ -498,7 +582,7 @@ export class Lockstep {
   #enqueueTurn(n) {
     const tick = this.firstTick(n);
     const entry = { n, cmds: [] };
-    if (n >= this.D) {
+    if (n > this.emptyUpTo) {
       for (const team of this.teams) {
         if (this.dropFrom.get(team) === n) this.#enqueueLeave(team, tick, entry); // [MP-LEAVE] same tick everywhere
         if (this.#isExempt(team, n)) { if (team !== this.localTeam) this.recv.get(team).delete(n); continue; }
@@ -738,7 +822,7 @@ export class Lockstep {
     if (fromTeam !== this.#coordinatorTeam(gone)) return;
     for (const team of this.teams) {
       const K = k[team];
-      if (!Number.isInteger(K) || K < this.D || K > this.enqueuedUpTo + this.cfg.maxTurnsAhead + 1) continue;
+      if (!Number.isInteger(K) || K <= this.emptyUpTo || K > this.enqueuedUpTo + this.cfg.maxTurnsAhead + 1) continue;
       if (team !== this.localTeam && !gone.has(team)) continue; // a player we still see in the room cannot be dropped
       const known = this.dropFrom.get(team);
       if (known === undefined) this.#applyDrop(team, K);
@@ -768,9 +852,9 @@ export class Lockstep {
       let need = Infinity;
       for (const p of present) {
         const a = this.peerAcks.get(p.team)?.[team];
-        need = Math.min(need, Number.isInteger(a) ? a : this.D - 1);
+        need = Math.min(need, Number.isInteger(a) ? a : this.emptyUpTo);
       }
-      for (let n = Math.max(need, this.D - 1) + 1; n <= upper && entries.length < this.lcfg.maxRelayTurns; n++) {
+      for (let n = Math.max(need, this.emptyUpTo) + 1; n <= upper && entries.length < this.lcfg.maxRelayTurns; n++) {
         const cmds = this.#heldTurn(team, n);
         if (cmds === null) break; // keep it contiguous
         entries.push(cmds.length ? [team, n, cmds.map(({ origin, ...c }) => c)] : [team, n]);
@@ -810,6 +894,7 @@ export class Lockstep {
     if (this.stopped || !data || typeof data !== 'object' || Array.isArray(data)) return;
     const team = this.teamByPeer.get(from);
     if (team === undefined || team === this.localTeam) return; // spectator / stranger / ourselves
+    if (data.z === 1) { if (from === this.hostId) this.#markEnded(false); return; } // [A2-net] the host ended the match
     if (jsonLength(data) > NET_SECURITY.maxIncomingChars) { console.warn('[net] oversized turn message ignored'); return; } // [MP-SEC]
     const now = this.now();
     this.#markReady(team); // [W6] it only sends turns after its own barrier: it is loaded

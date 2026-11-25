@@ -241,6 +241,7 @@ export class MatchUi {
       ${speedRow}
       ${this.saveLoad && !net ? `${over ? '' : `<button data-act="save">${t('match.menu.save')}</button>`}
       <button data-act="load">${t('match.menu.load')}</button>` : ''}
+      ${net && !over && this.#canSaveMp() ? `<button data-act="save">${t('match.menu.save')}</button>` : ''}
       <button data-act="settings">${t('match.menu.settings')}</button>
       ${over ? `<button data-act="results">${t('match.menu.results')}</button>`
         : out ? `<button data-act="leave" class="danger">${t('match.menu.leave')}</button>`
@@ -272,7 +273,7 @@ export class MatchUi {
       this.update();
     }
     else if (act === 'unpause') { this.#net?.resume(); this.update(); }
-    else if (act === 'save') { if (this.saveLoad && !this.#net) await this.saveLoad.openSaveDialog(); } // [J2] the menu keeps the game paused
+    else if (act === 'save') { if (this.saveLoad && (!this.#net || this.#canSaveMp())) await this.saveLoad.openSaveDialog(); } // [A2-ui] MP: host only // [J2] the menu keeps the game paused
     else if (act === 'load') { if (this.saveLoad && !this.#net) await this.saveLoad.openList({ inGame: true }); }
     else if (act === 'settings') {
       this.inSettings = true; // single player stays paused behind the settings screen
@@ -297,6 +298,9 @@ export class MatchUi {
   }
 
   /** [W5c] Restart is offered in single player only (no lockstep) and only when main.js gave a restart callback */
+  // [A2-ui] Multiplayer: only the host saves (SaveGame.canSave() is false for clients); Load is never offered in a net match
+  #canSaveMp() { return !!this.saveLoad && this.saveLoad.saveGame?.canSave?.() === true; }
+
   get #canRestart() { return !!this.match && typeof this.restart === 'function' && !this.#net && this.canRestart(); }
 
   /** [N4] single player: set directly; multiplayer: the host asks the Lockstep (applied everywhere before the same tick) */

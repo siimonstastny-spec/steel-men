@@ -498,7 +498,8 @@ export class CrewQuartersProc extends ProcModel {
     if (!this.shared) return;
     const an = this.kit.style.anim;
     const A = QUARTERS_ANIM;
-    this.time += delta * (1 + this.power);
+    const dt = delta;   // already scaled by animScale in tick(); no power:scanner, vents, levitators and pod waves stand still
+    this.time += dt * (1 + this.power);
     this.power += ((active ? 1 : 0) - this.power) * Math.min(1, delta * A.powerEase);
     const shift = A.waveShift / Math.max(0.01, an.pulse);
     this.podA?.setIntensity(this.#level(0));
@@ -508,9 +509,9 @@ export class CrewQuartersProc extends ProcModel {
     this.laserGlow?.setIntensity(glow);
     this.heat += ((active ? 1 : A.heatIdle) - this.heat) * Math.min(1, delta * an.glowRamp);
     this.heatGlow?.setIntensity(this.heat);
-    for (let i = 0; i < this.spinners.length; i++) this.spinners[i].update(delta, active);
-    for (let i = 0; i < this.levitators.length; i++) this.levitators[i].update(delta, active);
-    this.blink.update(delta, active);
+    for (let i = 0; i < this.spinners.length; i++) this.spinners[i].update(dt, active);
+    for (let i = 0; i < this.levitators.length; i++) this.levitators[i].update(dt, active);
+    this.blink.update(dt, active);
     this.beacons?.setIntensity(active ? (this.blink.on ? 1 : 0) : A.idleBeacon);
   }
 }

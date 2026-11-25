@@ -10,14 +10,22 @@
 import * as THREE from 'three';
 import { createProceduralStructure, hasProceduralModel, loadBuildingStyles } from '../procedural/registry.js';
 import { emblemPathData } from '../procedural/ProcModules.js';
-import { TEAMS, ICON_RENDERER } from '../config.js';
+import {
+  unitProcId, partProcId, partHasOwnProc, partHasStandIn, createUnitIconModel, createRobotIconModel, createPartIconModel, iconBounds, drawCrewIcon,
+} from '../procedural/IconScenes.js';
+import { TEAMS, ICON_RENDERER, PROC_ROBOTS } from '../config.js';
+import { procRobotsOn } from '../units/ProcMechVisual.js';   // [B6] robot / part icons follow the in-game switch
 
 export { ICON_RENDERER };
+
+const CREW_ID = 'crew';
 
 const _hex = new THREE.Color();
 const hexOfColor = new Map();       // team colour (number / string) → '#rrggbb' (no Color allocation per UI redraw)
 
+/** '#rrggbb' of a team colour; null for a missing / unknown colour (never cached, so no stale colour leaks in) */
 function colorKey(teamColor) {
+  if (teamColor === undefined || teamColor === null) return null;
   let hex = hexOfColor.get(teamColor);
   if (hex === undefined) { hex = `#${_hex.set(teamColor).getHexString()}`; hexOfColor.set(teamColor, hex); }
   return hex;
@@ -28,6 +36,11 @@ const _center = new THREE.Vector3();
 const _sphere = new THREE.Sphere();
 const _dir = new THREE.Vector3();
 const _bg = new THREE.Color(0, 0, 0);
+const _up = new THREE.Vector3(0, 1, 0);
+const _right = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
+const _corner = new THREE.Vector3();
+const TAN_HALF_FOV = Math.tan(THREE.MathUtils.degToRad(ICON_RENDERER.fov / 2));
 
 const cache = new Map();            // key → { canvas, id, race, color, size, state: 'queued' | 'done' | 'failed' }
 const queue = [];                   // entries waiting for render
@@ -60,43 +73,104 @@ function ensureGl(size) {
   return gl;
 }
 
-/** Renders one entry into its canvas (building is created, drawn and disposed again) */
+/** Model of an entry (building: structure model; unit / robot / part: procedural unit in its rest pose); null = none */
+function createModel(e) {
+  switch (e.kind) {
+    case 'unit': return createUnitIconModel(e.id, e.race, e.color);
+    case 'robot': return createRobotIconModel(e.spec, e.race, e.color);
+    case 'part': return createPartIconModel(e.spec, e.id, e.race, e.color);
+    default: {
+      const m = createProceduralStructure(e.id, e.race, e.color);
+      m?.update(0, false);
+      return m;
+    }
+  }
+}
+
+/** View of a non-building entry: { dir: [x, y, z], margin } */
+function viewOf(e) {
+  if (e.kind === 'unit') return ICON_RENDERER.unit;
+  if (e.kind === 'robot') return ICON_RENDERER.robot;
+  return ICON_RENDERER.part;
+}
+
+/** Camera that fits the projected bounding box (exact extent, no sphere slack) – units, robots and parts */
+function fitCameraToBox(g, e, view) {
+  const P = ICON_RENDERER.part;
+  let dir = view.viewDir;
+  if (e.kind === 'part') dir = P.viewDir[e.spec === 'legs' || e.spec === 'torso' ? e.spec : 'arm'];
+  _dir.fromArray(dir).normalize();
+  if (e.kind === 'part' && e.spec === 'leftArm' && P.mirrorLeftArm) _dir.x = -_dir.x;
+  _right.crossVectors(_up, _dir).normalize();
+  _camUp.crossVectors(_dir, _right);
+  _box.getCenter(_center);
+  _box.getBoundingSphere(_sphere);
+  let dist = 0;
+  for (let i = 0; i < 8; i++) {
+    _corner.set(i & 1 ? _box.max.x : _box.min.x, i & 2 ? _box.max.y : _box.min.y, i & 4 ? _box.max.z : _box.min.z).sub(_center);
+    const ext = Math.max(Math.abs(_corner.dot(_right)), Math.abs(_corner.dot(_camUp)));
+    dist = Math.max(dist, (ext * view.fitMargin) / TAN_HALF_FOV + _corner.dot(_dir));   // corner nearer to the camera needs more room
+  }
+  const r = _sphere.radius;
+  g.camera.position.copy(_center).addScaledVector(_dir, dist);
+  g.camera.near = Math.max(ICON_RENDERER.nearMin, dist - r * 2);
+  g.camera.far = dist + r * 2;
+  g.camera.updateProjectionMatrix();
+  g.camera.lookAt(_center);
+}
+
+/** Camera of buildings: bounding sphere, fixed 3/4 view */
+function fitCameraToSphere(g) {
+  _box.getBoundingSphere(_sphere);
+  _box.getCenter(_center);
+  const r = _sphere.radius;
+  const dist = (r * ICON_RENDERER.fitMargin) / Math.sin(THREE.MathUtils.degToRad(ICON_RENDERER.fov / 2));
+  _dir.fromArray(ICON_RENDERER.viewDir).normalize();
+  g.camera.position.copy(_center).addScaledVector(_dir, dist);
+  g.camera.near = Math.max(ICON_RENDERER.nearMin, dist - r * 2);
+  g.camera.far = dist + r * 2;
+  g.camera.updateProjectionMatrix();
+  _center.y -= r * ICON_RENDERER.targetLift;
+  g.camera.lookAt(_center);
+}
+
+/** Short blob: URL instead of a long data URL in every UI string; the snapshot is taken synchronously */
+function publish(e) {
+  e.canvas.toBlob((blob) => {
+    if (cache.get(e.key) !== e) return;   // disposed meanwhile: nothing to publish (no blob URL is created)
+    e.url = blob ? URL.createObjectURL(blob) : e.canvas.toDataURL('image/png');
+    version++;
+    for (const fn of listeners) fn();
+  }, 'image/png');
+}
+
+/** Renders one entry into its canvas (model is created, drawn and disposed again; crew is drawn with the 2D canvas) */
 function renderEntry(e) {
   let model = null;
   try {
-    model = createProceduralStructure(e.id, e.race, e.color);
+    if (e.kind === 'crew') {
+      drawCrewIcon(e.canvas.getContext('2d'), e.size, e.race, e.color);
+      e.state = 'done';
+      publish(e);
+      return;
+    }
+    model = createModel(e);
     if (!model) { e.state = 'failed'; return; }
     const g = ensureGl(e.size);
-    model.update(0, false);
     g.scene.add(model);
     model.updateWorldMatrix(true, true);
-    _box.makeEmpty().expandByObject(model);
+    if (e.kind === 'building') _box.makeEmpty().expandByObject(model);
+    else iconBounds(model, _box);
     if (_box.isEmpty()) { e.state = 'failed'; return; }
-    _box.getBoundingSphere(_sphere);
-    _box.getCenter(_center);
-    const r = _sphere.radius;
-    const dist = (r * ICON_RENDERER.fitMargin) / Math.sin(THREE.MathUtils.degToRad(ICON_RENDERER.fov / 2));
-    _dir.fromArray(ICON_RENDERER.viewDir).normalize();
-    g.camera.position.copy(_center).addScaledVector(_dir, dist);
-    g.camera.near = Math.max(ICON_RENDERER.nearMin, dist - r * 2);
-    g.camera.far = dist + r * 2;
-    g.camera.updateProjectionMatrix();
-    _center.y -= r * ICON_RENDERER.targetLift;
-    g.camera.lookAt(_center);
+    if (e.kind === 'building') fitCameraToSphere(g); else fitCameraToBox(g, e, viewOf(e));
     g.renderer.render(g.scene, g.camera);
     const ctx = e.canvas.getContext('2d');
     ctx.clearRect(0, 0, e.size, e.size);
     ctx.drawImage(g.renderer.domElement, 0, 0, e.size, e.size);   // same task as render → buffer still valid
     e.state = 'done';
-    // Short blob: URL instead of a long data URL in every UI string; the snapshot is taken synchronously
-    e.canvas.toBlob((blob) => {
-      if (cache.get(e.key) !== e) return;   // disposed meanwhile: nothing to publish (no blob URL is created)
-      e.url = blob ? URL.createObjectURL(blob) : e.canvas.toDataURL('image/png');
-      version++;
-      for (const fn of listeners) fn();
-    }, 'image/png');
+    publish(e);
   } catch (err) {
-    console.warn(`[IconRenderer] icon ${e.id}/${e.race} failed`, err);
+    console.warn(`[IconRenderer] icon ${e.kind} ${e.id}/${e.race} failed`, err);
     e.state = 'failed';
   } finally {
     if (model) { model.removeFromParent(); model.dispose(); }
@@ -106,8 +180,15 @@ function renderEntry(e) {
 function pump() {
   raf = 0;
   if (disposed) return;
-  let n = ICON_RENDERER.perFrame;
-  while (n-- > 0 && queue.length) renderEntry(queue.shift());   // listeners fire when the blob URL exists
+  // at least perFrame icons; with a backlog more of them while the frame time budget lasts (the stock window waited ~3 s
+  // at 1 icon per frame). Listeners fire when the blob URL exists (asynchronously), so the UI rebuilds once per batch.
+  const t0 = performance.now();
+  let n = 0;
+  while (queue.length && n < ICON_RENDERER.maxPerFrame
+    && (n < ICON_RENDERER.perFrame || performance.now() - t0 < ICON_RENDERER.frameBudgetMs)) {
+    renderEntry(queue.shift());
+    n++;
+  }
   if (queue.length) schedule();
 }
 
@@ -141,19 +222,130 @@ export function getBuildingIcon(id, race, teamColor, size = ICON_RENDERER.size) 
 function entryOf(id, race, teamColor, size) {
   if (disposed || !hasProceduralModel(id)) return null;   // GLB buildings: fallback (letters), see note
   const color = colorKey(teamColor);
-  const key = keyOf(id, race, color, size);
+  if (!color) return null;
+  return cachedEntry(keyOf(id, race, color, size), 'building', id, race, color, size, null);
+}
+
+/** Cache entry for a key, queued for rendering on the first request (spec = robot combo / part slot, else null) */
+function cachedEntry(key, kind, id, race, color, size, spec) {
   let e = cache.get(key);
   if (!e) {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    e = { canvas, id, race, color, size, key, state: 'queued', url: null };
+    e = { canvas, kind, id, race, color, size, key, spec, state: 'queued', url: null };
     cache.set(key, e);
     queue.push(e);
     ensureStyles();
     schedule();
+  } else if (e.state === 'queued' && !e.hot) {
+    // requested again by a UI view that is being drawn now = visible: render it before the prewarmed backlog
+    e.hot = true;
+    const i = queue.indexOf(e);
+    if (i > 0) { queue.splice(i, 1); queue.unshift(e); }
   }
   return e;
+}
+
+// ---------------------------------------------------------------- units, robots, parts (B2-1)
+
+/** Entry of a unit icon ('crew' = squad emblem) or null (disposed / no procedural model / stats not loaded yet) */
+function unitEntry(unitId, race, teamColor, size) {
+  if (disposed) return null;
+  const color = colorKey(teamColor);
+  if (!color) return null;
+  if (unitId === CREW_ID) return cachedEntry(keyOf(`crew:${CREW_ID}`, race, color, size), 'crew', CREW_ID, race, color, size, null);
+  const proc = unitProcId(unitId);
+  return proc ? cachedEntry(keyOf(`unit:${proc}`, race, color, size), 'unit', proc, race, color, size, null) : null;
+}
+
+/** [B6] procedural robot / part icons only for races drawn procedurally in game (PROC_ROBOTS.races) and while the switch is on; else letters */
+const robotIconsOn = (race) => procRobotsOn() && PROC_ROBOTS.races.includes(race);
+
+/** Part id for an icon: any registered part for a proc race; for other races only parts with their own stats.procModel (as before B6) */
+function iconProcId(slot, model, race, standInRobot = false) {
+  const id = partProcId(slot, model);
+  if (!id) return '';
+  // [B3] a part with stats.standInSet, and every part of a robot that carries one, is procedural for any race
+  if (procRobotsOn() && (standInRobot || partHasStandIn(slot, model))) return id;
+  return robotIconsOn(race) || (procRobotsOn() && partHasOwnProc(slot, model)) ? id : '';
+}
+
+/** Part ids of a loadout (legs and torso required, a missing arm = ''); null when a mounted part has no procedural model */
+function robotEntry(loadout, race, teamColor, size) {
+  if (disposed || !loadout) return null;
+  const si = partHasStandIn('legs', loadout.legs) || partHasStandIn('torso', loadout.torso)
+    || partHasStandIn('leftArm', loadout.leftArm) || partHasStandIn('rightArm', loadout.rightArm);   // [B3]
+  const legs = iconProcId('legs', loadout.legs, race, si);
+  const torso = iconProcId('torso', loadout.torso, race, si);
+  if (!legs || !torso) return null;
+  const leftArm = loadout.leftArm ? iconProcId('leftArm', loadout.leftArm, race, si) : '';
+  const rightArm = loadout.rightArm ? iconProcId('rightArm', loadout.rightArm, race, si) : '';
+  if ((loadout.leftArm && !leftArm) || (loadout.rightArm && !rightArm)) return null;
+  const color = colorKey(teamColor);
+  if (!color) return null;
+  const key = keyOf(`robot:${legs}|${torso}|${leftArm}|${rightArm}`, race, color, size);
+  return cachedEntry(key, 'robot', 'robot', race, color, size, { legs, torso, leftArm, rightArm });
+}
+
+function partEntry(slot, model, race, teamColor, size) {
+  if (disposed) return null;
+  const id = iconProcId(slot, model, race);
+  if (!id) return null;
+  const color = colorKey(teamColor);
+  if (!color) return null;
+  return cachedEntry(keyOf(`part:${slot}:${id}`, race, color, size), 'part', id, race, color, size, slot);
+}
+
+/**
+ * Icon of a unit as a blob URL: procedural vehicle / aircraft (unitId = stats.json vehicles key or procedural model id) or
+ * unitId 'crew' (race emblem on a bust, drawn with a canvas). null = not rendered yet or no model (keep the letters / emoji).
+ */
+export function unitIconUrl(unitId, race, teamColor, size = ICON_RENDERER.size) {
+  try { return unitEntry(unitId, race, teamColor, size)?.url ?? null; } catch { return null; }
+}
+
+/** `<img class="ico-img">` of a unit in the colour of a team (index into TEAMS), or '' */
+export function unitIconHtml(unitId, race, team) {
+  const color = TEAMS[team]?.color;
+  const url = color === undefined ? null : unitIconUrl(unitId, race, color);
+  return url ? `<img class="ico-img" src="${url}" alt="">` : '';
+}
+
+/**
+ * Icon of a whole robot as a blob URL. loadout = { legs, torso, leftArm, rightArm }: part model paths as the simulation
+ * keeps them (MechPart.key / RobotProduction.loadout, e.g. '3DParts/…glb') or procedural part ids; leftArm / rightArm
+ * null = no arm. null = not ready, or a part has no procedural model.
+ */
+export function robotIconUrl(loadout, race, teamColor, size = ICON_RENDERER.size) {
+  try { return robotEntry(loadout, race, teamColor, size)?.url ?? null; } catch { return null; }
+}
+
+export function robotIconHtml(loadout, race, team) {
+  const color = TEAMS[team]?.color;
+  const url = color === undefined ? null : robotIconUrl(loadout, race, color);
+  return url ? `<img class="ico-img" src="${url}" alt="">` : '';
+}
+
+/** Icon of one robot part (slot legs | torso | leftArm | rightArm, model path or procedural part id) as a blob URL, or null */
+export function partIconUrl(slot, model, race, teamColor, size = ICON_RENDERER.size) {
+  try { return partEntry(slot, model, race, teamColor, size)?.url ?? null; } catch { return null; }
+}
+
+export function partIconHtml(slot, model, race, team) {
+  const color = TEAMS[team]?.color;
+  const url = color === undefined ? null : partIconUrl(slot, model, race, color);
+  return url ? `<img class="ico-img" src="${url}" alt="">` : '';
+}
+
+/** Queues unit icons (spread over frames) */
+export function prewarmUnitIcons(unitIds, race, teamColor, size = ICON_RENDERER.size) {
+  for (const id of unitIds) unitIconUrl(id, race, teamColor, size);
+}
+
+/** Queues part icons: list = [{ slot, model }] */
+export function prewarmPartIcons(list, race, teamColor, size = ICON_RENDERER.size) {
+  for (const p of list) partIconUrl(p.slot, p.model, race, teamColor, size);
 }
 
 /** Same as getBuildingIcon, as a short blob: URL shared by every <img> (revoked on dispose); null while not ready */

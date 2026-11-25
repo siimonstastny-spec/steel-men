@@ -282,6 +282,7 @@ function paintOnBeforeCompile(shader) {
       'diffuseColor.rgb *= mix(vec3(1.0), texture2D(bumpMap, vBumpMapUv).rgb, uDetail);',
       'diffuseColor.rgb *= mix(vec3(1.0), uTeamColor, vSurface.x);',
       'diffuseColor.rgb *= mix(uState.x, uState.y, vSurface.x);',   // damage: paint scale, team-masked scale
+      'diffuseColor.rgb *= mix(1.0, uState.z, clamp(vSurface.w, 0.0, 1.0));',   // unpowered: glowing glass / lenses go dark, not just unlit
     ].join('\n'))
     .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vSurface.z;')
     .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vSurface.y;')
@@ -320,6 +321,7 @@ function paintInstancedShader(shader, highlight, withState) {
       'diffuseColor.rgb *= mix(vec3(1.0), texture2D(bumpMap, vBumpMapUv).rgb, uDetail);',
       'diffuseColor.rgb *= mix(vec3(1.0), vInst.rgb, vSurface.x);',
       withState ? 'diffuseColor.rgb *= mix(vState.x, vState.y, vSurface.x);' : '',
+      withState ? 'diffuseColor.rgb *= mix(1.0, vState.z, clamp(vSurface.w, 0.0, 1.0));' : '',
     ].join('\n'))
     .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vSurface.z;')
     .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vSurface.y;')

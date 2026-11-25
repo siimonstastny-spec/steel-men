@@ -1,7 +1,7 @@
 // Steel Men – multiplayer lobby screen (opened from MainMenu). Talks only to the Lobby API of
 // docs/MULTIPLAYER.md (src/net/Lobby.js): create / join, seat list, own faction + colour + ready,
 // host game settings, Start. Texts go through t('lobby.*'); styles in lobby.css (loaded by this module).
-import { NET, MENU, ECONOMY, VICTORY, LOBBY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS } from '../config.js';
+import { NET, MENU, ECONOMY, VICTORY, LOBBY, AIMENU, GAME_SPEED, PLAYERS_UI, AI_PLAYERS, LOBBY_CONTINUE, MAP_MODES } from '../config.js';
 import { cleanAiIdentity } from '../ai/AiProfiles.js'; // [N6]
 import { avatarForNetwork, avatarHtml, humanAvatarHtml } from './Avatar.js';
 import { validPrebuild } from '../game/PreBuild.js'; // [N8] pre-build phase option
@@ -23,6 +23,8 @@ import { getNetDiagnosis, inArtifact, supportsDirectory } from '../net/transport
 import { startNetProbe } from '../net/netProbe.js';
 import { LobbyDirectory } from '../net/LobbyDirectory.js'; // [LOBBY_LIST] list of public games (P2P only)
 import { cleanGameName } from '../net/Lobby.js';
+import { formatLength } from './SaveLoadView.js'; // [A2-ui]
+import { canRestoreHere } from '../game/SaveGame.js'; // [A2-ui] a continued match needs a fresh page
 
 // Network chosen in the lobby inside an artifact ('room' = platform, 'p2p' = WebRTC over Nostr relays, null = default).
 // Kept for this page load only (no profile): both players must pick the same one.
@@ -53,8 +55,26 @@ export class LobbyScreen {
    *        lobby.onStart payload + the still-open transport and lobby (the game needs them for Lockstep)
    * @param {() => void} opts.onBack                     user left the lobby screen
    * @param {() => void} opts.onUnavailable              transport could not be created
+   * @param {object|null} [opts.saveLoad]                [A2-ui] SaveLoadView: "Load game" (continue a saved MP game); null = no button
    */
-  constructor({ multiplayer, races, teams, onStart, onBack, onUnavailable }) {
+  constructor({ multiplayer, races, teams, onStart, onBack, onUnavailable, saveLoad = null }) {
+    this.saveLoad = saveLoad;
+    this.continueSave = null;  // [A2-ui] save picked for "Load game": the next create starts a continue lobby from it
+    this.progress = null;      // [A2-ui] last lobby.onContinueProgress report { phase, ratio, error? }
+    this.unsubProgress = null;
+    this.dragTeam = null;      // [A2-ui] seat (team) whose grip is being dragged
+    this.dndEl = null;         // element the drag & drop listeners sit on
+    this.dragGuard = (e) => { if (e?.type === 'blur' && e.target !== window) return; this.#onDragEnd(); }; // (capture also sees element blurs)
+    // safety net: window events / timeout end a drag whose dragend never came
+    this.dragGuardOn = false;
+    this.dragTimer = null;
+    this.dnd = {
+      dragstart: (e) => this.#onDragStart(e),
+      dragover: (e) => this.#onDragOver(e),
+      dragleave: (e) => this.#onDragLeave(e),
+      drop: (e) => this.#onDrop(e),
+      dragend: () => this.#onDragEnd(),
+    };
     this.mp = multiplayer;
     this.races = races;
     this.teams = teams;
@@ -89,13 +109,19 @@ export class LobbyScreen {
     this.maps = [];
     this.preview = null; // created on demand, disposed with the connection (#teardown)
     this.pickTeam = null;
-    loadMapCatalog().then((maps) => { this.maps = maps; this.#render(); });
+    loadMapCatalog(MAP_MODES.multiplayer).then((maps) => { this.maps = maps; this.#render(); });
   }
 
   attach(el) {
+    this.#detachDnd();
     this.el = el;
+    for (const [type, fn] of Object.entries(this.dnd)) el.addEventListener(type, fn); // [A2-ui]
+    this.dndEl = el;
     // A re-render while a dropdown / colour picker is open would close it: wait until it loses focus
     el.addEventListener('focusout', () => { if (this.renderPending) setTimeout(() => this.#render(), 0); });
+    // [A14-ui] remember which button the press started on: a lobby update may redraw the screen (innerHTML) before the
+    // mouse is released, and the browser then fires the click on the container instead of the button (click lost)
+    el.addEventListener('pointerdown', (e) => this.#onPress(e));
     el.addEventListener('click', (e) => this.#onClick(e));
     el.addEventListener('change', (e) => this.#onChange(e));
     el.addEventListener('input', (e) => {
@@ -123,6 +149,7 @@ export class LobbyScreen {
   async open() {
     this.#teardown();
     this.phase = 'choose';
+    this.continueSave = null; // [A2-ui]
     this.error = '';
     this.errorTech = '';
     this.failLine = '';
@@ -179,12 +206,30 @@ export class LobbyScreen {
   /** Leaves the lobby (if any) and drops the connection */
   close() { this.#teardown(); }
 
+  /** [A2-ui] Drops the connection and the drag & drop listeners (the menu itself keeps the screen for its whole life) */
+  dispose() {
+    this.#teardown();
+    this.#detachDnd();
+    this.continueSave = null;
+    this.el = null;
+  }
+
+  #detachDnd() {
+    if (this.dndEl) for (const [type, fn] of Object.entries(this.dnd)) this.dndEl.removeEventListener(type, fn);
+    this.dndEl = null;
+  }
+
   #teardown() {
     this.session++; // invalidates every await still in flight (open / #connect)
     this.probe?.cancel();
     this.probe = null;
     this.unsub?.();
     this.unsub = null;
+    this.unsubProgress?.(); // [A2-ui]
+    this.unsubProgress = null;
+    this.progress = null;
+    this.dragTeam = null;
+    this.#disarmDragGuard();
     try { this.lobby?.leave(); } catch { /* already gone */ }
     this.lobby = null;
     // P2P: a join still in progress (leaving while 'connecting') must not leave an open room behind
@@ -255,11 +300,16 @@ export class LobbyScreen {
         this.probe = null;
         this.unsub?.();
         this.unsub = null;
+        this.unsubProgress?.(); // [A2-ui] the game (main.js) reports the replay progress from here on
+        this.unsubProgress = null;
+        this.continueSave = null;
         this.lobby = null;
         this.transport = null;
         this.#disposePreview();
         this.onStart?.(info, net);
       });
+      // [A2-ui] continue lobby: transfer / replay progress (missing in a lobby without the continue API)
+      this.unsubProgress = this.lobby.onContinueProgress?.((p) => this.#onProgress(p)) ?? null;
       await action(this.lobby);
       if (session !== this.session) return; // closed meanwhile (or the game started: onStart took over)
       this.phase = 'lobby';
@@ -313,8 +363,122 @@ export class LobbyScreen {
     // outside P2P 'public' cannot work: the stored choice stays as it was
     saveLobbyPrefs({ name: typed && typed !== def ? typed : null, visibility: supportsDirectory(this.transport) ? this.form.visibility : undefined });
     const opts = { gameName: typed || def, visibility: this.form.visibility, password: this.form.password };
+    if (this.continueSave) opts.continueFrom = this.continueSave; // [A2-ui]
     this.form.password = ''; // used once, never kept
-    return this.#connect(async (l) => l.create({ ...(await this.#identity()), ...opts }));
+    return this.#connect(async (l) => {
+      await l.create({ ...(await this.#identity()), ...opts });
+      if (opts.continueFrom && !l.isContinue) throw new Error(t('lobby.continue.unsupported')); // [A2-ui] Lobby without the continue mode
+    });
+  }
+
+  // ---- [A2-ui] continue lobby: save pick, progress, drag & drop of seats ----
+  #isContinue() { return !!this.lobby?.isContinue && !!this.lobby?.state?.continue; }
+
+  /** Client of a continue lobby on a page where a match already ran: it cannot restore the save here (reload needed) */
+  #needsReload() {
+    if (!this.#isContinue() || this.#isHost()) return false;
+    try { return !canRestoreHere(); } catch { return false; }
+  }
+
+  /** "Load game": the save list (multiplayer saves) → create form of a continue lobby */
+  async #pickSave() {
+    if (typeof this.saveLoad?.openList !== 'function') return;
+    const session = this.session;
+    let save = null;
+    try { save = await this.saveLoad.openList({ mode: LOBBY_CONTINUE.pickMode, filter: LOBBY_CONTINUE.pickFilter }); } catch (err) { console.error(err); }
+    if (!save || session !== this.session || this.phase !== 'choose') return;
+    this.continueSave = save;
+    const prefs = getLobbyPrefs();
+    this.form = { name: prefs.name ?? this.#defaultGameName(), visibility: prefs.visibility, password: '' };
+    this.phase = 'createForm';
+    this.error = '';
+    this.#render();
+  }
+
+  #onProgress(p) {
+    this.progress = p && typeof p === 'object' ? p : null;
+    const box = this.el?.querySelector('[data-role="lb-progress"]');
+    if (box) box.innerHTML = this.#progressHtml();
+    else this.#render();
+  }
+
+  #progressHtml() {
+    const p = this.progress;
+    if (!p) return '';
+    if (p.error) return `<p class="menu-warn" role="alert">${escapeHtml(t(p.error))}</p>`;
+    const full = LOBBY_CONTINUE.percent;
+    const pct = Math.round(Math.min(1, Math.max(0, Number(p.ratio) || 0)) * full);
+    const phase = LOBBY_CONTINUE.phases.includes(p.phase) ? t(`lobby.continue.phase.${p.phase}`) : '';
+    return `<div class="lobby-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${full}" aria-valuenow="${pct}">
+        <div class="lobby-progress-bar" style="width:${pct}%"></div></div>
+      <small class="menu-muted">${escapeHtml(phase)} ${pct} %</small>`;
+  }
+
+  // Drag & drop of a seat's occupant (host, continue lobby): the grip is the drag source, any open seat row is a target
+  #canMoveSeats() { return this.#isContinue() && this.#isHost() && typeof this.lobby.moveSeat === 'function'; }
+
+  #onDragStart(e) {
+    const grip = e.target.closest?.('[data-grip-team]');
+    if (!grip || !this.#canMoveSeats()) return;
+    this.dragTeam = Number(grip.dataset.gripTeam);
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData(LOBBY_CONTINUE.dragMime, String(this.dragTeam));
+      const row = grip.closest('.setup-seat');
+      if (row) e.dataTransfer.setDragImage(row, 0, 0);
+    }
+    grip.closest('.setup-seat')?.classList.add('dragging');
+    this.#armDragGuard();
+  }
+
+  #armDragGuard() {
+    this.#disarmDragGuard();
+    for (const type of LOBBY_CONTINUE.dragGuardEvents) window.addEventListener(type, this.dragGuard, true);
+    this.dragGuardOn = true;
+    this.dragTimer = setTimeout(this.dragGuard, LOBBY_CONTINUE.dragTimeoutMs);
+  }
+
+  #disarmDragGuard() {
+    clearTimeout(this.dragTimer);
+    this.dragTimer = null;
+    if (!this.dragGuardOn) return;
+    for (const type of LOBBY_CONTINUE.dragGuardEvents) window.removeEventListener(type, this.dragGuard, true);
+    this.dragGuardOn = false;
+  }
+
+  #dropRow(e) {
+    const row = e.target.closest?.('[data-drop-team]');
+    return this.dragTeam !== null && row ? row : null;
+  }
+
+  #onDragOver(e) {
+    const row = this.#dropRow(e);
+    if (!row || Number(row.dataset.dropTeam) === this.dragTeam) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    row.classList.add('drop-target');
+  }
+
+  #onDragLeave(e) {
+    const row = e.target.closest?.('[data-drop-team]');
+    if (row && !row.contains(e.relatedTarget)) row.classList.remove('drop-target');
+  }
+
+  #onDrop(e) {
+    const row = this.#dropRow(e);
+    if (!row) return;
+    e.preventDefault();
+    const from = this.dragTeam;
+    const to = Number(row.dataset.dropTeam);
+    this.#onDragEnd();
+    if (from !== null && from !== to && this.#canMoveSeats()) this.#call(() => this.lobby.moveSeat(from, to));
+  }
+
+  #onDragEnd() {
+    this.#disarmDragGuard();
+    this.dragTeam = null;
+    this.el?.querySelectorAll('.dragging, .drop-target').forEach((n) => n.classList.remove('dragging', 'drop-target'));
+    if (this.renderPending) setTimeout(() => this.#render(), 0); // a lobby update arrived during the drag
   }
 
   #join() {
@@ -360,8 +524,24 @@ export class LobbyScreen {
     this.#render();
   }
 
+  #onPress(e) {
+    const b = e.button === 0 ? e.target.closest?.('button') : null;
+    this.press = b && !b.disabled && b.dataset.lb ? { ...b.dataset } : null;
+  }
+
+  /** Button now on screen that replaces the one pressed (same data-* attributes), or null */
+  #pressedReplacement() {
+    const press = this.press;
+    if (!press || !this.el) return null;
+    const attrs = Object.entries(press).map(([k, v]) => `[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}="${CSS.escape(String(v))}"]`);
+    return this.el.querySelector(`button${attrs.join('')}`);
+  }
+
   #onClick(e) {
-    const btn = e.target.closest('button');
+    let btn = e.target.closest('button');
+    // the pressed button was redrawn between pointerdown and pointerup: the click landed on the container
+    if (!btn && this.press && !e.target.closest?.('button, input, select, label, a')) btn = this.#pressedReplacement();
+    this.press = null;
     if (!btn || btn.disabled) return;
     const d = btn.dataset;
     const lobby = this.lobby;
@@ -383,22 +563,24 @@ export class LobbyScreen {
       case 'browseCancel': this.browseSel = null; this.browsePassword = ''; this.error = ''; this.#render(); break;
       case 'joinForm': this.phase = 'join'; this.error = ''; this.#render(); break;
       case 'join': this.#join(); break;
-      case 'chooseBack': this.phase = 'choose'; this.error = ''; this.#render(); break;
+      case 'chooseBack': this.phase = 'choose'; this.error = ''; this.continueSave = null; this.#render(); break;
+      case 'loadGame': this.#pickSave(); break; // [A2-ui]
       case 'kick':
         if (!this.#isHost() || !d.id) break;
         if (this.kickArm !== d.id) { this.kickArm = d.id; this.#render(); break; } // first click arms, second kicks
         this.kickArm = null;
         this.#call(() => lobby.kick(d.id));
         break;
-      case 'leave': this.probe?.cancel(); this.probe = null; this.#teardown(); this.onBack?.(); break;
+      case 'leave': this.probe?.cancel(); this.probe = null; this.#teardown(); this.continueSave = null; this.onBack?.(); break;
       case 'netSwitch': netChoice = netChoice === 'p2p' ? 'room' : 'p2p'; this.open(); break;
       case 'probe': this.#runProbe(); break;
       case 'copy': this.#copy(); break;
       case 'take': this.#call(() => lobby.takeSeat(Number(d.team))); break;
       case 'leaveSeat': this.#call(() => lobby.leaveSeat()); break;
-      case 'ready': this.#call(() => lobby.setReady(!this.#mySeat()?.ready)); break;
+      case 'ready': if (!this.#needsReload()) this.#call(() => lobby.setReady(!this.#mySeat()?.ready)); break; // [A2-ui]
       // [MAPS] picks travel keyed by the packed seat index (= team in the match), see #packedPicks
-      case 'start': this.#call(async () => { await lobby.setSettings({ startPicks: this.#packedPicks() }); return lobby.start(); }); break;
+      // [A2-ui] continue lobby: settings and starts are locked (the saved ones are used)
+      case 'start': this.#call(async () => { if (!this.#isContinue()) await lobby.setSettings({ startPicks: this.#packedPicks() }); return lobby.start(); }); break;
       case 'pickSeat': this.pickTeam = Number(d.team); this.#render(); break;
       case 'randomStarts': this.#setSetting('startPicksByTeam', {}); break;
       case 'race': this.#call(() => lobby.setRace(d.value)); break;
@@ -445,7 +627,7 @@ export class LobbyScreen {
   }
 
   #setSetting(key, value) {
-    if (!this.#isHost()) return;
+    if (!this.#isHost() || this.#isContinue()) return;
     this.#call(() => this.lobby.setSettings({ [key]: value }));
   }
 
@@ -463,13 +645,13 @@ export class LobbyScreen {
 
   // Host picks a map: picks are cleared and open seats beyond the map's starts are closed (humans keep theirs)
   #setMap(id) {
-    if (!this.#isHost()) return;
+    if (!this.#isHost() || this.#isContinue()) return;
     if (isRandomMap(id)) { // [W5a] no preview, no picks; the real map is drawn when the host starts
       this.pickTeam = null;
       this.#call(() => this.lobby.setSettings({ map: id, startPicksByTeam: {} }));
       return;
     }
-    const map = this.maps.find((m) => m.id === validMapId(id));
+    const map = this.maps.find((m) => m.id === validMapId(id, MAP_MODES.multiplayer));
     if (!map) return;
     this.pickTeam = null;
     this.#call(async () => {
@@ -502,7 +684,7 @@ export class LobbyScreen {
   #packedPicks() { return this.#indexPicks(); }
 
   #pickStart(start) {
-    if (!this.#isHost()) return;
+    if (!this.#isHost() || this.#isContinue()) return;
     const open = this.#openTeams();
     if (!open.length) return;
     const active = Math.max(0, open.indexOf(this.pickTeam ?? open[0]));
@@ -512,7 +694,9 @@ export class LobbyScreen {
     this.#setSetting('startPicksByTeam', byTeam);
   }
 
-  #mapBlock(host) {
+  #mapBlock(hostIn) {
+    const cont = this.#isContinue(); // [A2-ui] continue lobby: map and starts locked
+    const host = hostIn && !cont;
     const open = this.#openTeams();
     const active = open.includes(this.pickTeam) ? this.pickTeam : open[0];
     const tooMany = open.length > this.#mapPlayers();
@@ -552,6 +736,11 @@ export class LobbyScreen {
     if (!box) return;
     this.preview ??= new MapPreview({ onPick: (start) => this.#pickStart(start), title: t('setup.map.startHint') });
     box.appendChild(this.preview.el);
+    if (this.#isContinue()) { // [A2-ui] original start positions of the saved game's seats, read-only
+      this.preview.setMap(this.#currentMap());
+      this.preview.setMarks(this.#continueMarks(), false);
+      return;
+    }
     const open = this.#openTeams();
     const picks = this.#indexPicks();
     const marks = Object.entries(picks).map(([i, start]) => {
@@ -561,6 +750,19 @@ export class LobbyScreen {
     });
     this.preview.setMap(this.#currentMap());
     this.preview.setMarks(marks, this.#isHost());
+  }
+
+  // [A2-ui] Start marks of a continue lobby: start index of a seat = continue.seats[].start, else the saved start pick
+  // of the seat (settings.startPicksByTeam), else its own index (the order the saved game was started in)
+  #continueMarks() {
+    const picks = this.#settings().startPicksByTeam;
+    const saved = this.lobby?.state?.continue?.seats ?? [];
+    return this.#seats().map((s, i) => {
+      const team = s.team ?? i;
+      if (!s.open) return null;
+      const start = Number.isInteger(saved[i]?.start) ? saved[i].start : Number.isInteger(picks[team]) ? picks[team] : i;
+      return { start, color: safeColor(s.color, safeColor(this.teams[team]?.color, '#888888')), label: String(team + 1) };
+    }).filter(Boolean);
   }
 
   // Colour rules as in single player: a pick too similar to another seat's colour is refused
@@ -612,6 +814,7 @@ export class LobbyScreen {
     const s = this.lobby?.state?.settings ?? {};
     return {
       fogOfWar: s.fogOfWar ?? MENU.defaultFogMode,
+      superweapons: s.superweapons !== false, // [A9-F4a] missing = on
       victory: validConditionForSet(s.victory ?? VICTORY.defaultCondition, s.startSet, getStats()),
       energyCap: ECONOMY.energyCaps.includes(s.energyCap) ? s.energyCap : ECONOMY.defaultEnergyCap,
       populationCap: ECONOMY.populationCaps.includes(s.populationCap) ? s.populationCap : ECONOMY.defaultPopulationCap, // [W5a]
@@ -622,13 +825,14 @@ export class LobbyScreen {
       startMultiplier: startMultiplierFromSettings(s), // [D4]
       startResearch: startResearchFromSettings(s),
       friendlyFire: { ...MENU.friendlyFire, ...(s.friendlyFire ?? {}) },
-      map: validMapChoice(s.map), // [MAPS] map id or 'random' [W5a]
+      map: validMapChoice(s.map, MAP_MODES.multiplayer), // [MAPS] map id or 'random' [W5a]
       startPicksByTeam: s.startPicksByTeam && typeof s.startPicksByTeam === 'object' ? s.startPicksByTeam : {},
     };
   }
 
   #render() {
     if (!this.el) return;
+    if (this.dragTeam !== null) { this.renderPending = true; return; } // [A2-ui] a re-render would cancel the drag
     const active = document.activeElement;
     if (this.phase === 'lobby' && active && this.el.contains(active) && active.matches('select, input[type="color"]')) {
       this.renderPending = true;
@@ -668,7 +872,9 @@ export class LobbyScreen {
 
   #viewCreateForm() {
     const p2p = supportsDirectory(this.transport);
+    const cont = this.continueSave?.meta; // [A2-ui]
     return `
+      ${cont ? `<p class="lobby-continue-note"><b>${t('lobby.continue.title')}:</b> ${escapeHtml(cont.name ?? '')}</p>` : ''}
       <div class="lobby-form">
         <label class="row-label" for="lobby-name">${t('lobby.form.name')}</label>
         <input id="lobby-name" class="lobby-text" data-lb-input="name" type="text" maxlength="${LOBBY.nameMaxLength}"
@@ -836,6 +1042,7 @@ export class LobbyScreen {
       <div class="lobby-choose">
         <button class="menu-btn primary" data-lb="create">${t('lobby.create')}</button>
         <button class="menu-btn" data-lb="joinMenu">${t('lobby.join')}</button>
+        ${typeof this.saveLoad?.openList === 'function' ? `<button class="menu-btn" data-lb="loadGame" title="${escapeHtml(t('lobby.loadGame.hint'))}">${t('lobby.loadGame')}</button>` : ''}
       </div>
       <div class="menu-actions">${this.#backBtn()}</div>`;
   }
@@ -862,6 +1069,7 @@ export class LobbyScreen {
     const st = this.lobby?.state;
     if (!st) return this.#viewStatus(t('lobby.status.connecting'), true);
     const host = this.#isHost();
+    const cont = this.#isContinue(); // [A2-ui] continue lobby: settings and seat properties locked
     const mine = this.#mySeat();
     const seats = st.seats ?? [];
     const problem = this.lobby.startProblem(); // [N5b] i18n key of what is missing (open seats, ready, alliances) or null
@@ -888,22 +1096,37 @@ export class LobbyScreen {
     return `
       ${this.#lobbyHeader(st, host)}
       ${code}
+      ${cont ? this.#continueInfo(st.continue) : ''}
       <div class="setup-layout">
         <div class="setup-main">
-          ${host ? this.#presetBar(seats) : ''}
-          <div class="setup-seats" role="list">
+          ${host && !cont ? this.#presetBar(seats) : ''}
+          <div class="setup-seats${cont ? ' continue' : ''}" role="list">
             <div class="setup-seat head with-actions"><span>${t('setup.player')}</span><span>${t('setup.faction')}</span><span>${t('setup.teamColor')}</span><span>${t('setup.alliance.short')}</span><span>${t('lobby.state')}</span><span></span></div>
             ${seats.map((s, i) => this.#seatRow(s, i, mine, host)).join('')}
           </div>
           ${this.#mapBlock(host)}
         </div>
-        ${this.#settingsBlock(host)}
+        ${this.#settingsBlock(host, cont)}
       </div>
       ${this.#errorLine()}
+      ${this.#needsReload() ? `<p class="menu-warn" role="alert">${escapeHtml(t('net.continue.error.reload'))}</p>` : ''}
+      <div class="lobby-progress-box" data-role="lb-progress" aria-live="polite">${this.#progressHtml()}</div>
       <p class="lobby-status" role="status" aria-live="polite">${escapeHtml(status)}</p>
       <div class="menu-actions">
         ${this.#backBtn()}
         ${host ? `<button class="menu-btn primary" data-lb="start"${canStart ? '' : ' disabled'}>${t('lobby.start')}</button>` : ''}
+      </div>`;
+  }
+
+  // [A2-ui] Info about the saved game (name, map, length) and a hint that settings are locked
+  #continueInfo(c) {
+    const mapName = c.mapName || this.#mapLabel(c.mapId) || '–';
+    return `
+      <div class="lobby-continue" role="note">
+        <b class="lobby-continue-title">${t('lobby.continue.title')}</b>
+        <span class="lobby-continue-name">${escapeHtml(c.name ?? '')}</span>
+        <small class="menu-muted">${escapeHtml(`${t('setup.map')}: ${mapName} · ${t('lobby.continue.length')}: ${formatLength(c.durationTicks)}`)}</small>
+        <small class="menu-muted">${t(this.#isHost() ? 'lobby.continue.hintHost' : 'lobby.continue.hintGuest')}</small>
       </div>`;
   }
 
@@ -931,13 +1154,13 @@ export class LobbyScreen {
       <div class="setup-seat with-actions closed" role="listitem" aria-label="${escapeHtml(label)}">
         <div class="seat-player"><span class="lobby-seat-no">${label}</span><i class="menu-muted">${t('lobby.closed')}</i></div>
         <span></span><span></span><span></span><span></span>
-        <div class="seat-actions">${host && this.#openTeams().length < this.#mapPlayers() ? `<button class="menu-btn" data-lb="openSeat" data-team="${team}">${t('lobby.openSeat')}</button>` : ''}</div>
+        <div class="seat-actions">${host && !this.#isContinue() && this.#openTeams().length < this.#mapPlayers() ? `<button class="menu-btn" data-lb="openSeat" data-team="${team}">${t('lobby.openSeat')}</button>` : ''}</div>
       </div>`;
   }
 
   // [N5b] Host: alliance select of an open seat (the others only see the letter)
   #allianceCell(seat, team, host) {
-    if (!host) return `<span class="lobby-tag ally-tag" title="${escapeHtml(t('setup.alliance.hint'))}">${escapeHtml(allianceLetter(seat.alliance ?? team))}</span>`;
+    if (!host || this.#isContinue()) return `<span class="lobby-tag ally-tag" title="${escapeHtml(t('setup.alliance.hint'))}">${escapeHtml(allianceLetter(seat.alliance ?? team))}</span>`;
     const opts = Array.from({ length: this.#seats().length }, (_, id) => `
       <option value="${id}"${seat.alliance === id ? ' selected' : ''}>${escapeHtml(allianceLetter(id))}</option>`).join('');
     return `<select class="seat-select" data-lb-alliance="${team}" title="${escapeHtml(t('setup.alliance.hint'))}" aria-label="${escapeHtml(t('setup.alliance'))}">${opts}</select>`;
@@ -966,6 +1189,7 @@ export class LobbyScreen {
     const color = safeColor(seat.color, safeColor(this.teams[team]?.color, '#888888'));
     const raceKey = seat.race ?? this.races[0]?.key;
     const raceName = this.races.find((r) => r.key === raceKey)?.name ?? '';
+    const cont = this.#isContinue(); // [A2-ui] faction, colour, alliance and openness are fixed by the save
     const teamLabel = t('lobby.seat', { n: team + 1 });
     let who;
     if (taken) {
@@ -992,11 +1216,13 @@ export class LobbyScreen {
     let actions = '';
     if (isMine) {
       const others = this.#seats().filter((s) => s !== seat && s.color).map((s) => safeColor(s.color, null)).filter(Boolean);
-      raceCell = raceSelect('data-lb-race');
-      colorCell = this.#colorCell(color, others, 'color');
+      if (!cont) {
+        raceCell = raceSelect('data-lb-race');
+        colorCell = this.#colorCell(color, others, 'color');
+      }
       stateCell = `<span class="${seat.ready ? 'lobby-ok' : 'menu-muted'}">${t(seat.ready ? 'lobby.ready' : 'lobby.notReady')}</span>`;
       actions = `<button class="menu-btn" data-lb="leaveSeat">${t('lobby.leaveSeat')}</button>
-        <button class="menu-btn lobby-ready${seat.ready ? ' on' : ''}" data-lb="ready" aria-pressed="${!!seat.ready}">${t(seat.ready ? 'lobby.ready' : 'lobby.notReady')}</button>`;
+        <button class="menu-btn lobby-ready${seat.ready ? ' on' : ''}" data-lb="ready" aria-pressed="${!!seat.ready}"${this.#needsReload() ? ' disabled' : ''}>${t(seat.ready ? 'lobby.ready' : 'lobby.notReady')}</button>`;
     } else if (taken) {
       stateCell = `<span class="${seat.ready ? 'lobby-ok' : 'menu-muted'}">${t(seat.ready ? 'lobby.ready' : 'lobby.notReady')}</span>`;
       // [LOBBY_LIST] host: Kick (second click confirms)
@@ -1009,21 +1235,30 @@ export class LobbyScreen {
       const diff = AIMENU.difficulties.includes(seat.difficulty) ? seat.difficulty : AIMENU.defaultDifficulty;
       if (host) {
         const others = this.#seats().filter((s) => s.team !== team && s.color).map((s) => safeColor(s.color, null)).filter(Boolean);
-        raceCell = raceSelect(`data-lb-ai-race="${team}"`);
-        colorCell = this.#colorCell(color, others, 'aiColor', team);
+        if (!cont) {
+          raceCell = raceSelect(`data-lb-ai-race="${team}"`);
+          colorCell = this.#colorCell(color, others, 'aiColor', team);
+        }
         stateCell = `<select class="seat-select" data-lb-ai-diff="${team}" aria-label="${escapeHtml(t('ai.difficulty'))}">${AIMENU.difficulties.map((id) => `<option value="${id}" title="${escapeHtml(t(`ai.difficulty.${id}.hint`))}"${id === diff ? ' selected' : ''}>${t(`ai.difficulty.${id}`)}</option>`).join('')}</select>`;
         actions = `<button class="menu-btn" data-lb="removeAi" data-team="${team}">${t('lobby.removeAi')}</button>`;
       } else stateCell = `<span class="lobby-tag">${t(`ai.difficulty.${diff}`)}</span>`;
     } else if (seat.controller === 'open' || !seat.controller) {
-      raceCell = '';
-      colorCell = '';
+      if (!cont) { raceCell = ''; colorCell = ''; }
       actions = `<button class="menu-btn" data-lb="take" data-team="${team}">${t(mine ? 'lobby.moveSeat' : 'lobby.takeSeat')}</button>
         ${host ? `<button class="menu-btn" data-lb="addAi" data-team="${team}">${t('lobby.addAi')}</button>` : ''}`;
     }
-    if (host && !taken) actions += `<button class="menu-btn" data-lb="closeSeat" data-team="${team}">${t('lobby.closeSeat')}</button>`;
+    if (host && !taken && !cont) actions += `<button class="menu-btn" data-lb="closeSeat" data-team="${team}">${t('lobby.closeSeat')}</button>`;
+    // [A2-ui] continue lobby: grip (host) + who played this seat in the saved game; any open seat accepts a drop
+    const moveable = cont && this.#canMoveSeats();
+    const grip = moveable && (taken || seat.controller === 'ai')
+      ? `<span class="seat-grip" draggable="true" data-grip-team="${team}" title="${escapeHtml(t('lobby.continue.drag'))}" aria-label="${escapeHtml(t('lobby.continue.drag'))}"></span>`
+      : cont ? '<span class="seat-grip off" aria-hidden="true"></span>' : '';
+    const orig = this.lobby.state.continue?.seats?.[i];
+    const was = cont && orig
+      ? `<small class="seat-was menu-muted" title="${escapeHtml(t('lobby.continue.was'))}">${escapeHtml(t('lobby.continue.was'))}: ${escapeHtml(orig.originalName || t(orig.originalController === 'ai' ? 'lobby.ai' : 'common.player'))}</small>` : '';
     return `
-      <div class="setup-seat with-actions${isMine ? ' mine' : ''}" role="listitem" aria-label="${escapeHtml(teamLabel)}">
-        <div class="seat-player">${dot}<span class="lobby-seat-no">${teamLabel}</span>${who}</div>
+      <div class="setup-seat with-actions${isMine ? ' mine' : ''}${cont ? ' locked' : ''}" role="listitem" aria-label="${escapeHtml(teamLabel)}"${moveable ? ` data-drop-team="${team}"` : ''}>
+        <div class="seat-player">${grip}${dot}<span class="lobby-seat-no">${teamLabel}</span>${who}${was}</div>
         <div class="seat-cell">${raceCell}</div>
         <div class="seat-cell">${colorCell}</div>
         <div class="seat-cell">${this.#allianceCell(seat, team, host)}</div>
@@ -1033,13 +1268,14 @@ export class LobbyScreen {
   }
 
   // [B1] Game settings as comboboxes (GameOptions.js) + friendly fire; only the host can change them
-  #settingsBlock(host) {
+  #settingsBlock(host, locked = false) {
     const s = this.#settings();
+    const off = !host || locked; // [A2-ui] continue lobby: the saved rules cannot change
     return `
-      <aside class="setup-side">
-        <h3>${t('setup.rules')}${host ? '' : ` <small class="menu-muted">${t('lobby.hostOnly')}</small>`}</h3>
-        <div class="setup-options">${optionsHtml(s, { disabled: !host })}</div>
-        <div class="setup-ff">${friendlyFireHtml(s.friendlyFire, { disabled: !host, attr: 'data-lb-ff' })}</div>
+      <aside class="setup-side${locked ? ' locked' : ''}">
+        <h3>${t('setup.rules')}${locked ? ` <small class="menu-muted">${t('lobby.continue.locked')}</small>` : host ? '' : ` <small class="menu-muted">${t('lobby.hostOnly')}</small>`}</h3>
+        <div class="setup-options">${optionsHtml(s, { disabled: off })}</div>
+        <div class="setup-ff">${friendlyFireHtml(s.friendlyFire, { disabled: off, attr: 'data-lb-ff' })}</div>
       </aside>`;
   }
 }

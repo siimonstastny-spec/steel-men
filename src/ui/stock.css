@@ -39,3 +39,18 @@
 #stock-window .stk-sell button { font-weight: 600; }
 /* back / close on the left (project rule: left returns, right continues) */
 #stock-window .stk-actions { display: flex; justify-content: flex-start; margin-top: 12px; }
+
+/* [A5] dialog font 14 px (UI_SCALE.dialogFont, never scaled), hit targets, same breakpoints as the HUD (UI_SCALE) */
+#stock-window { font-size: var(--ui-font-dialog, 14px); }
+#stock-window button { min-height: var(--ui-hit-target, 32px); }
+#stock-window .stk-row { min-height: var(--ui-hit-target, 32px); box-sizing: border-box; }
+@media (max-height: 799px), (max-width: 1099px) { /* = UI_SCALE.breakpoints.compact, UI_SCALE.narrowWidth */
+  #stock-window .stk-panel { max-height: calc(100vh - 24px); padding: 10px 14px; }
+  #stock-window .stk-list { min-height: 80px; max-height: 40vh; }
+  #stock-window h2 { margin-bottom: 4px; }
+  #stock-window .stk-actions, #stock-window .stk-sell { margin-top: 8px; }
+}
+@media (max-height: 649px) { /* = UI_SCALE.breakpoints.tiny */
+  #stock-window .stk-panel { max-height: calc(100vh - 12px); }
+  #stock-window .stk-list { min-height: 56px; max-height: 32vh; }
+}

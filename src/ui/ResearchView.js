@@ -7,9 +7,16 @@
 // A pure view: clicks submit 'queueResearch' / 'queueAnalysis' (BuildMenu.submit); paying, the queue and
 // completion live in world.production. A destroyed facility cancels its queue with a refund (Production.update);
 // finished research stays.
-import { HUD, RESEARCH } from '../config.js';
+import { HUD, RESEARCH, TEAMS } from '../config.js';
 import { t } from '../i18n/i18n.js';
 import { unitName } from './BuildMenu.js';
+import { unitIconUrl } from './IconRenderer.js';
+
+/** [A9-F4a] Tab label of a tier: a tier may have its own name (i18n research.tier<N>, e.g. the super tier), else "Tier N" */
+function tierLabel(tier) {
+  const own = t(`research.tier${tier}`);
+  return own === `research.tier${tier}` ? t('research.tier', { tier }) : own;
+}
 
 const TIME_DECIMALS = 1;
 
@@ -46,7 +53,7 @@ export class ResearchView {
     summary.push({ label: t('hud.queue.title'), value: `${this.queue.itemsOf(producer).length} / ${HUD.production.maxQueue}` });
     const lootCount = this.research.analyses(this.team).length;
     const tabs = [
-      ...tiers.map((tier) => ({ label: t('research.tier', { tier }), on: this.tab === tier, onClick: () => this.#select(tier) })),
+      ...tiers.map((tier) => ({ label: tierLabel(tier), on: this.tab === tier, onClick: () => this.#select(tier) })),
       { label: t('research.analysis.tab', { n: lootCount }), on: analysis, onClick: () => this.#select(RESEARCH.analysisTab) },
     ];
     return { title, items, tabs, summary };
@@ -103,17 +110,32 @@ export class ResearchView {
 
   #lockText(st, id) {
     if (st.reason === 'tier') return st.tier.missing.map((m) => this.#missingText(m)).join('\n');
+    if (st.reason === 'disabled') return t('research.disabled'); // [A9-F4a] superweapons off in this match
     if (st.reason === 'research') {
       const defs = this.research.defs;
-      return t('research.needResearch', { list: this.research.missingResearch(this.team, id).map((r) => researchName(r, defs[r])).join(', ') });
+      const lines = [];
+      const all = this.research.missingResearch(this.team, id);
+      if (all.length) lines.push(t('research.needResearch', { list: all.map((r) => researchName(r, defs[r])).join(', ') }));
+      const any = this.research.missingAnyResearch(this.team, id); // [A9-F4a] one of the list is enough
+      if (any.length) lines.push(t('research.anyOf', { list: any.map((r) => researchName(r, defs[r])).join(', ') }));
+      return lines.join('\n');
     }
     return '';
   }
 
   #missingText(m) {
-    return m.type === 'structure'
-      ? t('research.needStructure', { name: unitName('structures', m.id) })
-      : t('research.needCompleted', { tier: m.tier, count: m.count, have: m.have });
+    if (m.type === 'structure') return t('research.needStructure', { name: unitName('structures', m.id) });
+    if (m.type === 'flag') return t('research.missingFlag'); // [A9-F4a] e.g. a superweapon program
+    if (m.type === 'option') return t('research.disabled'); // [A9-F4a] match option off
+    return t('research.needCompleted', { tier: m.tier, count: m.count, have: m.have });
+  }
+
+  /** [A9-F4a] Data network line of the tier summary: who the team shares research with (only for network members) */
+  #networkRow() {
+    const net = this.research.networkStatus?.(this.team);
+    if (!net?.member) return null;
+    const names = net.partners.map((p) => t('lobby.seat', { n: p + 1 }));
+    return { label: t('research.network', { list: net.node && names.length ? names.join(', ') : '–' }), value: String(net.sharedIds.length) };
   }
 
   #tierSummary(tier, items) {
@@ -121,6 +143,8 @@ export class ResearchView {
     const rows = [{ label: t('research.tier', { tier }), value: status.open ? t('research.open') : t('research.locked'), warn: !status.open }];
     for (const m of status.missing) rows.push({ label: this.#missingText(m), value: '', warn: true });
     rows.push({ label: t('research.completed'), value: this.research.doneInTier(this.team, tier) });
+    const net = this.#networkRow();
+    if (net) rows.push(net);
     if (!items.length) rows.push({ label: t('research.empty'), value: '' });
     if (items.some((it) => it.label.endsWith(' *'))) rows.push({ label: t('research.pendingMark'), value: '' });
     return rows;
@@ -133,6 +157,7 @@ export class ResearchView {
   // ---------- salvage analysis ----------
 
   #analysisLabel(loot) {
+    if (loot.kind === 'vehicle') return t('analysis.vehicle', { name: unitName('vehicles', loot.vehicle) }); // [A9-F4a]
     return t('research.analysis', { set: loot.set, kind: t(`research.kind.${loot.kind}`) });
   }
 
@@ -142,8 +167,10 @@ export class ResearchView {
       const { cost, buildTime } = this.research.analysisStats(this.team, loot);
       const active = this.research.isActive(this.team, loot.key);
       const label = this.#analysisLabel(loot);
+      const iconUrl = loot.kind === 'vehicle'
+        ? unitIconUrl(loot.vehicle, this.buildMenu.race, TEAMS[this.team]?.color) ?? undefined : undefined; // [A9-F4a] vehicle wreck icon
       return {
-        icon: RESEARCH.analysisIcon, label, pending: active, disabled: active || full,
+        icon: RESEARCH.analysisIcon, iconUrl, label, pending: active, disabled: active || full,
         tip: [label, t('research.analysis.tip'), t('grid.cost', { ore: cost.ore ?? 0, energy: cost.energy ?? 0 }),
           t('grid.time', { time: +buildTime.toFixed(TIME_DECIMALS) }), active ? t('research.active') : ''].filter(Boolean).join('\n'),
         onClick: () => this.#queueAnalysis(structure, loot),

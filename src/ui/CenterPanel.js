@@ -2,22 +2,24 @@
 // HP %), or the details of a single combat vehicle / crew / economy vehicle / building / wreck.
 // Artwork center_panel_left + mid (tiled) + right; the width follows the content. Layout numbers: config.js HUD_PANELS.center,
 // styles selection-panel.css. Pure view: html(...) returns markup, onPointer(e) handles a click on a group member.
-import { HUD, HUD_PANELS } from '../config.js';
+import { HUD, HUD_PANELS, STEALTH } from '../config.js';
 import { t } from '../i18n/i18n.js';
 import { canGather } from '../game/Production.js';
+import { isLocal } from '../core/LocalPlayer.js';
 import { accuracyProfile } from '../data/Stats.js';
-import { buildingIconHtml } from './IconRenderer.js';
+import { buildingIconHtml, unitIconHtml, robotIconHtml } from './IconRenderer.js';
 import { unitName, incomeText, storageText, incomeOf } from './BuildMenu.js';
 import { serviceState } from './RobotProduction.js';
-import { ITEM_ICONS, itemLabel, isWaitingEnergy, progressOf } from './ProductionQueue.js';
+import { ITEM_ICONS, itemIconUrl, itemLabel, isWaitingEnergy, progressOf } from './ProductionQueue.js';
 import {
-  esc, unitHp, unitIcon, hpColorOf, slimBar, pct, bonusText, VEHICLE_BONUS_KEYS, weaponDps, weaponState, maxRange,
+  esc, unitHp, unitIcon, hpColorOf, slimBar, pct, bonusText, VEHICLE_BONUS_KEYS, weaponDps, weaponState, weaponName, maxRange,
   damageOf, teamTag, wreckInfo,
 } from './hudUtil.js';
 
 const C = HUD_PANELS.center;
 const SEP = ' · ';
 const PERCENT = 100;
+const AURA_TEXT = { damageDealt: 'aura.damageDealt', damageTaken: 'aura.damageTaken', sightRange: 'aura.sightRange', construction: 'aura.construction' }; // [A9-F4a]
 
 /** [F2] Accuracy description of a weapon ({ stats | def }) for tooltips – from rules.combat.accuracy and the weapon data */
 export function accuracyText(w) {
@@ -38,7 +40,31 @@ const ENERGY_DECIMALS = 2;
 
 /** Display name of any unit: mechs / crews have a name, vehicles and buildings their type name */
 export const unitLabel = (u) => (!u ? '' : u.isVehicle || u.isStructure
-  ? unitName(u.isStructure ? 'structures' : 'vehicles', u.unitId) : u.name ?? '');
+  ? unitName(u.isStructure ? 'structures' : 'vehicles', u.unitId) : u.displayName ?? u.name ?? ''); // [A1] crews: name translated when shown
+
+const MECH_SLOT_KEYS = ['legs', 'torso', 'leftArm', 'rightArm'];
+const LOADOUT = { legs: null, torso: null, leftArm: null, rightArm: null }; // recycled by unitIconMarkup (no allocation per render)
+
+/**
+ * Icon markup of a unit for lists and headings: rendered icon (`<img class="ico-img">`) of the building / mech (from its
+ * mounted parts) / vehicle / crew in the unit's team colour; the emoji of hudUtil.unitIcon until it is ready or has no model.
+ */
+function unitIconMarkup(u, world) {
+  const race = u.race ?? world?.production?.raceOf(u.team);
+  let html = '';
+  if (u.isStructure) html = buildingIconHtml(u.unitId, race, u.team);
+  else if (u.isMech) {
+    for (const k of MECH_SLOT_KEYS) LOADOUT[k] = u.parts?.[k]?.stats?.path ?? null;
+    html = robotIconHtml(LOADOUT, race, u.team);
+  } else html = unitIconHtml(u.isVehicle ? u.unitId : 'crew', race, u.team);
+  return html || unitIcon(u);
+}
+
+/** Icon of a production item: rendered image, the emoji of ITEM_ICONS until it is ready */
+function queueIcon(item, world) {
+  const url = itemIconUrl(item, world);
+  return url ? `<img class="ico-img" src="${esc(url)}" alt="">` : esc(ITEM_ICONS[item.kind] ?? '');
+}
 
 /** Sort rank by type: mechs first, then crews, armed vehicles, other vehicles, buildings */
 const kindRank = (u) => (u.isMech ? 0 : u.isVehicle ? (u.canAttack ? 2 : 3) : u.isStructure ? 4 : 1);
@@ -65,6 +91,12 @@ export class CenterPanel {
 
   /** Click on a group member: select only it, Shift = remove it from the selection (as before) */
   onPointer(e) {
+    const launch = e.target.closest?.('[data-sw-launch]')?.dataset.swLaunch; // [A9-F4a] superweapon "Launch" button
+    if (launch !== undefined) {
+      e.preventDefault();
+      this.input.startSuperweaponTargeting(this.world.entityById(Number(launch)));
+      return true;
+    }
     const id = e.target.closest?.('[data-unit]')?.dataset.unit;
     if (id === undefined) return false;
     e.preventDefault();
@@ -94,7 +126,7 @@ export class CenterPanel {
       const u = units[i];
       const [hp, max] = unitHp(u);
       const ratio = max ? hp / max : 0;
-      return `<button class="cp-unit" data-unit="${u.eid}" title="${esc(unitLabel(u))}"><span class="ico">${(u.isStructure && buildingIconHtml(u.unitId, u.race, u.team)) || unitIcon(u)}</span>`
+      return `<button class="cp-unit" data-unit="${u.eid}" title="${esc(unitLabel(u))}"><span class="ico">${unitIconMarkup(u, this.world)}</span>`
         + `<span class="pct" style="color:${hpColorOf(hp, max)}">${pct(ratio)}%</span></button>`;
     }).join('');
     const vars = `--cp-cw:${C.memberWidth};--cp-ch:${C.memberHeight};--cp-gap:${C.memberGap}`;
@@ -105,7 +137,8 @@ export class CenterPanel {
 
   #single(u) {
     const [state, rows] = u.isStructure ? this.#structure(u) : u.isVehicle ? this.#vehicle(u) : this.#crew(u);
-    const icon = u.isStructure ? buildingIconHtml(u.unitId, u.race, u.team) : '';
+    const markup = unitIconMarkup(u, this.world);
+    const icon = markup.startsWith('<img') ? markup : ''; // heading: rendered icons only, no emoji
     return this.#sheet(`${icon ? `<span class="ico">${icon}</span>` : ''}${esc(unitLabel(u))}${teamTag(u)} – ${esc(state)}`, rows);
   }
 
@@ -120,7 +153,7 @@ export class CenterPanel {
     const damage = weapons.reduce((a, w) => a + damageOf((w.stats ?? w.def)?.damage), 0);
     const dps = weapons.reduce((a, w) => a + weaponDps(w), 0);
     rows.push([t('cp.damage'), String(Math.round(damage))], [t('cp.dps'), dps.toFixed(DECIMALS)],
-      [t('cp.range'), String(Math.round(maxRange(weapons)))], [t('cp.weapons'), `<span title="${esc(weapons.map((w) => `${(w.stats ?? w.def)?.id ?? ''}: ${accuracyText(w)}`).join('\n'))}">${esc(weapons.map(weaponState).join(SEP))}</span>`]);
+      [t('cp.range'), String(Math.round(maxRange(weapons)))], [t('cp.weapons'), `<span title="${esc(weapons.map((w) => `${weaponName((w.stats ?? w.def)?.id)}: ${accuracyText(w)}`).join('\n'))}">${esc(weapons.map(weaponState).join(SEP))}</span>`]);
   }
 
   #armorRow(u, rows) {
@@ -135,7 +168,8 @@ export class CenterPanel {
     const rows = [[t('cp.hp'), hpValue(c.hp, c.maxHp)], [t('cp.members'), esc(t('unit.members', { size: c.size, supply: c.supply }))]];
     if (c.rank) rows.push([t('cp.rank'), xpValue(c)], [t('cp.bonuses'), esc(bonusText(c.rank.bonuses) || t('unit.noBonus'))]);
     this.#armorRow(c, rows);
-    rows.push([t('cp.speed'), `${c.speed.toFixed(DECIMALS)} / ${(c.stats?.mobility?.moveSpeed ?? 0).toFixed(DECIMALS)}`]);
+    // an entity without speed (neither crew nor vehicle, e.g. a stray selection) must not break the whole HUD
+    rows.push([t('cp.speed'), `${(c.speed ?? 0).toFixed(DECIMALS)} / ${(c.stats?.mobility?.moveSpeed ?? 0).toFixed(DECIMALS)}`]);
     this.#weaponRows(c.weapons, rows);
     return [state, rows];
   }
@@ -150,6 +184,11 @@ export class CenterPanel {
     const rows = [[t('cp.hp'), hpValue(u.hp, u.maxHp)]];
     this.#armorRow(u, rows);
     rows.push([t('cp.speed'), `${u.speed.toFixed(DECIMALS)} / ${(u.stats?.mobility?.moveSpeed ?? 0).toFixed(DECIMALS)}`]);
+    if (u.stats?.abilities?.some((a) => a.type === STEALTH.abilityType)) { // [A9-F4a] cloaking vehicle: cloaked / revealed
+      rows.push([t('cp.stealth'), esc(t(u.cloaked ? 'stealth.cloaked' : 'stealth.revealed'))]);
+    }
+    const detection = this.world?.stealth?.detectionRadius(u) ?? 0;
+    if (detection > 0) rows.push([t('stealth.detection', { r: Math.round(detection) }), '']);
     if (u.canAttack) {
       this.#weaponRows(u.weapons, rows);
       if (u.rank) rows.push([t('cp.rank'), xpValue(u)], [t('cp.bonuses'), esc(bonusText(u.rank.bonuses, VEHICLE_BONUS_KEYS) || t('unit.noBonus'))]);
@@ -196,9 +235,37 @@ export class CenterPanel {
         rows.push([t('hud.queue.title'), this.#queueRow(prod.itemsOf(u.eid))]);
         if (canGather(u)) rows.push([t('rally.title'), esc(u.rally?.length ? t('rally.points', { n: u.rally.length }) : t('rally.hint'))]);
       }
+      this.#advancedRows(u, rows);
       this.#weaponRows(u.weapons, rows);
     }
     return [state, rows];
+  }
+
+  /** [A9-F4a] Rows of the advanced buildings: aura, detection, archeology station, superweapon (charge, launch button) */
+  #advancedRows(u, rows) {
+    const world = this.world;
+    const aura = world?.auras?.auraOf(u);
+    if (aura) {
+      const key = AURA_TEXT[aura.type];
+      const pctOf = (v) => Math.round(Math.abs(v) * PERCENT);
+      const text = aura.type === 'damageTaken' ? t(key, { pct: `${aura.value > 0 ? '+' : '−'}${pctOf(aura.value)}` })
+        : t(key, { pct: pctOf(aura.value), prod: pctOf(aura.productionValue) });
+      rows.push([text, esc(t('aura.radius', { r: Math.round(aura.radius) }))]);
+      if (!aura.active) rows.push([t('aura.inactive'), '<span class="warn">!</span>']);
+    }
+    const detection = world?.stealth?.detectionRadius(u) ?? 0;
+    if (detection > 0) rows.push([t('stealth.detection', { r: Math.round(detection) }), '']);
+    const arch = u.stats?.archeology;
+    if (arch) rows.push([t('structure.archeology.speed', { n: +(arch.analysisSpeed ?? 1).toFixed(DECIMALS) }), '']);
+    const sw = isLocal(u) ? world?.superweapons?.stateOf(u) : null; // an enemy's charge is not shown
+    if (sw) {
+      const label = t(`superweapon.state.${sw.state}`);
+      if (world.superweapons.canLaunch(u)) {
+        rows.push([label, `<button class="cp-sw-launch" data-sw-launch="${u.eid}">${esc(t('superweapon.launch'))}</button>`]);
+      } else {
+        rows.push([label, `<span class="${sw.state === 'stalled' ? 'warn' : ''}">${slimBar(sw.charge, sw.chargeTime, 'var(--hud-accent)')} ${pct(sw.ratio)} %</span>`]);
+      }
+    }
   }
 
   /** [W3] Production of a building: only the running item (name, progress, energy wait), the rest as small icons in a row */
@@ -206,12 +273,12 @@ export class CenterPanel {
     if (!items.length) return esc(`0 / ${HUD.production.maxQueue}`);
     const head = items[0];
     const waiting = isWaitingEnergy(head, this.world?.economy);
-    let html = `<span class="cp-qhead">${esc(ITEM_ICONS[head.kind] ?? '')} ${esc(itemLabel(head, this.world))} `
+    let html = `<span class="cp-qhead">${queueIcon(head, this.world)} ${esc(itemLabel(head, this.world))} `
       + `${slimBar(head.elapsed, head.total, 'var(--hud-accent)')} ${pct(progressOf(head))} %</span>`;
     if (waiting) html += ` <span class="warn">${esc(t('econ.waitingEnergy'))}</span>`;
     if (items.length > 1) {
       html += '<span class="cp-qrest">';
-      for (let i = 1; i < items.length; i++) html += `<i title="${esc(itemLabel(items[i], this.world))}">${esc(ITEM_ICONS[items[i].kind] ?? '')}</i>`;
+      for (let i = 1; i < items.length; i++) html += `<i title="${esc(itemLabel(items[i], this.world))}">${queueIcon(items[i], this.world)}</i>`;
       html += '</span>';
     }
     return html;

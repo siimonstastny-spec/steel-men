@@ -20,7 +20,7 @@
 // gives it stats, HP and footprint, world.addStructure gives it the eid and the pathfinding box, the model is
 // attached later by Structure.load(). The footprint must be in the cache (Structure.cachedFootprint) on every client:
 // call `await preloadFootprints(race)` for every race of the match before the simulation starts.
-import { getStats, unitStats, canProduce, loadStats } from '../../data/Stats.js';
+import { getStats, unitStats, canProduce, loadStats, superweaponLimit } from '../../data/Stats.js';
 import { Structure, modelFootprint, cachedFootprint } from '../../units/Structure.js';
 import { structureClassFor } from '../../units/structureClasses.js';
 import { queueOf, issueOrder } from '../../units/OrderQueue.js';
@@ -69,7 +69,7 @@ commandBus.onExecuted((cmd, tick, result) => {
  * | { error: 'requires', list: [ids] } | { error: 'invalid' }
  */
 export function ruleResult(code, stats, world, team) {
-  if (code === 'limit') return { error: 'limit', max: stats?.maxPerTeam };
+  if (code === 'limit') return { error: 'limit', max: stats?.superweapon ? Math.min(stats.maxPerTeam ?? Infinity, superweaponLimit()) : stats?.maxPerTeam };
   if (code === 'tier') return { error: 'tier', tier: stats?.requiresTier };
   if (code === 'requires') {
     const own = world.structures.filter((s) => s.team === team && !s.destroyed && s.complete);
@@ -149,6 +149,8 @@ export function checkRules(world, team, race, id, stats, upgrade = false) {
   const own = world.structures.filter((s) => s.team === team && !s.destroyed);
   if (!(stats.requires ?? []).every((req) => own.some((s) => s.unitId === req && s.complete))) return 'requires';
   if (stats.maxPerTeam && own.filter((s) => s.unitId === id).length >= stats.maxPerTeam) return 'limit';
+  // [A9-F3] one superweapon per team in total, whatever its id (unfinished ones count)
+  if (stats.superweapon && own.filter((s) => s.stats?.superweapon).length >= superweaponLimit()) return 'limit';
   if (stats.requiresTier && research && research.openTier(team) < stats.requiresTier) return 'tier';
   return '';
 }
@@ -190,7 +192,9 @@ export function turnStructure(structure, fp, yaw) {
 export function addAndLoad(world, structure, x, z) {
   world.addStructure(structure, x, z);
   // [I1] the next tick waits for the model (DefenseStructure muzzles / turning read it): same tick on every machine
-  world.trackLoad(structure.load()).catch((err) => console.error('Structure load failed', structure.unitId, err));
+  // [A1-3] holdOnFailure: in a lockstep match a building without its model on one client would desync – hold instead
+  // (retryLoad: a transient failure is retried first, like World.#defer; only then the match is held)
+  world.trackLoad(world.retryLoad(() => structure.load()), { holdOnFailure: true }).catch((err) => console.error('Structure load failed', structure.unitId, err));
   return structure;
 }
 

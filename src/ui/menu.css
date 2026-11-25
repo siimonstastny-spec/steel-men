@@ -36,9 +36,13 @@
   --menu-edge: inset 1px 1px 0 rgba(255,255,255,0.10), inset -1px -1px 0 rgba(0,0,0,0.6);
   --menu-drop: 0 3px 8px rgba(0,0,0,0.55);
   --menu-bevel: 8px;
+  --ui-hit-target: 32px;       /* [A5] = UI_SCALE.hitTarget: min height of every clickable control */
+  --menu-font-main: 12px;      /* [A5] = UI_SCALE.fontMain (not --ui-font-*: Hud.js publishes those unitless on <html>) */
+  --menu-font-small: 11px;     /* [A5] = UI_SCALE.fontSmall */
+  --ui-font-dialog: 14px;      /* [A5] = UI_SCALE.dialogFont: dialogs and tooltips, never scaled */
 }
 #menu {
-  position: fixed; inset: 0; z-index: 20; color: var(--menu-text); font-family: var(--menu-font); overflow-y: auto;
+  position: fixed; inset: 0; z-index: 20; color: var(--menu-text); font-family: var(--menu-font); overflow-y: auto; overflow-x: hidden;
 }
 #menu[hidden], #menu [hidden] { display: none !important; }
 /* game HUD stays hidden while the menu is open */
@@ -182,7 +186,7 @@ body:has(#hud-root:not([hidden])) #menu .menu-card {
 .vtab:focus-visible { outline: 1px solid var(--menu-accent); outline-offset: -2px; }
 .vtab.on { background: var(--menu-selected-bg); color: var(--menu-accent); border-color: var(--menu-border); box-shadow: inset 2px 0 0 var(--menu-accent); }
 .vtab-body { flex: 1 1 auto; min-width: 0; }
-@media (max-width: 600px) {
+@media (max-width: 600px) { /* phone width (not a UI_SCALE value): vertical tabs become a row */
   .vtabs-layout { flex-direction: column; }
   .vtabs { flex-direction: row; flex-wrap: wrap; flex: none; border-right: 0; border-bottom: 1px solid var(--menu-border-soft); }
 }
@@ -231,3 +235,57 @@ body:has(#hud-root:not([hidden])) #menu .menu-card {
 .map-side p { margin: 0; }
 .pick-seat { min-width: 44px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
 .pick-seat .team-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* ---- [A5] UI scaling below full HD ------------------------------------------------------------------------------
+   Same breakpoints as the HUD (UI_SCALE in config.js; @media cannot read var()):
+   compact = height < 800 (max-height: 799px) or width < 1100 (max-width: 1099px); tiny = height < 650 (max-height: 649px).
+   Floors: main font 12 px, small 11 px, dialogs 14 px, clickable controls >= 32 px high. Scrolling inside a panel is fine. */
+.menu-btn, .tab, .vtab, .key-slot, .setting-row select, .setting-row input[type=text], .faction { min-height: var(--ui-hit-target); box-sizing: border-box; }
+.setting-row input[type=text] { min-width: 0; }
+.setting-row > select, .setting-row > input[type=text] { flex: 0 1 240px; min-width: 0; }
+.swatch { min-width: 0; }
+.faction small, .opt-label, .row-label, .lobby-tag, small.menu-muted { font-size: var(--menu-font-small); } /* small.menu-muted: browser default 0.83em was 10.83 px */
+/* an unanswered fullscreen offer must not stay over the HUD (it may return with the menu; it is not marked as offered) */
+body:has(#menu[hidden]) .fullscreen-offer { display: none; }
+.fullscreen-offer {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 50; max-width: calc(100vw - 24px); box-sizing: border-box;
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 8px 12px; padding: 8px 14px;
+  color: var(--menu-text); font: var(--ui-font-dialog) var(--menu-font);
+  background: var(--menu-brushed), linear-gradient(180deg, #232a31, rgba(18, 22, 27, 0.98)); border: 1px solid var(--menu-border); border-top: 2px solid var(--menu-accent);
+  box-shadow: var(--menu-edge), 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+.fullscreen-offer .menu-btn { min-width: 0; padding: 6px 18px; font-size: var(--ui-font-main); text-align: center; } /* font = UI_SCALE.fontMain; 6px 18px = compact bar button padding (height comes from --ui-hit-target) */
+.fullscreen-offer .menu-btn::after { content: none; }
+@media (max-height: 799px), (max-width: 1099px) { /* = UI_SCALE.breakpoints.compact, UI_SCALE.narrowWidth: compact */
+  .menu-content { gap: 16px; padding: 24px max(12px, 4vw); }
+  .menu-title h1 { font-size: clamp(36px, 6vw, 64px); }
+  .menu-title p { margin-top: 6px; }
+  .menu-home { gap: 8px; }
+  .menu-btn { padding-top: 6px; padding-bottom: 6px; }
+  .menu-card { padding: 12px 16px; }
+  .menu-card h2 { margin-bottom: 8px; font-size: 16px; }
+  .menu-actions { margin-top: 10px; }
+  .team-block { padding: 8px 0; }
+  .row-label { margin: 6px 0 4px; }
+  .tab, .vtab { padding-top: 4px; padding-bottom: 4px; }
+  .tabs { margin-bottom: 8px; }
+  .tab-panel h3 { margin-top: 8px; }
+  .setting-row { margin: 4px 0; }
+  .key-row { margin: 2px 0; }
+  .swatch { width: 28px; height: 28px; }
+}
+@media (max-height: 649px) { /* = UI_SCALE.breakpoints.tiny: tiny */
+  .menu-content { gap: 10px; padding: 12px max(10px, 3vw); }
+  .menu-title h1 { font-size: clamp(28px, 5vw, 44px); }
+  .menu-title p { font-size: 13px; }
+  .menu-home { gap: 6px; }
+  .menu-card { padding: 10px 12px; }
+  .menu-card h2 { margin-bottom: 6px; }
+  .menu-actions { margin-top: 8px; }
+  .factions { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+  .faction { padding: 5px 9px; }
+  .map-select-body { gap: 8px; margin-top: 4px; }
+}
+@media (max-height: 649px) and (min-width: 1100px) { /* tiny + wide: the version line is not needed */
+  .menu-version { display: none; }
+}

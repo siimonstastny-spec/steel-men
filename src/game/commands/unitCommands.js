@@ -6,10 +6,11 @@
 import * as THREE from 'three';
 import { registerCommand, resolve, resolveOwn } from './CommandBus.js';
 import { MECH, CMD_GROUPING, FORMATION } from '../../config.js';
-import { issueOrder, clearQueue, queueOf } from '../../units/OrderQueue.js';
+import { issueOrder, clearQueue, queueOf, playerOrder } from '../../units/OrderQueue.js';
 import { isTargetable, areEnemies, canEngage } from '../Combat.js';
 import { canRepairTarget, isServiceBay, repairInterruptible } from '../Repair.js';
 import { isCrewBay, crewBayAt } from '../BayCrew.js';
+import { beginGroup, joinGroup, endGroup } from '../Formation.js';
 
 const DEBUG_XP = 100;             // XP of the debugXp command
 const DEBUG_DAMAGE = 25;          // damage of the debugDamage command
@@ -57,7 +58,7 @@ export function canTake(type, unit, target, queued = false) {
     case 'joinBay': // [N2] a crew on foot goes into the bay's crew queue (BayCrew.js); a full bay is checked on arrival
       return typeof unit.joinBay === 'function' && isCrewBay(target, unit.team) && (queued || (!unit.dead && !unit.inside));
     case 'board':
-      return Boolean(target.isMech) && target.team === unit.team
+      return Boolean(target.isMech || target.crewless) && target.team === unit.team // [A9-F3] crewless vehicle after a neutron bomb
         && (queued || (!unit.dead && !unit.inside && Boolean(target.canBoard)));
     default: return true;
   }
@@ -212,12 +213,35 @@ function shapedFormation(units, mode, spacing, centre, dir, apply) {
   }
 }
 
-/** Run closure of an order that also stores the group speed limit on the unit's new order (read by Movement.followPath) */
-const withCap = (unit, cap, start) => () => {
+/**
+ * [A7b] Front direction sent with the command (right-drag, FORMATION.dragFacing): a unit vector { x, z } or null.
+ * Anything malformed is ignored (the heading from the group to the point is used instead).
+ */
+function facingOf(cmd) {
+  const f = cmd.facing;
+  if (!f || !Number.isFinite(f.x) || !Number.isFinite(f.z)) return null;
+  const len = Math.hypot(f.x, f.z);
+  return len > FACING_MIN_LENGTH ? { x: f.x / len, z: f.z / len } : null;
+}
+const FACING_MIN_LENGTH = 1e-3; // numeric guard: shorter facing vectors carry no direction
+
+/**
+ * Run closure of an order that also stores the group speed limit on the unit's new order (read by Movement.followPath);
+ * [A7b] with `slot` the unit joins the marching group being built (Formation.joinGroup; only while the executor runs)
+ */
+const withCap = (unit, cap, start, slot = null, spacing = 0) => () => {
   const result = start();
   if (cap !== undefined && unit.order) unit.order.maxSpeed = cap;
+  if (result && slot) joinGroup(unit, slot, spacing);
   return result;
 };
+
+/** [A7b] Runs `body` building a marching group (Formation.js) when `march`; the group starts after the last order */
+function marching(march, centre, dir, cap, body) {
+  if (!march) { body(); return; }
+  beginGroup();
+  try { body(); } finally { endGroup(centre, dir, cap); }
+}
 
 registerCommand('setFormation', {
   validate: (world, cmd) => FORMATION.modes.includes(cmd.mode) && hasUnits(world, cmd),
@@ -242,25 +266,29 @@ registerCommand('move', {
       groups.crew = [];
     }
     const all = [...groups.mech, ...groups.vehicle, ...groups.crew];
-    const mode = all.length > 1 ? groupMode(all) : FORMATION.defaultMode;
+    const mode = all.length >= FORMATION.minGroupSize ? groupMode(all) : FORMATION.defaultMode;
     if (mode !== FORMATION.defaultMode) {
       // Shaped: blocks of mechs, vehicles, crews one behind the other (mechs in front), the whole centred on the point
-      const dir = headingTo(all, cmd.point);
+      const dir = facingOf(cmd) ?? headingTo(all, cmd.point);
       const cap = slowestSpeed(all);
       const blocks = SHAPED_ORDER.filter((kind) => groups[kind].length);
       let total = (blocks.length - 1) * FORMATION.kindGap;
       for (const kind of blocks) total += slotsFor(mode, groups[kind].length, FORMATION_SPACING[kind]).depth;
-      let cursor = -total / 2; // distance behind the point of the front edge of the next block
-      for (const kind of blocks) {
-        const depth = slotsFor(mode, groups[kind].length, FORMATION_SPACING[kind]).depth;
-        const back = cursor + depth / 2;
-        const centre = { x: cmd.point.x - dir.x * back, z: cmd.point.z - dir.z * back };
-        shapedFormation(groups[kind], mode, FORMATION_SPACING[kind], centre, dir, (u, p) => {
-          const target = toVec(world, p.x, p.z);
-          give(u, 'move', { target }, withCap(u, cap, () => u.moveTo(target)), cmd.queued);
-        });
-        cursor += depth + FORMATION.kindGap;
-      }
+      // [A7b] the group marches (one leader path, Formation.js)
+      marching(FORMATION.marchOrders.includes('move'), cmd.point, dir, cap, () => {
+        let cursor = -total / 2; // distance behind the point of the front edge of the next block
+        for (const kind of blocks) {
+          const spacing = FORMATION_SPACING[kind];
+          const depth = slotsFor(mode, groups[kind].length, spacing).depth;
+          const back = cursor + depth / 2;
+          const centre = { x: cmd.point.x - dir.x * back, z: cmd.point.z - dir.z * back };
+          shapedFormation(groups[kind], mode, spacing, centre, dir, (u, p) => {
+            const target = toVec(world, p.x, p.z);
+            give(u, 'move', { target }, withCap(u, cap, () => u.moveTo(target), p, spacing), cmd.queued);
+          });
+          cursor += depth + FORMATION.kindGap;
+        }
+      });
       return;
     }
     for (const kind of FORMATION_ORDER) {
@@ -282,14 +310,18 @@ function registerPointOrder(type, method) {
     validate: (world, cmd) => validPoint(cmd.point) && hasUnits(world, cmd),
     execute(world, cmd) {
       const fighters = own(world, cmd).filter(isFighter);
-      const place = (u, p, cap) => {
+      const place = (u, p, cap, slot = null) => {
         const target = toVec(world, p.x, p.z);
-        give(u, type, { target }, withCap(u, cap, () => u[method](target)), cmd.queued);
+        give(u, type, { target }, withCap(u, cap, () => u[method](target), slot, MECH.groupSpacing), cmd.queued);
       };
-      const mode = fighters.length > 1 ? groupMode(fighters) : FORMATION.defaultMode;
+      const mode = fighters.length >= FORMATION.minGroupSize ? groupMode(fighters) : FORMATION.defaultMode;
       if (mode === FORMATION.defaultMode) { formation(fighters, MECH.groupSpacing, cmd.point, place); return; }
       const cap = slowestSpeed(fighters);
-      shapedFormation(fighters, mode, MECH.groupSpacing, cmd.point, headingTo(fighters, cmd.point), (u, p) => place(u, p, cap));
+      const dir = facingOf(cmd) ?? headingTo(fighters, cmd.point);
+      const march = FORMATION.marchOrders.includes(type); // [A7b] attack-move marches as a group, patrol keeps the P1 shape
+      marching(march, cmd.point, dir, cap, () => {
+        shapedFormation(fighters, mode, MECH.groupSpacing, cmd.point, dir, (u, p) => place(u, p, cap, march ? p : null));
+      });
     },
   });
 }
@@ -317,10 +349,11 @@ registerCommand('guard', {
       const target = toVec(world, p.x, p.z);
       give(u, 'guard', { point: target }, withCap(u, cap, () => u.guard(target)), cmd.queued);
     };
-    const mode = units.length > 1 ? groupMode(units) : FORMATION.defaultMode;
+    const mode = units.length >= FORMATION.minGroupSize ? groupMode(units) : FORMATION.defaultMode;
     if (mode === FORMATION.defaultMode) { formation(units, MECH.groupSpacing, cmd.point, place); return; }
     const cap = slowestSpeed(units);
-    shapedFormation(units, mode, MECH.groupSpacing, cmd.point, headingTo(units, cmd.point), (u, p) => place(u, p, cap));
+    const dir = facingOf(cmd) ?? headingTo(units, cmd.point); // [A7b] front by right-drag
+    shapedFormation(units, mode, MECH.groupSpacing, cmd.point, dir, (u, p) => place(u, p, cap));
   },
 });
 
@@ -369,6 +402,8 @@ registerCommand('stop', {
   execute(world, cmd) {
     for (const u of own(world, cmd)) {
       if (repairInterruptible(u)) u.stopRepair(); // [R1] Stop ends a repair too (crew aboard)
+      const marching = playerOrder(u)?.formation; // [A7b] Stop leaves the marching group (Formation.js restores only given-up orders)
+      if (marching) marching.released = true;
       u.order = null;
       clearQueue(u);
     }

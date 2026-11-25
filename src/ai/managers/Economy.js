@@ -4,9 +4,10 @@
 import { AI } from '../../config.js';
 import { getStats, unitStats } from '../../data/Stats.js';
 import { PRIORITY, dist, isIdle, posOf, nearest, affordsAbove } from '../util.js';
-import { fullPopulation, resolveStructure, resolveVehicle, vehicleMatches, structureMatches } from '../AiData.js';
+import { fullPopulation, resolveStructure, resolveVehicle, vehicleMatches, structureMatches, buildableStructures } from '../AiData.js';
 import { checkRules } from '../../game/commands/buildCommands.js';
 import { plannedPower, powerGap } from '../power.js';
+import { techOf } from './Tech.js';
 
 export class EconomyManager {
   constructor(ai) {
@@ -63,10 +64,11 @@ export class EconomyManager {
     const measuredShort = this.avgDemand > this.avgIncome * (cfg.reactShare ?? 1) && stock < cap * (cfg.stockShare ?? 0);
     const longLow = this.lowStreak >= (cfg.lowReactSeconds ?? Infinity);
     if ((measuredShort || longLow) && plan.plantsBuilding === 0) count = Math.max(count, plan.plants + 1);
+    const wanted = count; // [A9-F4b] before the maxPlants cut
     count = Math.min(count, cfg.maxPlants ?? Infinity);
     const priority = longLow ? PRIORITY.urgent : (gap > 0 || low) ? PRIORITY.high : PRIORITY.normal;
-    wants.push({ value: '@power', count: Math.max(count, plan.plants), priority });
     this.powerShort = gap > 0 || measuredShort || longLow;
+    if (!this.#bigPlant(wants, plan, wanted, priority)) wants.push({ value: '@power', count: Math.max(count, plan.plants), priority });
 
     // Energy banks: buffer for production bursts once the plants keep the store full ([W5b] useless without a cap)
     const banks = unlimited ? 0 : cfg.banks ?? 0;
@@ -75,6 +77,37 @@ export class EconomyManager {
       const have = ai.construction?.ownedCount('@storage') ?? 0;
       if (have < banks) wants.push({ value: '@storage', count: have + 1, priority: PRIORITY.normal });
     }
+  }
+
+  /**
+   * [A9-F4b] Big power plant (the buildable @power with the highest income, e.g. a fusion reactor) instead of small
+   * ones: when `wanted` (plants the plan asks for, before the maxPlants cut) is at least tech.generator.replacePlants
+   * more than owned, or more are wanted while the small plant found no room (Construction gave up) or maxPlants is
+   * reached. One at a time (none while a plant is being built). @returns {boolean} the big plant was wished instead
+   */
+  #bigPlant(wants, plan, wanted, priority) {
+    const ai = this.ai;
+    const cfg = ai.diff.tech?.generator;
+    if (!cfg || !ai.diff.tech?.enabled || plan.plantsBuilding > 0) return false;
+    const extra = wanted - plan.plants;
+    if (extra <= 0) return false;
+    const blocked = Boolean(ai.construction?.noSpot.get(plan.plantId)?.gaveUp);
+    const capped = plan.plants >= (ai.diff.power?.maxPlants ?? Infinity);
+    if (extra < (cfg.replacePlants ?? Infinity) && !blocked && !capped) return false;
+    let big = null;
+    let bigCost = null;
+    let bigIncome = plan.plantIncome;
+    for (const id of buildableStructures(ai.race, ai.teamUnlocks)) {
+      if (!structureMatches('@power', id)) continue;
+      const stats = unitStats('structures', id, ai.race, ai.team);
+      const income = stats?.income?.energy ?? 0;
+      if (income > bigIncome && checkRules(ai.world, ai.team, ai.race, id, stats) === '') { big = id; bigIncome = income; bigCost = stats.cost; }
+    }
+    if (!big) return false;
+    // small plants still fit: they are built while the big one's price is not there (energy must not wait for ore)
+    if (!blocked && !capped && !ai.world.economy.canAfford(ai.team, bigCost ?? {})) return false;
+    wants.push({ value: big, count: (ai.construction?.ownedCount(big) ?? 0) + 1, priority });
+    return true;
   }
 
   /** status(): "income/demand" per second (measured, averaged) */
@@ -123,6 +156,7 @@ export class EconomyManager {
     const ai = this.ai;
     const deposits = this.#deposits();
     for (const v of ai.perception.own.harvesters) {
+      if (ai.bb.evacuating?.has(v.eid)) continue; // [A9-F4b] running from a superweapon strike
       const current = this.#target(v);
       if (current && !current.depleted) continue;
       if (!isIdle(v) && !current) continue; // driving somewhere on another order
@@ -185,7 +219,11 @@ export class EconomyManager {
       // Another facility only while every one is finished and researching (before: the 2nd was built while the
       // 1st stood idle, ore it took was missing for the research itself)
       const busy = facilities.every((s) => s.complete && (ai.world.production?.itemsOf(s.eid).length ?? 0) > 0);
-      if (have < (rp.facilities ?? 1) && (have === 0 || (spare && busy))) {
+      // [A1-5 r2] research.json firstAfter: the first facility waits until the team owns these (the robot chain: an
+      // urgent facility at buildAt 210 s took the builder, energy and slot of the assembly bay – X hard: bay at 359 s)
+      const after = have > 0 || bb.openingDone || (rp.firstAfter ?? []).every((v) => (ai.construction?.ownedCount(v) ?? 1) > 0
+        || !resolveStructure(v, ai.race, unlocks));
+      if (after && have < (rp.facilities ?? 1) && (have === 0 || (spare && busy))) {
         // v4: the first facility may outrank the build order's power / parts steps (research.json firstPriority)
         const priority = have === 0 ? (PRIORITY[rp.firstPriority] ?? PRIORITY.normal) : PRIORITY.normal;
         wants.push({ value: rp.facility ?? '@research', count: have + 1, priority });
@@ -193,6 +231,7 @@ export class EconomyManager {
     }
     this.#air(wants, now);
     this.#deepMining(wants, now);
+    techOf(ai).wishes(wants, now); // [A9-F4b] DataRelay, enhancers, imaging poles, detectors, railguns, superweapon…
     bb.wantStructures = wants;
   }
 
@@ -257,7 +296,11 @@ export class EconomyManager {
     const towers = Math.min(cfg.antiAir?.towers ?? 0, enemyAir);
     if (towers > 0 && resolveStructure('@antiAir', ai.race, unlocks)) {
       const have = owned('@antiAir');
-      if (have < towers) wants.push({ value: '@antiAir', count: have + 1, priority: PRIORITY.high });
+      // [A9-F4b] the dedicated AA tower (air-only weapon, aaTurret after its research) once the team may build it;
+      // `have` counts every anti-air tower, so the cheap dual-purpose one built before still counts
+      const aa = resolveStructure('@airDefense', ai.race, unlocks);
+      const value = aa && checkRules(ai.world, ai.team, ai.race, aa, unitStats('structures', aa, ai.race, ai.team)) === '' ? aa : '@antiAir';
+      if (have < towers) wants.push({ value, count: value === '@antiAir' ? have + 1 : owned(value) + 1, priority: PRIORITY.high });
     }
   }
 

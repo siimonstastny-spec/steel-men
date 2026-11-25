@@ -105,7 +105,7 @@
 .lobby-visibility-box .row-label { margin: 0; }
 .lobby-kick.armed { border-color: #d65a4a; color: #ff8a7a; }
 
-/* narrow window */
+/* narrow window (phone width, not a UI_SCALE value) */
 @media (max-width: 520px) {
   .lobby-game { grid-template-columns: minmax(0, 1fr) 52px 24px; }
   .lobby-game > :nth-child(2), .lobby-game > :nth-child(3) { display: none; }
@@ -126,3 +126,54 @@
 .settings-avatar-box { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .settings-avatar-box .menu-btn { min-width: 0; padding: 6px 12px; font-size: 13px; cursor: pointer; }
 .lobby-seat-head .human-avatar { margin-right: -2px; }
+
+/* [A2-ui] continue lobby (saved multiplayer game): info, locked options, seat drag handle, progress */
+.lobby-continue { display: flex; flex-direction: column; gap: 2px; margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--menu-border); border-left: 3px solid var(--menu-accent); background: var(--menu-faction-bg); }
+.lobby-continue-title { color: var(--menu-accent); font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; }
+.lobby-continue-name { color: var(--menu-text-bright); font-size: 16px; overflow-wrap: anywhere; }
+.lobby-continue-note { margin: 4px 0 0; color: var(--menu-text); }
+.setup-side.locked .setup-options, .setup-side.locked .setup-ff { opacity: 0.55; filter: grayscale(1); pointer-events: none; }
+.setup-seat.locked .seat-cell select:not([data-lb-ai-diff]) { opacity: 0.55; }
+.seat-was { margin-left: 8px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18ch; }
+
+/* drag handle: two columns of rivet dots in the style of the menu-card corner rivets */
+.seat-grip {
+  flex: 0 0 auto; width: 12px; height: 24px; margin-right: 6px; box-sizing: border-box; cursor: grab;
+  background:
+    radial-gradient(circle, #6b7681 0 1.5px, transparent 2px) 0 0 / 6px 8px repeat;
+  opacity: 0.85;
+}
+.seat-grip:hover { opacity: 1; background-image: radial-gradient(circle, var(--menu-accent) 0 1.5px, transparent 2px); }
+.seat-grip:active { cursor: grabbing; }
+.seat-grip.off { visibility: hidden; cursor: default; }
+.setup-seat.dragging { opacity: 0.5; }
+.setup-seat.drop-target { outline: 2px dashed var(--menu-accent); outline-offset: -2px; background: var(--menu-selected-bg); }
+
+.lobby-progress-box:empty { display: none; }
+.lobby-progress-box { margin-top: 12px; }
+.lobby-progress { height: 10px; border: 1px solid var(--menu-border); background: var(--menu-faction-bg); box-shadow: inset 1px 1px 3px rgba(0,0,0,0.6); }
+.lobby-progress-bar { height: 100%; background: linear-gradient(180deg, #55e6e1, var(--menu-accent) 55%, #1fa5a1); box-shadow: var(--menu-neon-glow); transition: width 0.2s linear; }
+
+/* [A5] hit targets and the same breakpoints as the HUD (UI_SCALE): compact = height < 800 or width < 1100, tiny = height < 650 */
+.lobby-field select, .lobby-text, .lobby-code, .lobby-controls > .menu-btn, .lobby-buttons .menu-btn, .lobby-copy { min-height: var(--ui-hit-target); box-sizing: border-box; }
+.lobby-game:not(.head) { min-height: var(--ui-hit-target); }
+.lobby-seat-toggle { min-height: var(--ui-hit-target); }
+@media (max-height: 799px), (max-width: 1099px) { /* = UI_SCALE.breakpoints.compact, UI_SCALE.narrowWidth */
+  .lobby-seat { padding: 6px 10px; }
+  .lobby-seats { gap: 6px; }
+  .lobby-code { padding-top: 4px; padding-bottom: 4px; font-size: 18px; }
+  .lobby-code-value { padding: 3px 12px; font-size: 18px; }
+  .lobby-code-box { padding-bottom: 8px; }
+  .lobby-choose { margin: 8px 0 2px; }
+  .lobby-controls { margin-top: 4px; gap: 6px 14px; }
+  .lobby-buttons .menu-btn, .lobby-controls > .menu-btn { padding-top: 4px; padding-bottom: 4px; }
+  .lobby-games { max-height: 44vh; }
+  .lobby-continue { margin-bottom: 8px; padding: 6px 10px; }
+  .lobby-title-row { padding-bottom: 6px; }
+  .lobby-name { font-size: 18px; }
+}
+@media (max-height: 649px) { /* = UI_SCALE.breakpoints.tiny */
+  .lobby-games { max-height: 36vh; }
+  .lobby-browse { min-height: 40px; }
+  .lobby-status { margin-top: 6px; }
+}
