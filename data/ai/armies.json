@@ -11,7 +11,9 @@
     "fallbackRole": "ranged",
     "stance": { "melee": "melee", "ranged": "ranged", "artillery": "ranged" },
     "behaviour": { "melee": "aggressive", "ranged": "aggressive", "artillery": "defensive" },
-    "score": { "armor": 1.0, "rangeBonus": 0.004, "costExponent": 0.6, "energyWeight": 1.5, "overloadPenalty": 0.5 },
+    "score": { "armor": 1.0, "rangeBonus": 0.004, "costExponent": 0.6, "energyWeight": 1.5, "overloadPenalty": 0.5,
+               "abilities": { "deflect": { "value": 1.2 }, "charge": { "value": 0.25, "needsClass": "melee" } },
+               "movementTypes": { "hover": 0.12 } },
     "counters": {
       "minSeen": 3,
       "rules": [

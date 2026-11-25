@@ -696,10 +696,18 @@ export class ProductionManager {
     const opts = Object.fromEntries(PART_SLOTS.map((slot) => [slot, this.prod.partOptions(this.team, slot)]));
     // Universal arms: one type goes on both sides (the model of each side is derived from the stock key)
     const arms = [];
+    let shield = null; // [A16] best arm without weapons whose abilities armies.json values (photon deflector): goes on one side
     for (const arm of opts[ARMS.slot]) {
       const st = this.#stat(arm.path, ARMS.canonicalSlot);
       const weapons = groundWeapons(st);
-      if (!weapons.length) continue;
+      if (!weapons.length) {
+        const boost = abilityBoost(w, [st], NO_CLASSES);
+        const cost = (st.cost?.ore ?? 0) + w.energyWeight * (st.cost?.energy ?? 0);
+        if (boost > 1 && (!shield || (boost - 1) / Math.max(1, cost) > shield.rate)) {
+          shield = { right: armModel(arm.path, 'rightArm'), part: this.#stat(armModel(arm.path, 'rightArm'), 'rightArm'), rate: (boost - 1) / Math.max(1, cost) };
+        }
+        continue;
+      }
       const rs = this.#stat(armModel(arm.path, 'rightArm'), 'rightArm');
       arms.push({
         left: armModel(arm.path, 'leftArm'), right: armModel(arm.path, 'rightArm'), classes: weapons.map((x) => x.class),
@@ -723,8 +731,15 @@ export class ProductionManager {
     if (!fitting.length) fitting = pickable;
     const partCost = (st) => (st.cost?.ore ?? 0) + w.energyWeight * (st.cost?.energy ?? 0);
     fitting = fitting.sort((a, b) => b.dps / Math.max(1, partCost(a.parts[0]) * 2) - a.dps / Math.max(1, partCost(b.parts[0]) * 2)).slice(0, TOP_ARMS);
+    // [A16] tank variant of every fitting arm: the weapon on the left side, the shield arm on the right (half the dps);
+    // not while energy is tight and the shield costs energy
+    if (shield && !(this.#energyTight(now) && (shield.part.cost?.energy ?? 0) > 0)) {
+      fitting = fitting.concat(fitting.map((a) => ({ ...a, right: shield.right, parts: [a.parts[0], shield.part], dps: a.dps / 2 })));
+    }
+    // [A16] torsos: abilities armies.json values (deflect…) raise the hp share of the pre-selection
+    const torsoKey = (st) => ((st.hp + 10 * dpsOf(st)) * abilityBoost(w, [st], NO_CLASSES)) / Math.max(1, partCost(st));
     const torsos = opts.torso.map((e) => ({ path: e.path, st: this.#stat(e.path, 'torso') }))
-      .sort((a, b) => (b.st.hp + 10 * dpsOf(b.st)) / Math.max(1, partCost(b.st)) - (a.st.hp + 10 * dpsOf(a.st)) / Math.max(1, partCost(a.st)))
+      .sort((a, b) => torsoKey(b.st) - torsoKey(a.st))
       .slice(0, TOP_TORSOS);
     const legs = opts.legs.map((e) => ({ path: e.path, st: this.#stat(e.path, 'legs') }));
     const combos = [];
@@ -744,6 +759,7 @@ export class ProductionManager {
           let value = Math.sqrt(hp * (1 + w.armor * armor / 100) * dps * (1 + w.rangeBonus * range))
             / Math.max(1, ore + w.energyWeight * energy) ** w.costExponent;
           if (carried > (l.st.loadCapacity ?? Infinity)) value *= w.overloadPenalty;
+          value *= abilityBoost(w, parts, a?.classes ?? NO_CLASSES); // [A16] deflect / charge / hover legs (armies.json score)
           combos.push({ value, ore, energy, loadout: { legs: l.path, torso: t.path, leftArm: a?.left ?? null, rightArm: a?.right ?? null } });
         }
       }
@@ -765,3 +781,29 @@ export class ProductionManager {
 }
 
 function dpsOf(st) { return groundWeapons(st).reduce((s, w) => s + weaponDps(w), 0); }
+
+const NO_CLASSES = Object.freeze([]);
+
+/**
+ * [A16] Score multiplier of the parts' abilities and movement type (armies.json score.abilities / score.movementTypes):
+ * 1 + Σ value × ability chance (1 without a chance) over every ability listed there – an entry with `needsClass` counts
+ * only when an arm weapon of that class is mounted (a charge needs a melee weapon) – + the value of the legs'
+ * mobility.movementType. 1 without the tables (old data: scores unchanged).
+ */
+function abilityBoost(w, parts, classes) {
+  const table = w.abilities;
+  const moves = w.movementTypes;
+  if (!table && !moves) return 1;
+  let k = 1;
+  for (const p of parts) {
+    if (table) {
+      for (const a of p.abilities ?? []) {
+        const e = table[a.type];
+        if (!e || (e.needsClass && !classes.includes(e.needsClass))) continue;
+        k += e.value * (a.chance ?? 1);
+      }
+    }
+    if (moves && p.kind === 'legs') k += moves[p.mobility?.movementType] ?? 0;
+  }
+  return k;
+}

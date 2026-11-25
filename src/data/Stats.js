@@ -1,5 +1,5 @@
 // Steel Men – game stats: loading data/stats.json, resolving stats per model, composing mechs
-import { setFromPath, ACCURACY, RESEARCH_A9 } from '../config.js';
+import { setFromPath, ACCURACY, RESEARCH_A9, ARMS } from '../config.js';
 
 const STATS_URL = './data/stats.json';
 const DAMAGE_TYPES = ['physical', 'energy'];
@@ -77,6 +77,17 @@ export function researchNeeded(kind, id, sub = null) {
 }
 
 /**
+ * [A15] Does a race's exclusive list of a group name this item? A part set may be listed whole ('Recon') or for one
+ * part kind only ('Recon:torso', unlockId format), so one kind of a set can belong to one faction and the rest to all.
+ * @param {object} raceData  stats.json races[race]
+ */
+export function exclusiveListed(raceData, kind, id, sub = null) {
+  const list = raceData?.exclusive?.[kind];
+  if (!list) return false;
+  return list.includes(id) || (sub !== null && list.includes(unlockId(id, sub)));
+}
+
+/**
  * May a race produce this item? The id must be exclusive to no race or to this race, and an item with
  * requiresResearch must be unlocked – or the player unlocked it (research or salvage analysis), which
  * opens both locks. One mechanism for research and loot.
@@ -87,14 +98,52 @@ export function researchNeeded(kind, id, sub = null) {
  * @param {string} [sub]     part kind ('legs' | 'torso' | 'arm') for part sets: unlocks may cover one kind only
  */
 export function canProduce(race, kind, id, unlocked, sub = null) {
-  if (!contextAllows(kind, id, unlocked, sub)) return false;
+  return contextAllows(kind, id, unlocked, sub, race) && ownedOrUnlocked(race, kind, id, unlocked, sub);
+}
+
+/** canProduce without the match context: faction exclusivity and requiresResearch (or an unlock opening both) */
+function ownedOrUnlocked(race, kind, id, unlocked, sub) {
   const extra = unlocked?.[kind];
   const has = (key) => Boolean(extra && (extra instanceof Set ? extra.has(key) : extra.includes(key)));
   const isUnlocked = has(id) || (sub !== null && has(unlockId(id, sub)));
   if (researchNeeded(kind, id, sub).length && !isUnlocked) return false;
   const races = getStats().races ?? {};
-  const owners = Object.keys(races).filter((key) => races[key].exclusive?.[kind]?.includes(id));
+  const owners = Object.keys(races).filter((key) => exclusiveListed(races[key], kind, id, sub));
   return owners.length === 0 || owners.includes(race) || isUnlocked;
+}
+
+// ---------- [A15] research tier per faction ----------
+
+/** T1: parts / vehicles of this tier (or without requiresTier) are open from the start, no research facility needed */
+export const BASE_TIER = 1;
+
+/**
+ * [A15] Research tier an item needs for a race. stats requiresTier (parts.<set>.<kind>, vehicles.<id>) is a number
+ * (same for every race) or { "<race>": n } (a race missing in the object = BASE_TIER). No field = BASE_TIER.
+ * Pure function of the data; canProduce (contextAllows) and the production UI's "requires tier N" reason use it.
+ */
+export function tierFor(raw, race) {
+  if (raw === null || raw === undefined) return BASE_TIER;
+  if (typeof raw === 'number') return raw;
+  return raw[race] ?? BASE_TIER;
+}
+
+/** [A15] Tier of an item of an exclusive group for a race (tierFor of its stats requiresTier); BASE_TIER when unknown */
+export function itemTier(kind, id, race, sub = null) {
+  return tierFor(rawItem(kind, id, sub)?.requiresTier, race);
+}
+
+/**
+ * [A15] UI reason "requires tier N": the tier an item still needs when only its research tier blocks it (the race owns
+ * it, research / unlock done, superweapons allowed), else 0. Same rules as canProduce; outside a match always 0.
+ */
+export function tierLocked(race, kind, id, unlocked, sub = null) {
+  if (!researchContext || !unlocked || !RESEARCH_A9.tierCheckedGroups.includes(kind)) return 0;
+  const raw = rawItem(kind, id, sub);
+  if (!raw || (isSuperweaponItem(raw) && !researchContext.superweaponsEnabled())) return 0;
+  const tier = tierFor(raw.requiresTier, race);
+  if (tier <= BASE_TIER || researchContext.tierOf(unlocked) >= tier) return 0;
+  return ownedOrUnlocked(race, kind, id, unlocked, sub) ? tier : 0;
 }
 
 // ---------- [A9] research context: open tier per team, match option "superweapons" ----------
@@ -125,15 +174,17 @@ export function superweaponLimit() {
 /**
  * [A9] Checks of the running match: superweapon items are not available while the option is off; groups in
  * RESEARCH_A9.tierCheckedGroups also need their stats requiresTier open (structures check it in buildCommands /
- * BuildMenu, which show the reason instead of hiding the building).
+ * BuildMenu, which show the reason instead of hiding the building). [A15] The tier is per race (tierFor); BASE_TIER
+ * needs nothing.
  */
-function contextAllows(kind, id, unlocked, sub) {
+function contextAllows(kind, id, unlocked, sub, race) {
   if (!researchContext) return true;
   const raw = rawItem(kind, id, sub);
   if (!raw) return true;
   if (isSuperweaponItem(raw) && !researchContext.superweaponsEnabled()) return false;
-  const tier = raw.requiresTier;
-  return !(tier && unlocked && RESEARCH_A9.tierCheckedGroups.includes(kind) && researchContext.tierOf(unlocked) < tier);
+  if (!unlocked || !RESEARCH_A9.tierCheckedGroups.includes(kind)) return true;
+  const tier = tierFor(raw.requiresTier, race);
+  return tier <= BASE_TIER || researchContext.tierOf(unlocked) >= tier;
 }
 
 // ---------- [A9] part sets without own GLB models (stand-in models until a procedural part is registered) ----------
@@ -142,22 +193,33 @@ function contextAllows(kind, id, unlocked, sub) {
 const modelAliases = new Map();
 
 /**
- * Adds catalog entries for part sets that exist only in stats.json (parts[set][kind].standInSet): one entry per
- * catalog entry of the stand-in set in that slot, with a virtual path of the new set
- * ('RobotPartsKatanaSword/LeftKatanaSwordArmX_Skel.glb' -> 'RobotPartsIonKatana/LeftIonKatanaArmX_Skel.glb'), so
- * setFromPath / raceFromPath / stockKey work unchanged. A set that has its own models in the catalog is left alone.
- * Call before withModelRaceParts. Returns a new catalog; the input is untouched.
+ * Adds catalog entries for part sets that exist only in stats.json: one entry per model, with a virtual path of the
+ * new set ('RobotPartsKatanaSword/LeftKatanaSwordArmX_Skel.glb' -> 'RobotPartsIonKatana/LeftIonKatanaArmX_Skel.glb'),
+ * so setFromPath / raceFromPath / stockKey work unchanged. The model comes from
+ *   • parts[set][kind].standInSet – every catalog entry of that (still existing) set in the slot, or
+ *   • [A15] parts[set][kind].standInModel – a GLB path template relative to models/ ({side} = ARMS.sidePrefix of the
+ *     arm slot, '' for legs / torso; {race} = every race with its own models, i.e. without modelRace). The model is
+ *     display only (the simulation body comes from the data), so a hand-made GLB replaces it by editing this path.
+ * A set that has its own models in the catalog is left alone. Call before withModelRaceParts. Returns a new catalog;
+ * the input is untouched.
  */
 export function withDataParts(catalog) {
   const parts = getStats().parts ?? {};
+  const modelRaces = raceKeys().filter((r) => !modelRaceOf(r));
   const out = {};
   for (const [slot, list] of Object.entries(catalog ?? {})) {
     if (!Array.isArray(list)) { out[slot] = list; continue; }
     const kind = SLOT_KIND[slot];
     const extra = [];
     for (const [set, kinds] of Object.entries(parts)) {
-      const standIn = kinds?.[kind]?.standInSet;
-      if (!standIn || list.some((p) => p.set === set)) continue;
+      const def = kinds?.[kind];
+      if (!def || list.some((p) => p.set === set)) continue;
+      if (def.standInModel) {
+        addModelEntries(extra, set, slot, def.standInModel, modelRaces);
+        continue;
+      }
+      const standIn = def.standInSet;
+      if (!standIn) continue;
       const dir = `${PART_DIR_PREFIX}${standIn}`;
       for (const p of list) {
         const [pathDir, file] = p.path.split('/');
@@ -172,6 +234,23 @@ export function withDataParts(catalog) {
   return out;
 }
 const PART_DIR_PREFIX = 'RobotParts';
+
+/** [A15] Catalog entries of a standInModel template: one per race with its own models; virtual path -> real GLB */
+function addModelEntries(extra, set, slot, template, races) {
+  const side = ARMS.sidePrefix[slot] ?? '';
+  for (const race of races) {
+    const real = template.replaceAll('{side}', side).replaceAll('{race}', race);
+    const [dir, file] = real.split('/');
+    if (!file) continue;
+    const modelSet = dir.startsWith(PART_DIR_PREFIX) ? dir.slice(PART_DIR_PREFIX.length) : '';
+    const path = `${PART_DIR_PREFIX}${set}/${modelSet ? file.replace(modelSet, set) : `${set}${file}`}`;
+    modelAliases.set(path, real);
+    extra.push({ path, set, race, sockets: [] });
+  }
+}
+
+/** [A15] Part of a data-only set (stats standInSet / standInModel: no own catalog models; drawn procedurally) */
+export const isDataOnlyPart = (stats) => Boolean(stats?.standInSet || stats?.standInModel);
 
 /** GLB to load for a part model path: the stand-in model of a stats-only set, else the path itself */
 export function partModelPath(path) {
@@ -299,9 +378,12 @@ export function composeMech(parts, bonuses = {}, ownerRace = null) {
     : 1;
 
   const base = legs?.mobility ?? s.defaults.mobility;
+  // [A16] a torso may carry a speed bonus (parts.<set>.torso.mobility.speedModifier, default 1): multiplies the final
+  // speed, applied after the overload factor (the overload floor rules.overload.minSpeedFactor limits loadFactor alone)
+  const torsoSpeed = parts.torso?.mobility?.speedModifier ?? 1;
   const mobility = {
     ...base,
-    moveSpeed: base.moveSpeed * loadFactor,
+    moveSpeed: base.moveSpeed * loadFactor * torsoSpeed,
     acceleration: base.acceleration * loadFactor,
   };
   // [R2] base × legs' part modifier (partStats) × owner's race modifier

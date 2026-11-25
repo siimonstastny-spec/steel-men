@@ -9,7 +9,7 @@ import { createProceduralUnit, hasProceduralUnit } from './units/UnitKit.js';
 import './units/index.js';   // registers every procedural unit
 import { ProcRobot, ProcRobotPart, robotPartIds } from './robots/RobotParts.js';
 import { emblemPathData } from './ProcModules.js';
-import { getStats, partStats, SLOT_KIND } from '../data/Stats.js';
+import { getStats, partStats, isDataOnlyPart, SLOT_KIND } from '../data/Stats.js';
 import { ICON_RENDERER, setFromPath } from '../config.js';
 import { procPartId as mappedPartId } from './robots/RobotPartMap.js';   // [B6] set → proc id table
 
@@ -70,7 +70,7 @@ export function partHasOwnProc(slot, model) {
 
 const standInCache = { legs: new Map(), torso: new Map(), leftArm: new Map(), rightArm: new Map() };
 
-/** [B3] true when the part model (path) belongs to a data-only set (stats.json parts[set][kind].standInSet); registered ids = false */
+/** [B3] true when the part model (path) belongs to a data-only set (stats.json parts[set][kind].standInSet / [A15] standInModel); registered ids = false */
 export function partHasStandIn(slot, model) {
   const cache = standInCache[slot];
   if (!cache || typeof model !== 'string' || !model) return false;
@@ -79,7 +79,7 @@ export function partHasStandIn(slot, model) {
   if (!kindIds) partProcId(slot, model);   // fills kindIds
   if (kindIds?.[SLOT_KIND[slot]].has(model)) r = false;
   else {
-    try { r = !!partStats(model, slot).standInSet; } catch { return false; }   // stats not loaded yet: ask again later
+    try { r = isDataOnlyPart(partStats(model, slot)); } catch { return false; }   // stats not loaded yet: ask again later
   }
   cache.set(model, r);
   return r;

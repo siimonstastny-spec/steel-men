@@ -249,12 +249,12 @@ function disposeLabel(sprite) {
  * Console (main.js wires steelMen.scene; this module is imported on demand):
  *   const { spawnPartCompare } = await import('./src/procedural/robots/RobotPreview.js');
  *   p = await spawnPartCompare(steelMen.scene, 'X', 'legs', ['Recon', 'HighStrength'], { x: 0, y: 0, z: 0 });
- *   p = await spawnPartCompare(steelMen.scene, 'Y', 'rightArm', ['Axe', 'Shield'], pos, { color: '#c8302c' });
+ *   p = await spawnPartCompare(steelMen.scene, 'Y', 'rightArm', ['HammerHand', 'Shield'], pos, { color: '#c8302c' });
  *   p.dispose()
  * @param {THREE.Object3D} scene
  * @param {string} race   style + GLB model race ('X' | 'Y' | 'Z'; others use the first GLB race for the GLB side)
  * @param {'legs'|'torso'|'leftArm'|'rightArm'} slot
- * @param {string[]} sets part sets ('Recon', 'Flak', 'Axe' …; as in stats.json parts)
+ * @param {string[]} sets part sets ('Recon', 'Flak', 'HammerHand' …; as in stats.json parts)
  * @param {{x:number,y?:number,z:number}} [pos]
  * @param {{ color?: string, labels?: boolean, procIds?: Object<string,string> }} [o] procIds = { Set: procId } override
  * @returns handle { pairs: [{ set, glb, proc, procId }], dispose() }
@@ -323,8 +323,8 @@ export async function spawnPartCompare(scene, race = 'X', slot = 'legs', sets = 
  * stats.procModel, else RobotPartMap) on the right, labelled. A missing slot / set falls back to Basic.
  *   const { spawnRobotCompare } = await import('./src/procedural/robots/RobotPreview.js');
  *   p = await spawnRobotCompare(steelMen.scene, 'X', [
- *     { legs: 'Recon', torso: 'Flak', leftArm: 'Axe', rightArm: 'GattlingGun' },
- *     { legs: 'Armor', torso: 'Armor', leftArm: 'Shield', rightArm: 'PowerFist' } ], { x: 0, y: 0, z: 0 });
+ *     { legs: 'Recon', torso: 'Flak', leftArm: 'HammerHand', rightArm: 'GattlingGun' },
+ *     { legs: 'Armor', torso: 'Armor', leftArm: 'Shield', rightArm: 'KatanaSword' } ], { x: 0, y: 0, z: 0 });
  *   p.dispose()
  * @param {string} race  style + GLB model race (X | Y | Z; others use the first GLB race for the GLB side)
  * @param {Array<{legs?:string,torso?:string,leftArm?:string,rightArm?:string}>} combos

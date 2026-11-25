@@ -10,7 +10,7 @@ const cache = new Map(); // url -> Promise<gltf>
 /** Načte GLB (jednou) a označí uzly glTF + jejich klidovou pózu */
 export function loadGltf(path) {
   if (!path) return Promise.reject(new Error('[AssetLoader] empty model path'));
-  path = partModelPath(path); // [A9] data-only robot parts (stats.parts.*.standInSet) map to their stand-in GLB
+  path = partModelPath(path); // [A9] data-only robot parts (stats.parts.*.standInSet / [A15] standInModel) map to their stand-in GLB
   const url = MODELS_BASE + path;
   if (!cache.has(url)) {
     const job = fetchGltf(url).then(markNodes).then((gltf) => fixTextures(fixGeometry(gltf, path), path));

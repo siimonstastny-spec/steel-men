@@ -404,11 +404,18 @@ export class BuildMenu {
   #productionOptions(s) {
     const options = this.production?.unitOptions(s) ?? [];
     const color = TEAMS[localTeam()]?.color;
-    return options.map(({ kind, unitId, stats }) => (kind === 'crew'
+    const items = options.map(({ kind, unitId, stats }) => (kind === 'crew'
       ? this.#option(t('grid.training'), ICONS.crew, stats, { producer: s.eid, kind }, t('grid.training.tip', { size: stats.squadSize }),
         unitIconUrl('crew', this.race, color))
       : this.#option(unitName('vehicles', unitId), ICONS.vehicle, stats, { producer: s.eid, kind, unitId }, '',
         unitIconUrl(unitId, this.race, color))));
+    // [A15] vehicles of a research tier not open yet: shown disabled with the reason (Stats.tierLocked)
+    for (const { unitId, tier } of this.production?.tierLockedUnits?.(s) ?? []) {
+      const label = unitName('vehicles', unitId);
+      items.push({ icon: ICONS.vehicle, iconUrl: unitIconUrl(unitId, this.race, color) ?? undefined, label, disabled: true,
+        tip: [label, t('build.requiresTier', { tier })].join('\n') });
+    }
+    return items;
   }
 
   #option(label, icon, stats, payload, desc = '', iconUrl = null) {

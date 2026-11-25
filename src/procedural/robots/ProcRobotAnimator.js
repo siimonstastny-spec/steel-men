@@ -11,6 +11,38 @@ const ATTACK_SLOT = { left: 'leftArm', right: 'rightArm' };   // MechAnimator si
 const ARM_SLOTS = ['leftArm', 'rightArm'];
 const wrapAngle = (a) => (a > Math.PI ? a - TAU : a < -Math.PI ? a + TAU : a);
 
+// [A16] Hop-run clip (speed legs with the 'hopRun' ability: HighSpeed / SprintLegs). DISPLAY ONLY: the simulation moves the mech
+// along the hop arc (mech.hopping, position.y above the terrain); this overlay only poses the legs on top of the walk cycle.
+// Rising: a leap (leading leg forward and stretched, trailing leg back and tucked); falling: both legs reach forward for the
+// landing. Angles in rad (hip − = forward, knee + = bent), weights ease with `blend` (1/s).
+const HOP_POSE = {
+  blend: 10, minWeight: 0.01, lean: 0.2, toe: 0.45,
+  rise: { frontHip: -0.9, frontKnee: 0.3, backHip: 0.6, backKnee: 1.05 },
+  fall: { hip: -0.6, knee: 0.8 },
+  forcePeriod: 1.2, forceRiseShare: 0.5, forceHeight: 5,   // forceHop (console test): cycle length s and its rising share
+};
+const lerpAngle = (a, b, k) => a + (b - a) * k;
+
+/**
+ * Poses the robot's legs / chest for a hop at weight k (0 = walk cycle untouched … 1 = full pose). Call after robot.tick().
+ * Legs without chains (never) are skipped. Allocation free.
+ */
+export function applyHopPose(robot, k, rising) {
+  const chains = robot?.chains;
+  if (!chains || k <= 0) return;
+  const P = HOP_POSE;
+  for (let i = 0; i < chains.length; i++) {
+    const c = chains[i];
+    const front = i === 0;   // chains[0] = phase 0 leg: leads the leap
+    const hip = rising ? (front ? P.rise.frontHip : P.rise.backHip) : P.fall.hip;
+    const knee = rising ? (front ? P.rise.frontKnee : P.rise.backKnee) : P.fall.knee;
+    c.thigh.rotation.x = lerpAngle(c.thigh.rotation.x, hip, k);
+    c.shin.rotation.x = lerpAngle(c.shin.rotation.x, knee, k);
+    c.foot.rotation.x = lerpAngle(c.foot.rotation.x, -(hip + knee) + P.toe, k);
+  }
+  if (robot.chest && !robot.clipDriven) robot.chest.rotation.x += P.lean * k;   // #body rewrites the chest every tick (no accumulation)
+}
+
 export class ProcRobotAnimator {
   /**
    * @param {THREE.Object3D} mech   owner (ModularMech): reads .speed, .rotation.y, .parts, .order, .aimHeight
@@ -28,6 +60,10 @@ export class ProcRobotAnimator {
     this.ownOneShot = null;     // stand-alone MechAnimator compatibility (ModularMech.#rebuildAnimation)
     this.ownAttackAction = null;
     this.lastYaw = mech.rotation.y;
+    this.hopW = 0;              // [A16] weight of the hop-run pose (display only)
+    this.hopLift = 0;           // last height above the terrain (rising / falling)
+    this.forceHop = false;      // [A16] console test: `mech.animator.forceHop = true` plays the hop pose without a rift
+    this.forceT = 0;
     this.setRobot(robot);
   }
 
@@ -111,6 +147,30 @@ export class ProcRobotAnimator {
     if (r.turret) this.#aim(r, m);
     m.procVisual?.keepHidden();
     r.tick(dt);
+    this.#hop(r, m, dt);
+  }
+
+  // [A16] hop-run overlay: weight follows mech.hopping (or forceHop); rising / falling from the height above the terrain
+  #hop(r, m, dt) {
+    const P = HOP_POSE;
+    const on = (m.hopping || this.forceHop) && !this.isDead;
+    this.hopW += ((on ? 1 : 0) - this.hopW) * Math.min(1, dt * P.blend);
+    if (this.hopW < P.minWeight) { this.hopW = 0; this.hopLift = 0; this.forceT = 0; r.position.y = 0; return; }
+    let rising;
+    if (this.forceHop) {
+      // console test: no sim arc exists, so the robot (child of the mech) rises itself along a sine arc
+      this.forceT += dt;
+      const u = (this.forceT % P.forcePeriod) / P.forcePeriod;
+      rising = u < P.forceRiseShare;
+      this.hopLift = P.forceHeight * Math.sin(Math.PI * u);
+      r.position.y = this.hopLift * this.hopW;
+    } else {
+      r.position.y = 0;
+      const lift = m.position.y - (m.world?.heightAt ? m.world.heightAt(m.position.x, m.position.z) : 0);
+      rising = lift >= this.hopLift;
+      this.hopLift = lift;
+    }
+    applyHopPose(r, this.hopW, rising);
   }
 
   // Turret follows the attack target (yaw relative to the mech's facing, pitch to the target's aim height)

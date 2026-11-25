@@ -6,17 +6,21 @@ import { MechAnimator } from '../anim/MechAnimator.js';
 import { MechPart } from './MechPart.js';
 import { ProcRobotAnimator } from '../procedural/robots/ProcRobotAnimator.js'; // [proc-robot]
 import { ProcMechVisual, procRobotCandidate, prepareProcRobots } from './ProcMechVisual.js'; // [proc-robot]
+import { hasGlbSkins, prepareGlbSkins, missingGlbSkins } from './GlbSkinVisual.js'; // [basic-m1] hand-made GLB parts of every race
 import { GlbAttackFx } from '../procedural/robots/GlbAttackFx.js'; // [B5 glb-fx] visual only
 import {
   SOCKETS, MECH, MOVEMENT, TEAMS, PLAYER_TEAM, VFX, ORDERS, RINGS, ARRIVE_DISTANCE, BEHAVIOUR, basicLoadout, PING,
-  JUMP_JET, MECH_COLLISION,
+  JUMP_JET, MECH_COLLISION, A16, RACE,
 } from '../config.js';
 import { loadStats, getStats, partStats, composeMech, teamRule } from '../data/Stats.js';
 import {
   isTargetable, areEnemies, edgeDistance, angleTo, canFireAt, engagementRange, releaseAttack, clipHitType, pickTarget,
+  dealDamage, clearShot,
 } from '../game/Combat.js';
 import { fogReaction, retargetAuto, lostTargetOrder, orderExpired } from './UnitCombat.js';
-import { blockedOnTheWay, followPath, contactDistance } from '../game/Movement.js';
+import { blockedOnTheWay, followPath, contactDistance, canCrossRift } from '../game/Movement.js';
+import { unitTerrainFactor } from '../game/TerrainTypes.js';
+import { attacksAllowed } from '../game/PreBuild.js';
 import { applyTeamColor } from '../core/TeamColor.js';
 import { play } from '../audio/Sound.js';
 import { approachBay, updateService, activeRepairers, isServiceBay } from '../game/Repair.js';
@@ -35,6 +39,8 @@ export const PILOT_ARM_SLOT = Object.freeze({ leftArm: 'rightArm', rightArm: 'le
 export const pilotSlot = (side) => PILOT_ARM_SLOT[side] ?? side;
 const WEAPON_SLOTS = [...ARM_SLOTS, 'torso', 'legs']; // order of ModularMech.weapons (arms first)
 const NO_WEAPONS = Object.freeze([]);
+const CHARGE_IGNORE = [null, null]; // [A16] scratch: [mech, target] of the charge line test (cleared after each use)
+const CHARGE_NEXT = { x: 0, z: 0 };  // [A16] scratch: end of one charge step
 
 const distXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -85,9 +91,13 @@ export class ModularMech extends THREE.Group {
     this.flightAbility = null; // best 'flight' ability of the mounted parts (JetPack torso), crew bonuses applied
     this.flightCooldown = 0;   // s until the next flight is possible
     this.inFlight = false;     // in the air: cannot be stopped, no collisions, no orders / attacks until it lands
-    this.hopAbility = null;    // best 'hopRun' ability (JumpJet legs): runs and hops over rifts, never walls / cliffs
+    this.hopAbility = null;    // best 'hopRun' ability ([A15] speed legs HighSpeed / SprintLegs): runs and hops over rifts, never walls / cliffs
     this.moveAnimRef = MECH.walkAnimRefSpeed; // speed at which the move loop plays at normal rate (legs anim.moveRefSpeed)
     this.hopping = false;      // over a rift in a running hop (y follows the hop arc, not the terrain)
+    // [A16] attack charge (legs ability 'charge', docs/notes/a16-a2-mechanics.md)
+    this.chargeAbility = null; // best 'charge' ability of the mounted parts (longest range), crew bonuses applied
+    this.chargeCooldown = 0;   // s until the next charge is possible
+    this.charging = false;     // dashing straight at the attack target (display may read it: boosters on)
     // [proc-robot] display only (ProcMechVisual.js): procedural robot drawn over the hidden GLB parts, or null
     this.procVisual = null;
     this.procModel = null;     // current ProcRobot (Highlight.js, World disposes it with procVisual)
@@ -98,6 +108,10 @@ export class ModularMech extends THREE.Group {
   #flight = { fromX: 0, fromZ: 0, fromY: 0, toX: 0, toZ: 0, toY: 0, t: 0, duration: 1, height: 0, phase: null };
   /** [R2] Current rift hop: the takeoff → landing line, the mech's y follows the arc over its projection on it */
   #hop = { fromX: 0, fromZ: 0, fromY: 0, toX: 0, toZ: 0, toY: 0, height: 0 };
+  /** [A16] Seconds left of the current charge */
+  #chargeTimer = 0;
+  /** [A16] The current charge made its first step (its cooldown is running) */
+  #chargeStarted = false;
 
   get isMech() { return true; }
   /** [R2] Has a flight ability and it is recharged */
@@ -116,6 +130,10 @@ export class ModularMech extends THREE.Group {
     ]);
     this.animLib = lib;
     await prepareProcRobots(this.race, this.loadout); // [A9/B3] loadout: data-only parts draw procedurally; [proc-robot] style kits for the robot builder (null for other races)
+    // [basic-m1] skin models of the owner's race and of every loadout part's race (a part is drawn by its own race's skin)
+    const skinRaces = new Set([this.race ?? RACE]);
+    for (const k of keys) skinRaces.add(partStats(this.loadout[k], k, this.race, this.team).race ?? this.race ?? RACE);
+    await Promise.all([...skinRaces].map(prepareGlbSkins));
     this.stance ??= getStats().rules.combat.defaultStance;
     this.behaviour ??= getStats().rules.combat.defaultBehaviour;
 
@@ -142,11 +160,12 @@ export class ModularMech extends THREE.Group {
 
     this.animator = new MechAnimator(this, lib);
     // [proc-robot] the procedural display wraps the GLB animator (its clips keep driving the hidden simulation body)
-    if (procRobotCandidate(this.race, this.loadout)) {
+    // [basic-m1] a race with GLB skins gets the display wrapper too (config only, the same on every client)
+    if (procRobotCandidate(this.race, this.loadout) || hasGlbSkins(this.race ?? RACE)) {
       this.procVisual = new ProcMechVisual(this);
       this.animator = new ProcRobotAnimator(this, null, this.animator);
     }
-    this.animator.setWalkClip(this.parts.legs.stats.anim?.move ?? null); // [R2] legs' own move loop (JumpJet hop run)
+    this.animator.setWalkClip(this.parts.legs.stats.anim?.move ?? null); // [R2] legs' own move loop (stats anim.move; none = common walk)
     this.animator.rebuild();
     this.procVisual?.sync(); // [proc-robot]
     // [B5 glb-fx] display only: never moves GLB nodes (MechPart.muzzlePoint = simulation shot origin), flashes live in
@@ -165,6 +184,28 @@ export class ModularMech extends THREE.Group {
   /** Arm slots with a broken arm still mounted (0 HP: no weapons, may fall off when hit again) */
   get brokenArmSlots() { return ARM_SLOTS.filter((s) => this.parts[s] && !this.parts[s].alive); }
   get evasion() { return this.stats?.evasion ?? 0; }
+
+  /**
+   * [A16] Chance that a shot hitting this mech is sent back (Combat.deflectShot): every live part with a 'deflect'
+   * ability adds its `chance` as 1 − Π(1 − chance), capped at rules.combat.deflect.maxChance. Only while the mech is
+   * powered (active crew, not stunned). `beam` = instant hit (laser): only abilities with `beams: true` count.
+   * Reads the parts' own stats (research applied), so a broken arm deflects nothing. No allocation.
+   */
+  deflectChance(beam = false) {
+    if (!this.active || this.status?.disabled) return 0;
+    let pass = 1;
+    for (let i = 0; i < WEAPON_SLOTS.length; i++) {
+      const part = this.parts[WEAPON_SLOTS[i]];
+      if (!part?.alive) continue;
+      const list = part.stats.abilities;
+      for (let k = 0; k < list.length; k++) {
+        const a = list[k];
+        if (a.type === 'deflect' && (!beam || a.beams) && a.chance > 0) pass *= 1 - a.chance;
+      }
+    }
+    if (pass >= 1) return 0;
+    return Math.min(1 - pass, getStats().rules.combat.deflect?.maxChance ?? 1);
+  }
 
   /** Mech obeys orders only with a crew on board (after the boarding delay) and not while being repaired */
   get active() { return !this.destroyed && this.crew !== null && this.boardTimer <= 0 && !this.repairing; }
@@ -329,6 +370,7 @@ export class ModularMech extends THREE.Group {
     this.stopRepair();
     this.destroyed = true;
     this.hopping = false; // [R2] the wreck sinks from where it is
+    this.charging = false; // [A16]
     play('mechDestroyed', { position: this.position });
     this.order = null;
     this.setSelected(false);
@@ -598,6 +640,7 @@ export class ModularMech extends THREE.Group {
     this.procModel?.setCloaked?.(this.cloaked && !this.destroyed ? 1 : 0); // [A9] Camo torso look (visual only, idempotent; enemies: FogOfWar hides)
     if (this.inFlight) this.#updateFlight(dt); // [R2] a flight always ends with a landing (even a wreck lands first)
     this.flightCooldown = Math.max(0, this.flightCooldown - dt);
+    this.chargeCooldown = Math.max(0, this.chargeCooldown - dt); // [A16]
     this.reboardBlock = Math.max(0, this.reboardBlock - dt);
     if (this.destroyed) { if (!this.inFlight) this.#sink(dt); return; }
     if (this.bay) { this.#paintInBay(); this.speed = 0; this.animator?.setMoving(false); updateService(this, dt); return; } // in an assembly bay (Repair.js)
@@ -610,14 +653,14 @@ export class ModularMech extends THREE.Group {
     if (this.repairing) this.#repair(dt);
     else if (this.crew) this.#checkMorale();
     if (this.inFlight) return; // [R2] in the air: new orders wait for the landing
-    if (!this.active) { this.speed = 0; this.#endHop(); this.animator?.setMoving(false); return; }
+    if (!this.active) { this.speed = 0; this.#endHop(); this.charging = false; this.animator?.setMoving(false); return; }
     // Stunned or being thrown back (StatusEffects): no moving, turning or new attacks
-    if (this.status?.disabled || this.status?.knockedBack) { this.speed = 0; this.#endHop(); this.animator?.setMoving(false); return; }
+    if (this.status?.disabled || this.status?.knockedBack) { this.speed = 0; this.#endHop(); this.charging = false; this.animator?.setMoving(false); return; }
 
     advanceQueue(this); // orders given with Shift (OrderQueue.js)
     this.#updateTarget();
     const moving = this.#move(dt);
-    if (!moving) { this.speed = 0; this.#endHop(); } // [R2] a stopped hop lands at once (no hanging in the air)
+    if (!moving) { this.speed = 0; this.#endHop(); this.charging = false; } // [R2] a stopped hop lands at once (no hanging in the air)
     this.#fire(moving);
     this.animator?.setMoving(moving && this.holdTimer <= 0);
     // Minimum rate keeps the legs moving while the mech turns on the spot
@@ -792,6 +835,10 @@ export class ModularMech extends THREE.Group {
   // Vrací true, pokud se robot v tomto snímku pohnul
   #move(dt) {
     const o = this.order;
+    if (this.charging && (o?.type !== 'attack' || this.holdTimer > 0)) { // [A16] order changed / firing
+      const arrived = o?.type === 'attack' && isTargetable(o.target) && edgeDistance(this, o.target) <= engagementRange(this, this.stance);
+      this.#endCharge(arrived ? o.target : null);
+    }
     if (!o) return false;
     if (this.holdTimer > 0) { // firing a heavy / melee weapon – stand, keep facing the target
       if (o.type === 'attack') this.#turnTo(o.target.position, dt);
@@ -812,12 +859,16 @@ export class ModularMech extends THREE.Group {
       const range = engagementRange(this, this.stance);
       if (range === null) { this.order = null; return false; }
       // In range – or already touching the target (collision radii keep us from getting closer)
-      const touching = edgeDistance(this, o.target) <= this.radius + MOVEMENT.contactSlack;
-      if (edgeDistance(this, o.target) <= range || touching) {
+      const edge = edgeDistance(this, o.target);
+      const touching = edge <= this.radius + MOVEMENT.contactSlack;
+      if (edge <= range || touching) {
+        if (this.charging) this.#endCharge(o.target); // [A16] the charge arrived: impact, then the melee blow (#fire)
         o.approachBest = undefined; // made it – the next approach starts its progress check afresh
         this.#turnTo(o.target.position, dt);
         return false;
       }
+      // [A16] attack charge: a straight dash at a ground target in charge range (legs 'charge' ability)
+      if (this.charging || this.#canCharge(o.target, edge, range)) return this.#chargeStep(o.target, edge, range, dt);
       // An attack never gives up: when other units block the way, walk to a free spot around the target
       if (this.#approachStuck(o, edgeDistance(this, o.target), dt)) this.#pickApproachSlot(o);
       target = this.#approachPoint(o);
@@ -894,7 +945,7 @@ export class ModularMech extends THREE.Group {
     return true;
   }
 
-  // ---------- [R2] jet movement: JetPack flight, JumpJet rift hops ----------
+  // ---------- [R2] jet movement: JetPack flight, rift hops ([A15] speed legs 'hopRun') ----------
 
   // At the takeoff of a planned flight: stand, face the landing point, take off once recharged. Returns true when it
   // took off. Waiting does not count as being blocked (blockedOnTheWay is not called).
@@ -996,6 +1047,105 @@ export class ModularMech extends THREE.Group {
     this.position.y = Math.max(ground, h.fromY + (h.toY - h.fromY) * t + 4 * h.height * t * (1 - t));
   }
 
+  // ---------- [A16] attack charge (legs ability 'charge') ----------
+
+  /**
+   * May the mech start a charge at its attack target now? Recharged, not hopping, attacks allowed, a ground target
+   * (no aircraft) beyond the engagement range but within the ability's range, the mech fights it in melee (has a melee
+   * weapon and its engagement range is the melee one: melee stance, or no other weapons), the target roughly ahead
+   * (A16.charge.startFacing) and a clear straight line: no static obstacle (walls, cliffs, buildings, rifts unless the
+   * mech crosses them) and no tall map obstacle between them. Decision: the charge never jumps over anything – it only
+   * starts on a free straight line and stops at the first obstacle (#chargeStep), so it cannot skip a wall or a cliff.
+   */
+  #canCharge(target, edge, range) {
+    const a = this.chargeAbility;
+    if (!a || this.chargeCooldown > 0 || this.hopping || target.airborne || edge > a.range) return false;
+    if (!attacksAllowed(this.world)) return false;
+    if (Math.abs(angleTo(this, target.position) + MECH.modelYawOffset) > A16.charge.startFacing * DEG) return false;
+    if (!this.#chargesInMelee(range)) return false;
+    if (!clearShot(this.world, this, target)) return false;
+    return this.world.nav.segmentClear(this.position, target.position, this.#chargeShapes(target));
+  }
+
+  // The engagement range is the melee one (engagementRange picked a melee weapon for this stance)
+  // (walks the live parts' weapons directly – the `weapons` getter would allocate a list every tick)
+  #chargesInMelee(range) {
+    const factor = getStats().rules.combat.approachRangeFactor;
+    for (let i = 0; i < WEAPON_SLOTS.length; i++) {
+      const part = this.parts[WEAPON_SLOTS[i]];
+      if (!part?.alive) continue;
+      const ws = part.weapons;
+      for (let k = 0; k < ws.length; k++) {
+        const s = ws[k].stats;
+        if (s?.class === 'melee' && s.range * factor >= range) return true;
+      }
+    }
+    return false;
+  }
+
+  // Static obstacles for the straight charge line (recycled list of NavGrid.shapesFor; the target is not an obstacle)
+  #chargeShapes(target) {
+    CHARGE_IGNORE[0] = this;
+    CHARGE_IGNORE[1] = target;
+    const shapes = this.world.nav.shapesFor(this.radius, CHARGE_IGNORE, canCrossRift(this), this);
+    CHARGE_IGNORE[0] = CHARGE_IGNORE[1] = null; // do not keep the units alive
+    return shapes;
+  }
+
+  /**
+   * One tick of the charge: faces the target and dashes straight at it at moveSpeed × speedFactor (× the terrain factor
+   * of its chassis), accelerating hard. Ends without impact at the first static obstacle on the step, when the time
+   * runs out (maxDuration) – the normal approach then carries on; the impact comes when it reaches the engagement range.
+   * @returns {boolean} true when the mech moved
+   */
+  #chargeStep(target, edge, range, dt) {
+    const a = this.chargeAbility;
+    const C = A16.charge;
+    if (!this.charging) {
+      this.charging = true;
+      this.#chargeTimer = a.maxDuration ?? C.defaultMaxDuration;
+      this.#chargeStarted = false; // the cooldown starts with the first real step (a charge blocked at once costs nothing)
+    }
+    this.#chargeTimer -= dt;
+    const m = this.stats.mobility;
+    this.#turnTo(target.position, dt);
+    const terrain = unitTerrainFactor(this);
+    const top = m.moveSpeed * (a.speedFactor ?? C.defaultSpeedFactor) * (terrain > 0 ? terrain : 1);
+    this.speed = Math.min(top, this.speed + m.acceleration * C.accelerationFactor * dt);
+    const dx = target.position.x - this.position.x;
+    const dz = target.position.z - this.position.z;
+    const len = Math.hypot(dx, dz);
+    const step = Math.min(this.speed * dt, Math.max(0, edge - range));
+    if (len < MOVEMENT.overlapEpsilon || step <= 0) { this.#endCharge(null); return false; }
+    const nx = this.position.x + (dx / len) * step;
+    const nz = this.position.z + (dz / len) * step;
+    CHARGE_NEXT.x = nx;
+    CHARGE_NEXT.z = nz;
+    if (!this.world.nav.segmentClear(this.position, CHARGE_NEXT, this.#chargeShapes(target))) { this.#endCharge(null); return false; }
+    this.position.x = nx;
+    this.position.z = nz;
+    this.position.y = this.world.heightAt(nx, nz);
+    if (!this.#chargeStarted) { this.#chargeStarted = true; this.chargeCooldown = a.cooldown ?? 0; }
+    // Arrived this tick: impact now, so the melee blow (#fire right after #move) follows in the same tick. (Before, the
+    // blow set holdTimer first and the next tick ended the charge without its impact.)
+    if (edgeDistance(this, target) <= range) this.#endCharge(target);
+    else if (this.#chargeTimer <= 0) this.#endCharge(null);
+    return true;
+  }
+
+  /**
+   * Ends a running charge; with `target` (it arrived) the impact deals the ability's hitDamage to it (Combat.dealDamage:
+   * armour, auras, XP). The speed falls back to the normal move speed.
+   */
+  #endCharge(target) {
+    if (!this.charging) return;
+    this.charging = false;
+    this.speed = Math.min(this.speed, this.stats.mobility.moveSpeed);
+    if (this.order) this.order.nav = null; // the dash left the planned path: plan again from here
+    const hit = this.chargeAbility?.hitDamage;
+    if (target && hit && isTargetable(target) && areEnemies(this, target)) dealDamage(this, target, hit, this.position);
+  }
+
   /** Turns towards a point at turnSpeed; returns the remaining angle (rad) */
   #turnTo(point, dt) {
     const diff = angleTo(this, point) + MECH.modelYawOffset;
@@ -1043,7 +1193,7 @@ export class ModularMech extends THREE.Group {
     const r = o.target.radius + this.radius + ORDERS.approachGap;
     // [N7-5] aircraft never take a ground spot (and the other way round)
     const others = this.world.units.filter((u) => u !== this && u !== o.target && Boolean(u.airborne) === Boolean(this.airborne));
-    const shapes = this.world.nav.shapesFor(this.radius, [this, o.target], false, this); // [W7] per-obstacle circle
+    const shapes = this.world.nav.shapesFor(this.radius, [this, o.target], canCrossRift(this), this); // [W7] per-obstacle circle; [A16] hover legs: rifts are free
     let chosen = current + step;
     for (let k = 1; k < ORDERS.approachSlots; k++) {
       const a = current + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * step; // +1, −1, +2, −2… steps from ours
@@ -1105,12 +1255,15 @@ export class ModularMech extends THREE.Group {
     // [R2] jet abilities: the longest range of each kind wins (data stay per part)
     this.flightAbility = null;
     this.hopAbility = null;
+    this.chargeAbility = null;
     for (const a of this.stats.abilities ?? []) {
       if (a.type === 'flight' && (!this.flightAbility || a.range > this.flightAbility.range)) this.flightAbility = a;
       if (a.type === 'hopRun' && (!this.hopAbility || a.range > this.hopAbility.range)) this.hopAbility = a;
+      if (a.type === 'charge' && (!this.chargeAbility || a.range > this.chargeAbility.range)) this.chargeAbility = a; // [A16]
     }
     if (!this.hopAbility) this.hopping = false;
-    this.animator?.setWalkClip(this.parts.legs?.stats.anim?.move ?? null); // [R2] e.g. the JumpJet run loop
+    if (!this.chargeAbility) this.charging = false;
+    this.animator?.setWalkClip(this.parts.legs?.stats.anim?.move ?? null); // [R2] legs' own run loop (stats anim.move; none = common walk)
     // Move speed at which the legs' loop plays at normal rate (anim.moveRefSpeed – a run stride differs from the walk)
     this.moveAnimRef = this.parts.legs?.stats.anim?.moveRefSpeed ?? MECH.walkAnimRefSpeed;
   }
@@ -1122,6 +1275,9 @@ export class ModularMech extends THREE.Group {
    */
   #rebuildAnimation() {
     this.procVisual?.sync(); // [proc-robot] part combination changed: new robot / hidden slot / back to GLB
+    // [basic-m1] a picked-up / swapped part of a race whose skins are not loaded yet: load them, then redraw (display only)
+    const skins = this.procVisual ? missingGlbSkins(this, this.race ?? RACE) : null;
+    skins?.then(() => { if (!this.removed && this.procVisual) this.procVisual.sync(); });
     const an = this.animator;
     if (!an) return;
     const run = an.attackAction;

@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v31';
+export const GAME_VERSION = 'v32';
 // Game name (brand, shown in the main menu title; not translated)
 export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
@@ -639,34 +639,39 @@ export const AI_RESUME = {
 // --- [A2-ai] end ---
 // --- [LOADOUT] starting robot loadouts (src/game/StartLoadouts.js) ---
 // Per slot a list of part sets in order of preference: the first one the faction may produce (canProduce) and has a
-// model of wins, so one template gives every faction its own robot. Frame / Alien are never picked.
+// model of wins, so one template gives every faction its own robot. Frame is never picked. [A15] Only T1 parts of the
+// race are picked (StartLoadouts), so T2 / T3 sets listed here are skipped at the start.
 export const LOADOUT = {
   fallbackSet: 'Basic',             // used when no listed set fits the faction
   player: ['universal', 'duelist', 'brawler'], // robots at the player's start (the second mixes melee + ranged)
   enemy: ['duelist', 'gunner'],     // enemy test squad (same faction as the enemy player)
   templates: {
-    // Plain all-round robot: basic body, shield arm + machine gun
-    universal: { legs: ['Basic'], torso: ['Basic'], leftArm: ['Shield'], rightArm: ['GattlingGun'] },
-    // Melee: heavy legs + armour, hammer/fist and blade
+    // Plain all-round robot: basic body, shield arm + the faction's T1 weapon
+    universal: {
+      legs: ['Basic'], torso: ['Basic'],
+      leftArm: ['Shield', 'EnergyShield', 'LaserShield'],
+      rightArm: ['GattlingGun', 'LaserRepeater', 'PlasmaCannon', 'KatanaSword'],
+    },
+    // Melee: heavy legs + armour, hammer / blade / grip
     brawler: {
-      legs: ['HighStrength', 'HTHupgrade', 'PowerShield', 'JumpJet'],
+      legs: ['Armor', 'HighSpeed', 'DrunkMissile'],
       torso: ['Armor', 'SelfRepair'],
-      leftArm: ['HammerHand', 'PowerFist', 'ElectroGrip', 'BladeArm'],
-      rightArm: ['Axe', 'KatanaSword', 'ElectroGrip', 'BladeArm'],
+      leftArm: ['HammerHand', 'KatanaSword', 'ElectroGrip', 'LaserRipper'],
+      rightArm: ['KatanaSword', 'HammerHand', 'ElectroGrip', 'LaserRipper'],
     },
-    // Ranged: weapon legs and torso, missiles / blaster, machine gun when the faction has nothing better
+    // Ranged: weapon legs, guns / plasma / lasers (a faction without a T1 gun keeps the Basic arm)
     gunner: {
-      legs: ['PowerGun', 'Laser', 'BlastPulse', 'Steady'],
-      torso: ['DrunkMissile', 'Tracer', 'Flak'],
-      leftArm: ['HomingMissile', 'GattlingGun'],
-      rightArm: ['EnergyBlaster', 'GattlingGun'],
+      legs: ['DrunkMissile', 'HighSpeed', 'Armor'],
+      torso: ['SelfRepair', 'Armor'],
+      leftArm: ['GattlingGun', 'LaserRepeater', 'PlasmaCannon'],
+      rightArm: ['PlasmaCannon', 'LaserRepeater', 'GattlingGun'],
     },
-    // Mixed: one melee arm and one ranged arm (to try the stance switch)
+    // Mixed: one melee arm and one ranged / shield arm (to try the stance switch)
     duelist: {
-      legs: ['Sonar', 'Steady', 'JumpJet'],
-      torso: ['SelfRepair', 'Armor', 'JetPack'],
-      leftArm: ['KatanaSword', 'Axe', 'ElectroGrip'],
-      rightArm: ['EnergyBlaster', 'GattlingGun'],
+      legs: ['HighSpeed', 'DrunkMissile', 'Armor'],
+      torso: ['SelfRepair', 'Armor'],
+      leftArm: ['KatanaSword', 'HammerHand', 'ElectroGrip', 'LaserRipper'],
+      rightArm: ['GattlingGun', 'LaserRepeater', 'PlasmaCannon', 'Shield'],
     },
   },
 };
@@ -2520,7 +2525,7 @@ export const ECONOMY_ALERTS = {
 };
 // --- [D2] end ---
 
-// --- [N6-jump] jet movement ([R2]: JetPack torso 'flight', JumpJet legs 'hopRun' – docs/notes/n6-jumpjet.md) ---
+// --- [N6-jump] jet movement ([R2]: JetPack torso 'flight', [A15] speed legs 'hopRun' – docs/notes/n6-jumpjet.md) ---
 export const JUMP_JET = {
   flight: {                          // short flight over any obstacle (walls, cliffs, rifts, buildings)
     defaultSpeed: 30,                // units/s – horizontal flight speed when the ability has no `speed`
@@ -2538,6 +2543,32 @@ export const JUMP_JET = {
   },
 };
 // --- [N6-jump] end ---
+
+// --- [A16] part mechanics: attack charge (legs 'charge'), photon deflector ('deflect'), flame cone (weapon `cone`) –
+// docs/notes/a16-a2-mechanics.md. Balance numbers live in data/stats.json (abilities, rules.combat.deflect); here only
+// fallbacks for missing ability fields and the look of the effects. ---
+export const A16 = {
+  charge: {
+    defaultSpeedFactor: 2.5,         // × moveSpeed during a charge when the ability has no `speedFactor`
+    defaultMaxDuration: 1.5,         // s – longest charge when the ability has no `maxDuration`
+    accelerationFactor: 4,           // × mobility.acceleration while charging (bursts off at once)
+    startFacing: 35,                 // degrees – starts only when the target is within this angle of the facing
+  },
+  cone: {
+    defaultAngle: 40,                // degrees – full cone angle when the weapon's `cone` has no `angle`
+  },
+  fx: {                              // visual only (Effects.flameCone / deflect flash)
+    flamePerShot: 9,                 // flame puffs per cone tick (one tick per burst shot)
+    flameLife: [0.35, 0.6],          // s – life range of one puff (the puff travels range / life)
+    flameSize: [0.6, 3.2],           // start → end size of a puff (units)
+    flameRise: 2,                    // units/s – slight lift of the puffs
+    flameDrag: 1.2,
+    flameColorNear: [1, 0.85, 0.45], // rgb 0..1 at the nozzle (glow pool: additive, fades out)
+    flameColorFar: [1, 0.32, 0.08],  // rgb at the end of the cone
+    deflectFlashSize: 0.35,          // × VFX.energyImpact size of the flash where a shot bounces off
+  },
+};
+// --- [A16] end ---
 
 // --- [N7] aircraft and anti-air (src/units/Aircraft.js, Movement.followPath, Combat.hitsLayer – docs/notes/n7-air.md) ---
 export const AIR = {
@@ -2611,17 +2642,41 @@ export const PROC_STATE = {
   gateUnpoweredSpeed: 0.15,  // wall gate leaf speed without power, × WALL_ANIM.gateSpeed (slow manual opening; visual only)
 };
 
-// --- [proc-robot] procedural combat robots (src/units/ProcMechVisual.js, docs/notes/proc-robot-wire.md) ---
-// Display only: the GLB parts stay the (hidden) simulation body, so on / off never changes the simulation.
-// A robot is drawn procedurally when its owner's race is listed and every mounted part has a registered
-// stats.json procModel; otherwise the GLB parts are drawn. window.steelMen.procedural = false turns it off too.
 // --- [W-skin] hand-made GLB robot parts drawn over the stand-in simulation body (src/units/GlbSkinVisual.js,
 // docs/notes/w-glb-skin.md). Display only; win over PROC_ROBOTS when every mounted part of the robot has a skin.
-// Skin meshes follow the stand-in rig node with the same `_partNN` suffix. shift = skin part's socket minus the stand-in
-// socket (part space, model units; from the designer's Assembly_*.glb), offset = whole skin in mech space (feet on ground).
+// [basic-m1] (docs/notes/basic-m1-skins.md) every race, per set and slot. A set's `style` picks how its models are read
+// (`styles`): 'native' = the approved hand-modelled parts (models/RobotPartsBasicM1, nodes paired with the stand-in rig
+// by tree position, own materials / texture / logo, team paint = the owner's colour); 'draft' = the colleague's Mercury
+// draft arms (nodes paired by `_partNN` suffix, runtime texture + emblem of GLB_SKIN_TEXTURE). Sockets of a skin model
+// that lie elsewhere than the stand-in's move everything mounted on them (skinned parts and the GLB parts redrawn by the
+// skin), measured from the GLBs at runtime. Entry fields: path, shift = meshes moved in part space, mechOffset = legs
+// only: the whole drawing moved in mech space while these legs are mounted. Switches: GLB_SKINS.enabled,
+// races.<R>.enabled, sets.<S>.enabled (before a robot loads), window.steelMen.glbSkins = false (display, next sync).
+const BASIC_M1_DIR = 'RobotPartsBasicM1/';
+// New legs' socket_TorsoMount is 1.7 further forward (z) and 0.6 higher than the stand-in's: the drawing moves back by
+// the z part, so the torso and arms rise 0.6 but stay above the simulation body (shots leave near the drawn barrels)
+const BASIC_M1_LEGS_OFFSET = [0, 0, -1.7];
+const basicM1Set = (race) => ({
+  style: 'native',
+  legs: { path: `${BASIC_M1_DIR}BasicLegs${race}.glb`, mechOffset: BASIC_M1_LEGS_OFFSET },
+  torso: { path: `${BASIC_M1_DIR}BasicTorso${race}.glb` },
+  leftArm: { path: `${BASIC_M1_DIR}LeftBasicHandArm${race}.glb` },
+  rightArm: { path: `${BASIC_M1_DIR}RightBasicHandArm${race}.glb` },
+});
 export const GLB_SKINS = {
   enabled: true,
   teamColorTag: 'team-palette',  // glTF material extras.runtimeColor that takes the owner's colour
+  // [basic-m1] how the models of a set are read (see above)
+  styles: {
+    native: { bind: 'tree', runtimeTexture: false, paint: 'native' },
+    draft: { bind: 'suffix', runtimeTexture: true, paint: 'multiply' },
+  },
+  defaultStyle: 'draft',
+  bindMaxDistance: 2,            // model units – a skin node farther than this from every stand-in rig node follows its parent
+  socketEpsilon: 0.001,          // model units – a socket shift shorter than this counts as none
+  // 'native' team paint = the owner's colour (linear), luminance kept within min..max (black / white teams stay readable);
+  // a team-painted emissive (neon) takes the team hue at its own brightness
+  nativePaint: { minLum: 0.02, maxLum: 0.6 },
   // [W-glb-arms] arm models with a weapon: nodes without a `_partNN` suffix (receiver, emitter glow, shield field…) follow
   // this rig node of the stand-in arm (the wrist, `_part02`), like the Basic arm's hand
   armAttachPart: '02',
@@ -2629,30 +2684,30 @@ export const GLB_SKINS = {
   // per simulation tick, so no clock and no allocation): emissiveIntensity × (min .. max)
   pulse: { nodePattern: '(Animated)', speed: 5, min: 0.55, max: 1.3, phaseStep: 1.7 },
   races: {
+    X: { enabled: true, sets: { Basic: basicM1Set('X') } },
+    Y: { enabled: true, sets: { Basic: basicM1Set('Y') } },
+    Z: { enabled: true, sets: { Basic: basicM1Set('Z') } },
     W: {
-      // skin soles 0.87 above the stand-in's (BasicLegsW_Skel 13:36: sole y −20.34, BasicLegsX part03 / part06: −21.21).
-      // Applied only while the legs are skinned too (torso / arms on stand-in legs stay at the stand-in's sockets).
-      offset: [0, -0.87, 0],
-      // shift = Assembly_BasicW.glb node translation minus the stand-in socket (torso 0,0,0 − TorsoMount 0.1,0.2,0.3;
-      // arms ∓4.3,6.6,0 − ArmLeft −5.4,6.7,−1.6 / ArmRight 5.3,6.7,−1.6). Weapon arms share the Basic arm's shoulder.
+      enabled: true,
+      // [basic-m1] the approved W set replaces the draft Basic (models/RobotPartsMercuryDraft stays on disk). The draft
+      // weapon arms have their origin at the draft shoulder: no shift; on the new W torso they follow its own arm
+      // sockets (socket shift measured from the GLB), on a stand-in torso they sit at the stand-in's sockets.
       sets: {
-        Basic: {
-          legs:     { path: 'RobotPartsMercuryDraft/BasicLegsW_Skel.glb',      shift: [0, 0, 0] },
-          torso:    { path: 'RobotPartsMercuryDraft/BasicTorsoW_Skel.glb',     shift: [-0.1, -0.2, -0.3] },
-          leftArm:  { path: 'RobotPartsMercuryDraft/BasicArmW_Left_Skel.glb',  shift: [1.1, -0.1, 1.6] },
-          rightArm: { path: 'RobotPartsMercuryDraft/BasicArmW_Right_Skel.glb', shift: [-1.0, -0.1, 1.6] },
-        },
+        Basic: basicM1Set('W'),
         LaserRepeater: {
-          leftArm:  { path: 'RobotPartsMercuryDraft/LaserRepeaterArmW_Left_T1.glb',  shift: [1.1, -0.1, 1.6] },
-          rightArm: { path: 'RobotPartsMercuryDraft/LaserRepeaterArmW_Right_T1.glb', shift: [-1.0, -0.1, 1.6] },
+          style: 'draft',
+          leftArm:  { path: 'RobotPartsMercuryDraft/LaserRepeaterArmW_Left_T1.glb' },
+          rightArm: { path: 'RobotPartsMercuryDraft/LaserRepeaterArmW_Right_T1.glb' },
         },
         LaserRipper: {
-          leftArm:  { path: 'RobotPartsMercuryDraft/LaserRipperArmW_Left_T1.glb',  shift: [1.1, -0.1, 1.6] },
-          rightArm: { path: 'RobotPartsMercuryDraft/LaserRipperArmW_Right_T1.glb', shift: [-1.0, -0.1, 1.6] },
+          style: 'draft',
+          leftArm:  { path: 'RobotPartsMercuryDraft/LaserRipperArmW_Left_T1.glb' },
+          rightArm: { path: 'RobotPartsMercuryDraft/LaserRipperArmW_Right_T1.glb' },
         },
         LaserShield: {
-          leftArm:  { path: 'RobotPartsMercuryDraft/LaserShieldArmW_Left_T1.glb',  shift: [1.1, -0.1, 1.6] },
-          rightArm: { path: 'RobotPartsMercuryDraft/LaserShieldArmW_Right_T1.glb', shift: [-1.0, -0.1, 1.6] },
+          style: 'draft',
+          leftArm:  { path: 'RobotPartsMercuryDraft/LaserShieldArmW_Left_T1.glb' },
+          rightArm: { path: 'RobotPartsMercuryDraft/LaserShieldArmW_Right_T1.glb' },
         },
       },
     },
@@ -2763,6 +2818,10 @@ export const GLB_SKIN_TEXTURE = {
   },
 };
 
+// --- [proc-robot] procedural combat robots (src/units/ProcMechVisual.js, docs/notes/proc-robot-wire.md) ---
+// Display only: the GLB parts stay the (hidden) simulation body, so on / off never changes the simulation.
+// A robot is drawn procedurally when its owner's race is listed and every mounted part has a registered
+// stats.json procModel; otherwise the GLB parts are drawn. window.steelMen.procedural = false turns it off too.
 export const PROC_ROBOTS = {
   enabled: true,
   races: ['W'],
@@ -3107,7 +3166,7 @@ export const NET_CONTINUE = {
 // src/core/SaveStore.js, docs/notes/j1-save-core.md). Loading checks SIM_VERSION and the data fingerprint, never GAME_VERSION.
 // Raise SIM_VERSION with every change that alters the simulation (combat, balance code, AI decisions, command
 // executors, determinism fixes); text / UI / visual-only releases keep it, so saves stay loadable.
-export const SIM_VERSION = 6; // 6 = A9 (research T2/T3, super tier, Data network, new buildings / parts, vehicle tiers); 5 = A14 (terrain speed factor per chassis, weighted A*); 4 = A8 (ASCII map wall height 12.3 ± 12 % → line of sight / wall stops); 3 = A7 (crew morale bail-out, melee sweep vs wrecks, formation P2 march); 2 = A1 (simBody of structures, AI production / placement, chunked commands) after v28
+export const SIM_VERSION = 8; // 8 = A16 (attack charge legs, photon deflector, hover photon jet legs, flamethrower cone, AI shield arms / ability scores); 7 = A15 (content purge per new_units, per-faction requiresTier, hopRun on speed legs, new start arms); 6 = A9 (research T2/T3, super tier, Data network, new buildings / parts, vehicle tiers); 5 = A14 (terrain speed factor per chassis, weighted A*); 4 = A8 (ASCII map wall height 12.3 ± 12 % → line of sight / wall stops); 3 = A7 (crew morale bail-out, melee sweep vs wrecks, formation P2 march); 2 = A1 (simBody of structures, AI production / placement, chunked commands) after v28
 export const SAVE = {
   format: 'steelmen-save',      // marker of a save object / .smsave file
   formatVersion: 1,             // layout of the save object (not the simulation)

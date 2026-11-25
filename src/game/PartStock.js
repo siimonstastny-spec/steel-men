@@ -3,7 +3,7 @@
 // (RobotPartFactory) fills and the assembly bay (RobotAssemblyBay) takes from. One stock lives in
 // world.economy.parts. Parts are counted by model path; an arm is universal: left and right models of one type share one stock entry.
 // Only the simulation changes the stock (Production.js, Repair.js); the UI reads it.
-import { partStats, canProduce, withModelRaceParts, withDataParts, SLOT_KIND } from '../data/Stats.js';
+import { partStats, canProduce, tierLocked, withModelRaceParts, withDataParts, SLOT_KIND } from '../data/Stats.js';
 import { ARMS } from '../config.js';
 
 export const MECH_SLOTS = ['legs', 'torso', 'leftArm', 'rightArm'];
@@ -50,6 +50,22 @@ export function partOptions(catalog, factorySlot, race, unlocked = null) {
     .filter((p) => (p.race === race || (p.race === null && partStats(p.path, slot, race).buildable))
       && canProduce(race, PRODUCTION_KIND, p.set, unlocked, SLOT_KIND[slot])) // research / salvage unlock per part kind
     .sort((a, b) => (a.set === BASE_SET ? -1 : b.set === BASE_SET ? 1 : a.set.localeCompare(b.set)));
+}
+
+/**
+ * [A15] Parts of a slot the faction will make once its research tier opens (UI "requires tier N"): [{ entry, tier }],
+ * same order as partOptions. Only parts that only the tier blocks (Stats.tierLocked); [] outside a match.
+ */
+export function tierLockedParts(catalog, factorySlot, race, unlocked = null) {
+  const slot = catalogSlot(factorySlot);
+  const kind = SLOT_KIND[slot];
+  const out = [];
+  for (const p of catalog?.[slot] ?? []) {
+    if (p.race !== race) continue;
+    const tier = tierLocked(race, PRODUCTION_KIND, p.set, unlocked, kind);
+    if (tier) out.push({ entry: p, tier });
+  }
+  return out.sort((a, b) => a.entry.set.localeCompare(b.entry.set));
 }
 
 /** Catalog entry of a model path in a slot, or null (validates paths coming from commands) */

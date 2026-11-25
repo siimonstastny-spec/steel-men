@@ -9,6 +9,9 @@ import './RobotArms.js';
 import './RobotArmsMelee.js';
 import './RobotArmsRanged.js';
 import './RobotArmsB3.js';
+import './RobotLegsA16.js';
+import './RobotTorsosA16.js';
+import './RobotArmsA16.js';
 
 export {
   ProcRobot, createProcRobot, ProcRobotPart, createProcRobotPart, robotPartIds, resolveRobotCombo, robotKit, ROBOT_KIT,

@@ -317,7 +317,7 @@ export class ResearchManager {
     const plan = this.plan;
     if (this.#activeCount() >= (plan.maxActive ?? 1)) return this.#block(`running ${this.#activeCount()}/${plan.maxActive ?? 1}`);
     // [E1] economy hold (Economy #econ: too few trucks): no research, no reservation – the ore goes to the trucks
-    // (v20b: normal kept 1/3 trucks for minutes while "saving missileArtillery" took the ore)
+    // (v20b: normal kept 1/3 trucks for minutes while saving for a T1 faction research took the ore)
     if (this.ai.bb.econ?.hold) return this.#block('economy hold');
     const facility = this.#freeFacility(facilities);
     if (!facility) return this.#block('facility queue full');

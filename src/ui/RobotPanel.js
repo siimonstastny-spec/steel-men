@@ -154,6 +154,10 @@ export class RobotPanel {
         parts.push(t(wait > 0 ? 'hud.flightCooldown' : 'hud.flightReady', { value: wait }));
       }
       if (mech.hopAbility) parts.push(t('ability.hopRun'));
+      // [A16] charge legs, photon deflector (any part), hover legs
+      if (mech.chargeAbility) parts.push(t('ability.charge'));
+      if (mech.deflectChance?.() > 0) parts.push(t('ability.deflect'));
+      if (mech.stats?.mobility?.movementType === 'hover') parts.push(t('ability.hover'));
       if (mech.hasMixedWeapons) parts.push(t('unit.stance', { stance: t(mech.stance === 'melee' ? 'cmd.stanceMelee' : 'cmd.stanceRanged') }));
       return esc(parts.join(SEP) || '–');
     }

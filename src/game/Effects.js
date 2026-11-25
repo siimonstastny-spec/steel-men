@@ -2,7 +2,7 @@
 // Explosion models (models/explosion/*.glb) are static meshes – all their animation happens here.
 import * as THREE from 'three';
 import { loadModel } from '../core/AssetLoader.js';
-import { VFX, R2, SOUND_HOOKS } from '../config.js';
+import { VFX, R2, SOUND_HOOKS, A16 } from '../config.js';
 import { play } from '../audio/Sound.js';
 import { loadExplosionData, explosionData, explosionPlan, damagePlan, ParticleField } from './ExplosionStyles.js';
 
@@ -279,6 +279,31 @@ export class Effects {
    */
   custom(life, update, dispose) {
     this.items.push({ life, update, dispose });
+  }
+
+  /**
+   * [A16] One tick of a flamethrower cone: A16.fx.flamePerShot glow puffs from the nozzle spreading inside the cone
+   * (half angle `half`, rad) around the yaw `yaw`, each travelling about `range` during its life. Batched in the shared
+   * particle field (one instanced mesh for all flames); own visual rng, never world.rng. No allocation.
+   */
+  flameCone(from, yaw, range, half) {
+    if (this.headless || !explosionData()) return; // [J1] visual only; the field needs the explosion engine data
+    const fx = A16.fx;
+    const field = this.#field();
+    const pool = field.pools.glow;
+    const near = fx.flameColorNear;
+    const far = fx.flameColorFar;
+    for (let n = 0; n < fx.flamePerShot; n++) {
+      const a = yaw + (field.rand() * 2 - 1) * half;
+      const life = fx.flameLife[0] + field.rand() * (fx.flameLife[1] - fx.flameLife[0]);
+      // start speed that covers `range` within the life despite the pool's drag (distance = v0 · (1 − e^(−drag·life)) / drag)
+      const speed = fx.flameDrag > 0 ? (range * fx.flameDrag) / (1 - Math.exp(-fx.flameDrag * life)) : range / life;
+      const m = field.rand();
+      pool.add(from.x, from.y, from.z, Math.sin(a) * speed, fx.flameRise, Math.cos(a) * speed, life,
+        fx.flameSize[0], fx.flameSize[1],
+        near[0] + (far[0] - near[0]) * m, near[1] + (far[1] - near[1]) * m, near[2] + (far[2] - near[2]) * m,
+        0, fx.flameDrag, from.y);
+    }
   }
 
   /** Instant shot line (lasers, guns without projectile speed) */

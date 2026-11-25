@@ -14,7 +14,7 @@ import { loadBuildingStyles } from '../procedural/registry.js';
 import * as RobotParts from '../procedural/robots/RobotParts.js'; // side effects: registers every robot part
 import * as RobotKit from '../procedural/robots/RobotKit.js';
 import { procPartId } from '../procedural/robots/RobotPartMap.js'; // [B6] set → proc id when stats.json has no procModel
-import { partStats } from '../data/Stats.js'; // [B3] loadout → standInSet check at candidate time
+import { partStats, isDataOnlyPart } from '../data/Stats.js'; // [B3] loadout → data-only part check at candidate time
 import { GlbSkin, skinReady, prepareGlbSkins, hasGlbSkins, createSkinPartModel } from './GlbSkinVisual.js'; // [W-skin] hand-made GLB parts win over procedural ones
 
 const SLOTS = ['legs', 'torso', 'leftArm', 'rightArm'];
@@ -29,8 +29,8 @@ const ONE = new THREE.Vector3(1, 1, 1);
 
 /** Procedural robots may be drawn now (config + console switch window.steelMen.procedural) */
 export const procRobotsOn = () => PROC_ROBOTS.enabled && globalThis.window?.steelMen?.procedural !== false;
-/** [B3] A part of a data-only set (stats.json standInSet: IonKatana, SprintLegs, BastionTorso …) makes the whole robot procedural */
-const hasStandIn = (part) => !!part?.stats?.standInSet;
+/** [B3] A part of a data-only set (stats.json standInSet / [A15] standInModel: IonKatana, SprintLegs, BastionTorso …) makes the whole robot procedural */
+const hasStandIn = (part) => isDataOnlyPart(part?.stats);
 
 /** [B3] The loadout { legs, torso, leftArm, rightArm } (model paths) names a part with stats.standInSet (stats must be loaded) */
 function loadoutHasStandIn(loadout) {
@@ -38,7 +38,7 @@ function loadoutHasStandIn(loadout) {
   for (let i = 0; i < SLOTS.length; i++) {
     const path = loadout[SLOTS[i]];
     if (!path) continue;
-    try { if (partStats(path, SLOTS[i]).standInSet) return true; } catch { /* stats not loaded: not a candidate */ }
+    try { if (isDataOnlyPart(partStats(path, SLOTS[i]))) return true; } catch { /* stats not loaded: not a candidate */ }
   }
   return false;
 }

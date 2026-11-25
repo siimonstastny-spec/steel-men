@@ -18,7 +18,7 @@
 // (Alliances / FogOfWar), so the network adds no sight of its own.
 // Queueing / paying / completion is driven by world.production (src/game/Production.js, commands
 // 'queueResearch' / 'queueAnalysis'); ResearchView only shows it.
-import { getStats, canProduce, unlockId, setResearchEffects, researchTimeFactor, teamRule, partStats, SLOT_KIND, setResearchContext, isSuperweaponItem, unitStats } from '../data/Stats.js';
+import { getStats, canProduce, exclusiveListed, unlockId, setResearchEffects, researchTimeFactor, teamRule, partStats, SLOT_KIND, setResearchContext, isSuperweaponItem, unitStats } from '../data/Stats.js';
 import { RESEARCH, SALVAGE_DROP, RESEARCH_A9, ARCHEOLOGY } from '../config.js';
 import { edgeDistance } from './Combat.js';
 import { areAllies, allianceLeader } from './Alliances.js';
@@ -274,18 +274,21 @@ export class Research {
       const needs = u.group === PART_GROUP
         ? getStats().parts?.[u.id]?.[u.sub]?.requiresResearch
         : getStats()[u.group]?.[u.id]?.requiresResearch;
-      if (!this.#raceMayOwn(team, u.group, u.id)) continue; // [A9] research never unlocks another faction's exclusive item
+      if (!this.#raceMayOwn(team, u.group, u.id, u.sub)) continue; // [A9] research never unlocks another faction's exclusive item
       if ((needs ?? []).every((r) => t.completed.has(r))) this.#unlock(team, u.group, unlockId(u.id, u.sub));
     }
     this.#syncNetwork(team);
   }
 
-  /** [A9] false when the item is exclusive to other races (races[*].exclusive[group]); salvage unlocks go elsewhere */
-  #raceMayOwn(team, group, id) {
+  /**
+   * [A9] false when the item is exclusive to other races (races[*].exclusive[group]; [A15] a part set may be listed for
+   * one part kind, 'Set:kind'); salvage unlocks go elsewhere
+   */
+  #raceMayOwn(team, group, id, sub = null) {
     const races = getStats().races ?? {};
     let listed = false;
     for (const key in races) {
-      if (!races[key].exclusive?.[group]?.includes(id)) continue;
+      if (!exclusiveListed(races[key], group, id, sub)) continue;
       if (key === this.races[team]) return true;
       listed = true;
     }
@@ -388,7 +391,7 @@ export class Research {
 
   /**
    * A captured part reached the team's research facility. Stored only when the team cannot make that part
-   * kind and it is buildable at all (Alien parts are loot only). @returns {boolean} newly stored
+   * kind and it is buildable at all (buildable: false parts are loot only). @returns {boolean} newly stored
    */
   addLoot(team, { set, kind, path, race = null }) {
     const t = this.teams[team];

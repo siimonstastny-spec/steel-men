@@ -2,10 +2,11 @@
 // Pure and deterministic: the same race + the same data always give the same loadouts, so every client of a
 // lockstep match builds the same robots. The code knows no faction names: LOADOUT.templates (config.js) list, per
 // slot, part sets in order of preference; the first set the race may produce (canProduce) and has a model of
-// (catalog entry of its own race) wins, Basic is the fallback. Raceless parts (Frame, Alien) are never picked.
+// (catalog entry of its own race) wins, Basic is the fallback. Raceless parts (Frame) are never picked.
+// [A15] Only parts of the race's first tier (Stats.tierFor ≤ BASE_TIER): a start robot never carries T2 / T3 parts.
 // Legs are chosen last: the first candidate whose loadCapacity carries the chosen torso and arms (no overload).
 import { LOADOUT, START_SETS } from '../config.js';
-import { partStats, canProduce, SLOT_KIND } from '../data/Stats.js';
+import { partStats, canProduce, itemTier, BASE_TIER, SLOT_KIND } from '../data/Stats.js';
 
 const PRODUCTION_KIND = 'partSets'; // races[*].exclusive group that limits part production
 
@@ -14,10 +15,11 @@ function entryOf(catalog, slot, set, race) {
   return (catalog?.[slot] ?? []).find((p) => p.set === set && p.race === race) ?? null;
 }
 
-/** Candidate sets of a slot that the race may produce (no research / salvage unlock assumed) and has a model of */
+/** Candidate sets of a slot that the race may produce at the start (no research / salvage unlock, T1) and has a model of */
 function allowed(catalog, slot, race, candidates) {
   return candidates
-    .filter((set) => canProduce(race, PRODUCTION_KIND, set, null, SLOT_KIND[slot]))
+    .filter((set) => canProduce(race, PRODUCTION_KIND, set, null, SLOT_KIND[slot])
+      && itemTier(PRODUCTION_KIND, set, race, SLOT_KIND[slot]) <= BASE_TIER)
     .map((set) => entryOf(catalog, slot, set, race))
     .filter(Boolean);
 }

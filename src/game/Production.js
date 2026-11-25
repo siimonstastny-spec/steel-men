@@ -17,7 +17,7 @@
 //   { id, team, producer (eid), kind: 'vehicle'|'crew'|'part'|'mech'|'research'|'analysis',
 //     unitId?, slot?, path?, set?, loadout?, parts?, researchId?, lootKey?, lootKind?,
 //     cost, supply, total, elapsed, due?, paid? }   ([W5b] due / paid: deferred part of the cost, e.g. { energy: 40 })
-import { getStats, canProduce, unitStats, crewStats, partStats, mechStatsFromLoadout, mechAssemblyStats } from '../data/Stats.js';
+import { getStats, canProduce, tierLocked, unitStats, crewStats, partStats, mechStatsFromLoadout, mechAssemblyStats } from '../data/Stats.js';
 import * as THREE from 'three';
 import { HUD, ROBOT_PRODUCTION, RALLY, BAY_CREW } from '../config.js';
 import { issueOrder } from '../units/OrderQueue.js';
@@ -224,6 +224,25 @@ export class Production {
       if (b.team === team && pending.some((e) => e.eid === b.eid)) return true;
     }
     return false;
+  }
+
+  /**
+   * [A15] Vehicles this building will make once the team's research tier opens (UI "requires tier N"):
+   * [{ unitId, tier }] in data order – only those the tier alone blocks (Stats.tierLocked). Read-only, UI use.
+   */
+  tierLockedUnits(structure) {
+    const out = [];
+    if (!structure.produces?.includes(PRODUCES.vehicle)) return out;
+    const race = this.raceOf(structure.team);
+    const unlocks = this.unlocksOf(structure.team);
+    const all = getStats().vehicles ?? {};
+    for (const id of Object.keys(all)) {
+      const raw = all[id];
+      if (raw.buildable === false || ![].concat(raw.producedAt ?? []).includes(structure.unitId)) continue;
+      const tier = tierLocked(race, 'vehicles', id, unlocks);
+      if (tier) out.push({ unitId: id, tier });
+    }
+    return out;
   }
 
   #vehicleAllowed(structure, id) {

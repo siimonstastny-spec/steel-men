@@ -121,13 +121,13 @@ function disposeOriginal(holder) {
  * Spawns one procedural unit per style (default: every style of data/buildingStyles.json) in a row along +X.
  * @param {THREE.Object3D} scene
  * @param {{x:number, y?:number, z:number}} position
- * @param {object} [o] { id = 'lightTank', races, teamColor, opts (model options, e.g. { chassis: 'wheels', weapon:
+ * @param {object} [o] { id = 'mediumTank', races, teamColor, opts (model options, e.g. { chassis: 'wheels', weapon:
  *   'lightning' }), demo = true, batching = false (far LOD instancing, needs a scene), original (GLB vehicle id to show
  *   behind, e.g. 'gunTank'), scale }
  * @returns handle { models, originals, demo, cloak, deploy, stats(), batchStats(), dispose() }
  */
 export async function spawnUnitPreview(scene, position = { x: 0, y: 0, z: 0 }, {
-  id = 'lightTank', races, teamColor = UNIT_PREVIEW.teamColor, opts = {}, demo = true, batching = false, original = null, scale,
+  id = 'mediumTank', races, teamColor = UNIT_PREVIEW.teamColor, opts = {}, demo = true, batching = false, original = null, scale,
 } = {}) {
   await Promise.all([loadStats(), loadBuildingStyles()]);
   const keys = races ?? styleKeys();

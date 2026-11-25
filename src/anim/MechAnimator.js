@@ -27,7 +27,7 @@ export class MechAnimator {
     this.dead = false;
     this.attackCounters = new Map(); // `${set}/${side}` -> next clip variant
     this.walkRate = 1;
-    this.walkClip = CLIPS.walk; // [R2] move loop – legs may bring their own (stats anim.move, e.g. the JumpJet hop run)
+    this.walkClip = CLIPS.walk; // [R2] move loop – legs may bring their own (stats anim.move; [A15] speed legs have none yet = walk)
     this.air = { name: null, loop: false, duration: 0 }; // [R2] jet flight clip that replaces the base loop
     this.crewed = false;
     this.poweredDown = true;    // power-down already finished -> crewless pose starts at its last frame
@@ -65,7 +65,7 @@ export class MechAnimator {
 
   /**
    * [R2] Clip of the move loop (null = the common walk). Unknown names fall back to the walk (warning once).
-   * @param {string|null} name  e.g. 'RobotPartsJumpJet_LegsJetFly'
+   * @param {string|null} name  e.g. 'run' (a clip of the animation library)
    */
   setWalkClip(name) {
     const clip = name && this.lib.clips.has(name) ? name : CLIPS.walk;

@@ -49,7 +49,7 @@ export function loadAnimLibrary() {
       sides,
       amputated: { leftArm: ampL.animations[0], rightArm: ampR.animations[0] },
       /**
-       * Útočné klipy specifické pro sadu dílů (např. 'Basic', 'Axe').
+       * Útočné klipy specifické pro sadu dílů (např. 'Basic', 'HammerHand').
        * @param {'left'|'right'} [side]  only clips that swing this arm (clips come in mirrored pairs)
        */
       clipsForSet(set, side = null) {

@@ -16,7 +16,7 @@ import { bayCrewCount } from '../game/BayCrew.js';
 import { weaponName } from './hudUtil.js';
 import { partStats, mechStatsFromLoadout, mechAssemblyStats } from '../data/Stats.js';
 import { t } from '../i18n/i18n.js';
-import { MECH_SLOTS, PART_SLOTS, ARM_SLOTS, partOptions, framePart, catalogSlot, armModel, stockKey } from '../game/PartStock.js';
+import { MECH_SLOTS, PART_SLOTS, ARM_SLOTS, partOptions, tierLockedParts, framePart, catalogSlot, armModel, stockKey } from '../game/PartStock.js';
 import { progressOf } from './ProductionQueue.js';
 import { MechHologram, PartHologram } from '../units/MechHologram.js';
 import { taskProgress, waitingMech, canRelease } from '../game/Repair.js';
@@ -123,6 +123,13 @@ export class RobotProduction {
       tip: [this.#partTip(p, slot), t('grid.shiftBatch', { n: SHIFT_BATCH.count }), this.#fullTip(producer)].filter(Boolean).join('\n'),
       onClick: (e) => this.#queuePart(structure, slot, p, e?.shift),
     }));
+    // [A15] parts of a research tier not open yet: shown disabled with the reason (Stats.tierLocked)
+    for (const { entry: p, tier } of tierLockedParts(this.catalog, slot, this.race, this.buildMenu.unlocks)) {
+      items.push({
+        icon: p.set.slice(0, ROBOT_PRODUCTION.setIconLetters), iconUrl: this.#iconUrl(p, slot), label: p.set, disabled: true,
+        tip: [this.#partTip(p, slot), t('build.requiresTier', { tier })].filter(Boolean).join('\n'),
+      });
+    }
     items.push(this.#stockItem());
     return {
       title, items,

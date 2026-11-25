@@ -2,7 +2,7 @@
 // All numbers come from data/stats.json (weapon stats and rules.combat).
 import * as THREE from 'three';
 import { getStats, applyArmor, teamRule } from '../data/Stats.js';
-import { VFX, GENERATOR_BLAST, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY, LOS } from '../config.js';
+import { VFX, GENERATOR_BLAST, TARGET_PRIORITY, MELEE_STRUCTURE, AIR, ACCURACY, LOS, A16 } from '../config.js';
 import { play, weaponSoundEvent } from '../audio/Sound.js';
 import { applyWeaponEffects } from './StatusEffects.js';
 import { areAllies } from './Alliances.js';
@@ -365,6 +365,7 @@ export function releaseAttack(world, attacker, weapon, target, { hit = 'single' 
         else world.effects.tracer(from, stop, s.projectileColor || color);
         return;
       }
+      if (s.cone) { fireCone(world, attacker, s, from); return; } // [A16] flamethrower: everything in the cone
       if (s.spread > 0) { firePellet(world, attacker, s, from, aim, color); return; }
       // Hit roll when the shot leaves: a miss flies into the ground beside the target (and may splash there)
       noteAttacker(target, attacker); // lets idle units fight back (even when the shot misses)
@@ -380,6 +381,8 @@ export function releaseAttack(world, attacker, weapon, target, { hit = 'single' 
       }
       const land = (point) => {
         if (wreck) { resolveWreckImpact(world, attacker, s, wreck, point); return; }
+        // [A16] a photon deflector on the unit that is hit may send the shot back (no damage to it)
+        if ((onTarget || victim) && deflectShot(world, attacker, s, victim ?? target, point, from, color)) return;
         if (victim && areEnemies(attacker, victim)) noteAttacker(victim, attacker);
         resolveShot(world, attacker, s, victim ?? target, point, from, onTarget || !!victim, victimFactor);
       };
@@ -665,6 +668,88 @@ function firePellet(world, attacker, s, from, aim, color) {
   if (areEnemies(attacker, hit.unit)) noteAttacker(hit.unit, attacker);
   applyHit(world, attacker, s, hit.unit, hit.factor, from, 1, score);
   awardXp(attacker, score.dealt, score.kills);
+}
+
+/**
+ * [A16] Flame cone (weapon `cone: { angle }`, full angle in degrees): one tick of the burst hits every unit the weapon
+ * can hurt (sideFactor: enemies; own units only with friendly fire) whose body is within the weapon's range of the
+ * attacker's edge and whose centre lies inside the cone around the attacker's facing, with a clear line (tall map
+ * obstacles shield). No hit roll – the cone decides (like pellets). Weapon effects (burn) on every unit hit; wrecks in
+ * the cone are hit too. Deterministic: world.units order, no rng.
+ */
+function fireCone(world, attacker, s, from) {
+  const half = ((s.cone.angle ?? A16.cone.defaultAngle) * DEG) / 2;
+  const range = s.range;
+  const score = { dealt: 0, kills: 0 };
+  for (const unit of world.units) {
+    if (!isTargetable(unit) || !hitsLayer(s, unit)) continue;
+    const ff = sideFactor(world, attacker, unit, s);
+    if (ff <= 0 || edgeDistance(attacker, unit) > range || Math.abs(angleTo(attacker, unit.position)) > half) continue;
+    if (!clearShot(world, attacker, unit)) continue;
+    if (areEnemies(attacker, unit)) noteAttacker(unit, attacker);
+    applyHit(world, attacker, s, unit, ff, from, 1, score);
+  }
+  const near = SWEEP_NEAR;
+  for (const wreck of world.damageableWrecks) {
+    wreck.bounds().clampPoint(attacker.position, near);
+    const d = Math.hypot(near.x - attacker.position.x, near.z - attacker.position.z) - (attacker.radius ?? 0);
+    if (d > range || Math.abs(angleTo(attacker, near)) > half) continue;
+    damageWreck(world, wreck, s, 1);
+  }
+  world.effects.flameCone?.(from, attacker.rotation.y, range + (attacker.radius ?? 0), half); // visual only
+  awardXp(attacker, score.dealt, score.kills);
+}
+
+/**
+ * [A16] Can this shot be sent back by a photon deflector? Only real projectiles of direct-fire weapons: not melee, not
+ * artillery (lobbed shells / area bombardment), not cone / pellet weapons (those never reach this point); instant
+ * hits (lasers, projectileSpeed 0) only when the deflector allows `beams`.
+ */
+function deflectable(s, beams) {
+  if (s.class === 'melee' || s.class === 'artillery' || s.cone) return false;
+  return s.projectileSpeed > 0 || beams;
+}
+
+/**
+ * Combined deflect chance of a unit against weapon stats `s`: the unit's own deflectChance(beam) (ModularMech – live
+ * parts with a 'deflect' ability), 0 for units without it or shots that cannot be deflected.
+ */
+export function deflectChanceAgainst(unit, s) {
+  if (typeof unit?.deflectChance !== 'function') return 0;
+  const beam = !(s.projectileSpeed > 0);
+  const chance = unit.deflectChance(beam);
+  return chance > 0 && deflectable(s, beam) ? chance : 0;
+}
+
+/**
+ * [A16] Rolls the deflector of the unit that is hit (world.rng – only when it has a chance, so other shots never use the
+ * generator). On success the shot does no damage and goes back to the shooter as the deflecting unit's shot: a
+ * projectile flies back (homing on the shooter), an instant beam returns at once; it always hits the shooter if it is
+ * still there (× rules.combat.deflect.reflectDamageFactor, splash / effects / pierce of the weapon apply, XP to the
+ * deflecting crew) and is never deflected again (no ping-pong). A short flash where it bounced (visual).
+ * @returns {boolean} true when the shot was deflected
+ */
+function deflectShot(world, attacker, s, unit, point, from, color) {
+  const chance = deflectChanceAgainst(unit, s);
+  if (chance <= 0 || world.rng.next() >= chance) return false;
+  const factor = getStats().rules.combat.deflect?.reflectDamageFactor ?? 1;
+  const at = surfacePoint(unit, point, from);
+  world.effects.burst(VFX.energyImpact, at, { size: A16.fx.deflectFlashSize, sound: 'impact' }); // visual only
+  // friendly fire settings apply to the way back too (the deflecting unit is the shooter now)
+  const back = (p) => {
+    const k = sideFactor(world, unit, attacker, s);
+    if (k > 0) resolveShot(world, unit, s, attacker, p, at, isTargetable(attacker), factor * k);
+  };
+  if (s.projectileSpeed > 0) {
+    const last = aimPoint(attacker, new THREE.Vector3()); // allocation only on a deflected shot
+    const homing = () => (isTargetable(attacker) ? aimPoint(attacker, last) : last);
+    world.effects.projectile(at, homing, s.projectileSpeed, color, back, projectileLook(s));
+  } else {
+    const end = aimPoint(attacker, new THREE.Vector3());
+    world.effects.tracer(at, end, s.projectileColor || color);
+    back(end);
+  }
+  return true;
 }
 
 /** Piercing shot: continues behind the target along the line of fire into up to pierce.count more units */

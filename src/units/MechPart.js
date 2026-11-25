@@ -17,7 +17,7 @@ export class MechPart {
   constructor(key, object, stats, maxHp = stats.hp) {
     this.key = key;
     this.stats = stats;
-    this.set = stats.set; // sada dílu, např. 'Basic', 'Axe' (určuje útočné animace)
+    this.set = stats.set; // sada dílu, např. 'Basic', 'HammerHand' (určuje útočné animace)
     this.object = object;
     this.maxHp = maxHp;
     this.hp = maxHp;
