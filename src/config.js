@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v32';
+export const GAME_VERSION = 'v33';
 // Game name (brand, shown in the main menu title; not translated)
 export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
