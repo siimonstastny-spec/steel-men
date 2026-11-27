@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v33';
+export const GAME_VERSION = 'v34';
 // Game name (brand, shown in the main menu title; not translated)
 export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
@@ -993,6 +993,14 @@ export const RINGS = {
  */
 export const ATTACK_CLIP_SET = {
   SniperLaser: 'GattlingGun',
+  RocketArm: 'HomingMissile', // [basic-m1] data-only set on the HomingMissile stand-in: its launch clips anim86 / anim87 (side-matched)
+};
+
+// [basic-m1] Arm of a set attack clip where AnimLibrary's motion measure is wrong (it sums frame-to-frame motion; these
+// launch clips move the body a lot and come out 'both'). Measured as deviation from the first frame: anim86 left, anim87 right.
+export const ATTACK_CLIP_SIDES = {
+  RobotPartsHomingMissile_RobotSkeleton_anim86: 'left',
+  RobotPartsHomingMissile_RobotSkeleton_anim87: 'right',
 };
 
 // RTS orders of mechs (ModularMech): attack-move, guard, patrol
@@ -2653,6 +2661,7 @@ export const PROC_STATE = {
 // only: the whole drawing moved in mech space while these legs are mounted. Switches: GLB_SKINS.enabled,
 // races.<R>.enabled, sets.<S>.enabled (before a robot loads), window.steelMen.glbSkins = false (display, next sync).
 const BASIC_M1_DIR = 'RobotPartsBasicM1/';
+const T1_DIR = 'RobotPartsT1/'; // hand-modelled T1 weapon arms
 // New legs' socket_TorsoMount is 1.7 further forward (z) and 0.6 higher than the stand-in's: the drawing moves back by
 // the z part, so the torso and arms rise 0.6 but stay above the simulation body (shots leave near the drawn barrels)
 const BASIC_M1_LEGS_OFFSET = [0, 0, -1.7];
@@ -2684,7 +2693,25 @@ export const GLB_SKINS = {
   // per simulation tick, so no clock and no allocation): emissiveIntensity × (min .. max)
   pulse: { nodePattern: '(Animated)', speed: 5, min: 0.55, max: 1.3, phaseStep: 1.7 },
   races: {
-    X: { enabled: true, sets: { Basic: basicM1Set('X') } },
+    X: {
+      enabled: true,
+      sets: {
+        Basic: basicM1Set('X'),
+        // [basic-m1] first textured T1 weapon arms (models/RobotPartsT1). RocketArm is a data-only set (stand-in
+        // HomingMissile arm): its launcher block replaces the forearm (nodes Upper → Fore), shots still leave from the
+        // stand-in's socket_Launch_1 (simulation)
+        KatanaSword: {
+          style: 'native',
+          leftArm: { path: `${T1_DIR}LeftKatanaSwordArmX.glb` },
+          rightArm: { path: `${T1_DIR}RightKatanaSwordArmX.glb` },
+        },
+        RocketArm: {
+          style: 'native',
+          leftArm: { path: `${T1_DIR}LeftRocketArmX.glb` },
+          rightArm: { path: `${T1_DIR}RightRocketArmX.glb` },
+        },
+      },
+    },
     Y: { enabled: true, sets: { Basic: basicM1Set('Y') } },
     Z: { enabled: true, sets: { Basic: basicM1Set('Z') } },
     W: {

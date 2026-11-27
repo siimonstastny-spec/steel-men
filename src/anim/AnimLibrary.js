@@ -3,7 +3,7 @@
 // Uzly kostry se mapují na uzly dílů podle pozice ve stromu (nejbližší sourozenec).
 import * as THREE from 'three';
 import { loadGltf } from '../core/AssetLoader.js';
-import { R2 } from '../config.js';
+import { R2, ATTACK_CLIP_SIDES } from '../config.js';
 
 const SKELETON = 'animbase/RobotSkeleton.glb';
 const AMPUTATED = {
@@ -89,7 +89,7 @@ function classifyClipSides(skeleton, clips) {
     if (!name.startsWith('RobotParts')) continue;
     const l = motion(clip, arms.left);
     const r = motion(clip, arms.right);
-    sides.set(name, Math.max(l, r) < Math.min(l, r) * BOTH_ARMS_RATIO ? 'both' : l > r ? 'left' : 'right');
+    sides.set(name, ATTACK_CLIP_SIDES[name] ?? (Math.max(l, r) < Math.min(l, r) * BOTH_ARMS_RATIO ? 'both' : l > r ? 'left' : 'right'));
   }
   return sides;
 }
