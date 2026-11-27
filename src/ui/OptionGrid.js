@@ -66,7 +66,7 @@ export class OptionGrid {
     const tabRow = tabs.length
       ? `<div class="hud-tabs">${tabs.map((tb, i) => `<button class="${tb.on ? 'on' : ''}" data-tab="${i}">${esc(tb.label)}</button>`).join('')}</div>` : '';
     const sum = summary.length
-      ? `<div class="hud-summary">${summary.map((r) => `<div class="${r.warn ? 'warn' : ''}"><span>${esc(r.label)}</span><b>${esc(r.value)}</b></div>`).join('')}</div>` : '';
+      ? `<div class="hud-summary" data-scroll-key="summary">${summary.map((r) => `<div class="${r.warn ? 'warn' : ''}"><span>${esc(r.label)}</span><b>${esc(r.value)}</b></div>`).join('')}</div>` : '';
     const act = action
       ? `<button class="hud-action" data-action="1" title="${esc(action.tip)}" ${action.disabled ? 'disabled' : ''}>${esc(action.label)}</button>` : '';
     return `${head}${tabRow}<div class="hud-grid" data-scroll-key="grid">${cells.join('')}</div>${sum}${act}`;

@@ -7,13 +7,17 @@
 }
 #diplomacy-view[hidden] { display: none; }
 #diplomacy-view .dip-panel {
-  min-width: 560px; max-width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto;
+  min-width: 560px; max-width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: hidden;
+  display: flex; flex-direction: column;
   box-sizing: border-box; padding: 16px 20px;
   background: var(--menu-brushed, none), linear-gradient(180deg, rgba(34, 41, 48, 0.97), rgba(14, 18, 22, 0.97));
   border: 1px solid var(--hud-border, #3a4652);
 }
 #diplomacy-view h2 { margin: 0 0 8px; font-size: 18px; letter-spacing: 0.04em; text-transform: uppercase; }
 #diplomacy-view .dip-own { margin: 0 0 10px; opacity: 0.85; }
+/* title, hint and close stay put; only the player table scrolls */
+#diplomacy-view .dip-panel > * { flex: 0 0 auto; }
+#diplomacy-view .dip-scroll { flex: 0 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 #diplomacy-view .dip-table { width: 100%; border-collapse: collapse; }
 #diplomacy-view th { text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; opacity: 0.6; padding: 4px 6px; }
 #diplomacy-view td { padding: 5px 6px; vertical-align: middle; border-top: 1px solid rgba(223, 230, 238, 0.1); }
@@ -58,8 +62,7 @@
   #diplomacy-view .dip-panel { max-height: calc(100vh - 12px); padding: 8px 12px; }
 }
 
-/* [A4-UI] 5–8 players: compact rows, sticky header; the panel itself scrolls (max-height above) */
-#diplomacy-view .dip-panel { min-width: min(560px, calc(100vw - 32px)); }
+/* [A4-UI] 5–8 players: compact rows, sticky header (inside .dip-scroll, the only scroller) */
 #diplomacy-view .dip-many { padding: 10px 14px; }
 #diplomacy-view .dip-many h2 { font-size: 16px; margin-bottom: 4px; }
 #diplomacy-view .dip-many .dip-own { margin-bottom: 6px; }

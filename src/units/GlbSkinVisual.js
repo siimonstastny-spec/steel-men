@@ -9,7 +9,6 @@
 import * as THREE from 'three';
 import { GLB_SKINS, HIGHLIGHT, SIM, SOCKETS, TEAMS } from '../config.js';
 import { loadGltf } from '../core/AssetLoader.js';
-import { isDataOnlyPart } from '../data/Stats.js';
 import { prepareSkinGltf, findEmblemPlacement, createEmblemMesh, attachTeamPaint, setTeamPaint } from './GlbSkinTexture.js';
 
 export const SKIN_SLOTS = ['legs', 'torso', 'leftArm', 'rightArm'];
@@ -125,8 +124,9 @@ function markSkinNodes(gltf, root) {
 }
 
 /**
- * [basic-m1] Loads the skins of mounted parts whose race's models are not loaded yet (a part picked up from another
- * race). Returns a promise to sync the display after, or null when nothing is missing.
+ * [basic-m1] Loads the skin models of the mounted parts that are not loaded yet (a new robot, a part picked up / swapped;
+ * [t-parts] only what is mounted – a race has dozens of skin models). Returns a promise to sync the display after, or
+ * null when nothing is missing.
  */
 export function missingGlbSkins(mech, race) {
   let jobs = null;
@@ -134,7 +134,7 @@ export function missingGlbSkins(mech, race) {
     const part = mech.parts[slot];
     const e = part ? skinEntry(race, part) : null;
     if (!e || loaded.has(e.path)) continue;
-    (jobs ??= []).push(prepareGlbSkins(partRace(part, race)));
+    (jobs ??= []).push(loadSkin(e));
   }
   return jobs ? Promise.all(jobs) : null;
 }
@@ -153,14 +153,10 @@ export function partSkinned(part, race) {
  */
 export function skinReady(mech, race) {
   if (!skinsOn()) return false;
-  let any = false;
-  for (const slot of SKIN_SLOTS) {
-    const part = mech.parts[slot];
-    if (partSkinned(part, race)) any = true;
-    // [basic-m1] a data-only part without a skin has only a placeholder GLB: the procedural robot draws that mech
-    else if (part && isDataOnlyPart(part.stats)) return false;
-  }
-  return any;
+  // [t-parts] the skin wins whenever any mounted part has one; a part without a skin (data-only ones too) is drawn as
+  // its stand-in GLB (redrawn by the skin when a socket under it moved)
+  for (const slot of SKIN_SLOTS) if (partSkinned(mech.parts[slot], race)) return true;
+  return false;
 }
 
 /** [basic-m1] Colour of a mounted part: its paint team's (a captured part keeps the painter's until an assembly bay) */
@@ -355,6 +351,8 @@ function pairNode(skin, rig, pairs, maxSq) {
   pairs.set(skin, rig);
   const rigKids = rig.children.filter(isRigNode);
   const used = new Set();
+  const found = [];  // [skin child, rig child]
+  const lonely = []; // skin children without a counterpart nearby
   for (const child of skin.children) {
     if (!isSkinNode(child)) continue;
     let best = null;
@@ -364,10 +362,13 @@ function pairNode(skin, rig, pairs, maxSq) {
       const d = child.position.distanceToSquared(_v.fromArray(k.userData.rest.p));
       if (d < bestSq) { bestSq = d; best = k; }
     }
-    if (!best) continue; // no counterpart nearby: its meshes follow the paired parent
-    used.add(best);
-    pairNode(child, best, pairs, maxSq);
+    if (best) { used.add(best); found.push([child, best]); } else lonely.push(child);
   }
+  // [t-parts] exactly one skin child and one rig child left: the same joint in other proportions (feet of short
+  // stand-in legs, the Howitzer barrel). Otherwise the lonely ones follow the paired parent (turret / mast extras).
+  const spare = rigKids.filter((k) => !used.has(k));
+  if (lonely.length === 1 && spare.length === 1) found.push([lonely[0], spare[0]]);
+  for (const [s, r] of found) pairNode(s, r, pairs, maxSq);
 }
 
 /** [basic-m1] Part-space position of a socket of the skin model incl. the entry shift (cached per model), or null */
@@ -483,28 +484,15 @@ export class GlbSkin {
     const entry = skinEntry(this.race, part);
     const mats = this.#mats(slot, part);
     const tree = entry.style.bind === 'tree';
-    const pairs = tree ? pairTree(loaded.get(entry.path), part) : null;
-    const nodes = tree ? null : rigNodes(part);
-    const byNode = new Map(); // node -> follower
     const list = skinMeshes(entry, slot);
     const groups = [];        // list index -> follower group
+    const place = tree ? this.#treeFollowers(entry, part, slotGroup) : this.#suffixFollowers(part, slotGroup);
     for (const s of list) {
-      let node = null;
-      if (tree) for (let n = s.skinNode; n && !node; n = n.parent) node = pairs.get(n) ?? null;
-      else if (s.suffix !== null) node = nodes.get(s.suffix) ?? null;
-      node ??= part.object;
-      let f = byNode.get(node);
-      if (!f) {
-        const group = new THREE.Group();
-        group.matrixAutoUpdate = false;
-        slotGroup.add(group);
-        f = { node, rest: restInverse(node, part.object, new THREE.Matrix4()), group };
-        byNode.set(node, f);
-        this.followers.push(f);
-      }
+      const { f, inv } = place(s);
       const mesh = cloneMesh(s.mesh, mats, s.animated, entry.style);
       if (isField(mesh)) { mesh.visible = this.darkness <= 0; this.fields.push(mesh); }
       mesh.matrix.copy(s.matrix);
+      if (inv) mesh.matrix.premultiply(inv);
       f.group.add(mesh);
       groups.push(f.group);
     }
@@ -515,6 +503,63 @@ export class GlbSkin {
       groups[em.index].add(mesh);
       this.emblems.push(mesh);
     }
+  }
+
+  #newGroup(slotGroup) {
+    const group = new THREE.Group();
+    group.matrixAutoUpdate = false;
+    slotGroup.add(group);
+    return group;
+  }
+
+  /** 'draft' models: a follower per stand-in rig node (`_partNN` suffix); meshes stay in part space */
+  #suffixFollowers(part, slotGroup) {
+    const nodes = rigNodes(part);
+    const byNode = new Map(); // node -> follower
+    return (s) => {
+      const node = (s.suffix !== null && nodes.get(s.suffix)) || part.object;
+      let f = byNode.get(node);
+      if (!f) {
+        f = { node, rest: restInverse(node, part.object, new THREE.Matrix4()), parent: null, group: this.#newGroup(slotGroup) };
+        byNode.set(node, f);
+        this.followers.push(f);
+      }
+      return { f, inv: null };
+    };
+  }
+
+  /**
+   * [t-parts] 'native' models: a follower per paired skin node, chained like the skin model's own tree – the root
+   * follows the stand-in rig root, every child sits at ITS OWN joint and turns by the paired rig node's clip rotation.
+   * The stand-in's joints may lie elsewhere (other proportions, e.g. Armor legs' feet ~3 units higher), so a skin limb
+   * never swings around a foreign pivot. Meshes are placed relative to their skin node (inv). Parents come first.
+   */
+  #treeFollowers(entry, part, slotGroup) {
+    const root = loaded.get(entry.path);
+    const pairs = pairTree(root, part); // skin node -> rig node, parents first
+    const bySkin = new Map();           // skin node -> follower
+    for (const [sn, rn] of pairs) {
+      let parent = null;
+      for (let n = sn.parent; n && !parent; n = n.parent) parent = bySkin.get(n) ?? null;
+      const skinRest = sceneMatrix(sn, root, new THREE.Matrix4());
+      const f = { node: rn, rest: null, parent, group: this.#newGroup(slotGroup), skinInv: skinRest.clone().invert(), local: null, restQinv: null };
+      if (parent) { // skin node relative to its parent follower's node; clip rotation relative to the rig rest pose
+        f.local = parent.skinInv.clone().multiply(skinRest);
+        f.restQinv = new THREE.Quaternion().fromArray(rn.userData.rest.q).invert();
+      } else f.rest = restInverse(rn, part.object, new THREE.Matrix4()).multiply(skinRest);
+      bySkin.set(sn, f);
+      this.followers.push(f);
+    }
+    let top = null; // follower of the root when a mesh lies outside every paired node
+    for (const f of bySkin.values()) { top = f; break; }
+    const fallback = top ?? { node: part.object, rest: IDENTITY, parent: null, group: this.#newGroup(slotGroup), skinInv: IDENTITY };
+    if (!top) this.followers.push(fallback);
+    return (s) => {
+      let f = null;
+      for (let n = s.skinNode; n && !f; n = n.parent) f = bySkin.get(n) ?? null;
+      f ??= fallback;
+      return { f, inv: f.skinInv };
+    };
   }
 
   // [basic-m1] An unskinned part above a moved socket: copies of its GLB meshes (shared geometry AND material, so its
@@ -531,7 +576,7 @@ export class GlbSkin {
       group.matrixAutoUpdate = false;
       group.add(mesh);
       slotGroup.add(group);
-      this.followers.push({ node: src, rest: IDENTITY, group });
+      this.followers.push({ node: src, rest: IDENTITY, parent: null, group });
       this.proxies.push({ src, mesh });
     }
   }
@@ -543,6 +588,12 @@ export class GlbSkin {
     for (let i = 0; i < this.followers.length; i++) {
       const f = this.followers[i];
       const mat = f.group.matrix;
+      if (f.parent) { // [t-parts] skin joint chain: parent × own rest offset × the rig node's clip rotation
+        _q.copy(f.restQinv).multiply(f.node.quaternion);
+        mat.multiplyMatrices(f.parent.group.matrix, f.local).multiply(_m.makeRotationFromQuaternion(_q));
+        f.group.matrixWorldNeedsUpdate = true;
+        continue;
+      }
       mat.identity();
       for (let o = f.node; o && o !== mech; o = o.parent) {
         o.updateMatrix();

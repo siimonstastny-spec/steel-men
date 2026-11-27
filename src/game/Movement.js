@@ -12,6 +12,7 @@ const IGNORE = [];           // scratch of followPath: [unit, ...ignore], read b
 const FIND_OPTS = {          // scratch options of followPath's findPath call (findPath only destructures them)
   radius: 0, ignore: IGNORE, crossRift: false, flyRange: 0, flyPenalty: 0, hopRange: 0, hopPenalty: 0, body: null,
   terrainClass: null, // [A14-terrain] chassis class of the unit (weighted A*)
+  reach: null,        // [pathfinding-v2] order.reach: stand spot by path length (Pathfinding.findPath opts.reach)
 };
 
 /**
@@ -221,8 +222,10 @@ function groundPath(unit, order, goal, ignore, dt) {
     opts.hopRange = unit.hopAbility?.range ?? 0; opts.hopPenalty = JUMP_JET.hop.pathPenalty;
     opts.body = unit; // [W7] obstacles inflated by the unit's circle that touches them (mech: shoulders / legs)
     opts.terrainClass = cls; // [A14-terrain]
+    opts.reach = order.reach ?? null; // [pathfinding-v2] set by builders / repairers (Vehicle.js)
     const res = nav.findPath(unit.position, goal, opts);
     opts.body = null; // (do not keep the unit alive)
+    opts.reach = null;
     IGNORE.length = 0; // (nor the unit and its targets in the recycled ignore list)
     plan = order.nav = {
       waypoints: res.waypoints,

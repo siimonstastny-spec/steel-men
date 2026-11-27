@@ -200,6 +200,7 @@ let econAlerts = null; // [D2] no main building / low energy; created at the fir
 // startGame(settings): console tests of N players, e.g. steelMen.startGame({ playerCount: 4, alliances: [0, 0, 1, 1], … })
 window.steelMen = { renderer, world, input, scene, camera, controls, game, minimap, hud, edgeScroll, commandBus, gameSpeed, startGame, statsBar, diplomacy, loading, stockWindow, saveGame, saveStore, perfPanel, aiTickStats };installAiConsole(); // steelMen.ai.start / fastForward / report / log / stop (AI vs AI test)
 installDeterminismConsole(); // [I1] steelMen.det – determinism runs (docs/notes/i1-determinism.md)
+window.steelMen.path = { run: (opts) => import('./debug/pathProbe.js').then((P) => P.runPathProbe(opts)) }; // [pathfinding-v2] steelMen.path.run({ only: 'tower' })
 window.steelMen.modelBudget = (opts) => import('./procedural/debug/ModelBudget.js').then((B) => B.runModelBudget(opts)); // [B4] model triangle / draw call budget
 window.steelMen.sound = { play: playSound, unlock: unlockAudio, stopAll: stopAllSounds, dispose: disposeAudio, weapon: weaponSoundEvent }; // [A6] steelMen.sound.play('shotCannon')
 installUiSounds(); // [A6]

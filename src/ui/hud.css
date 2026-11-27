@@ -117,15 +117,20 @@ body:has(#menu:not([hidden])) :is(#hud-root, #unit-overlays, .hud-tooltip) { vis
 .hud-prod-art .m { flex: 1 1 auto; background-image: url("../../data/image/ui/hud2/production_mid.png"); background-repeat: repeat-y; background-size: 100% calc(var(--hud-prod-row-h) * var(--hud-u)); }
 .hud-prod-art .b { height: calc(var(--hud-prod-bottom-h) * var(--hud-u)); background-image: url("../../data/image/ui/hud2/production_bottom.png"); }
 /* the column never grows past the room above the idle buttons (--hud-prod-col-max, Hud.js): more content scrolls inside the panel */
-.hud-prod-col { position: absolute; left: calc(50 * var(--hud-u)); top: calc(var(--hud-prod-col-y) * var(--hud-u)); width: calc(240 * var(--hud-u) + 6px); max-height: calc(var(--hud-prod-col-max) * var(--hud-u)); overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; }
-.hud-prod-col > * { flex: 0 0 auto; }
+.hud-prod-col { position: absolute; left: calc(50 * var(--hud-u)); top: calc(var(--hud-prod-col-y) * var(--hud-u)); width: calc(240 * var(--hud-u) + 6px); max-height: calc(var(--hud-prod-col-max) * var(--hud-u)); overflow: hidden; display: flex; flex-direction: column; }
+/* OptionGrid's wrapper is display: contents, so its children are the flex items: descendant selectors, not ">" on the column */
+.hud-prod-col [data-el="optionGrid"] > * { flex: 0 0 auto; }
+/* the column itself never scrolls: title (h3), tabs, summary and action stay put, only the grid (the one scroller) shrinks to the room left */
+.hud-prod-col { --hud-grid-min-rows: 1; } /* the grid never shrinks below this many rows; the summary gives way first, the action button never */
+.hud-prod-col .hud-grid { flex: 0 1 auto; min-height: calc(var(--hud-grid-min-rows) * 60 * var(--hud-u)); }
+.hud-prod-col .hud-summary { flex: 0 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 /* OptionGrid (data-el="optionGrid") renders title, tabs, grid, summary, action as direct children: they join the column */
 [data-el="optionGrid"] { display: contents; }
 /* spacer for the title slot, so the grid always starts at y 76 even for a view without a title */
 .hud-prod-col::before { content: ""; order: 0; display: block; flex: 0 0 auto; height: calc(33 * var(--hud-u)); }
 .hud-prod-col h3 { z-index: 1; position: absolute; left: calc(12 * var(--hud-u)); top: 0; display: block; box-sizing: border-box; width: calc(212 * var(--hud-u)); height: calc(22 * var(--hud-u)); margin: 0; line-height: calc(22 * var(--hud-u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* [W3] the grid is at least 4×4 cells and grows with its rows (the whole building list fits; the panel's mid strip follows, Hud.#fitProduction) */
-.hud-grid { order: 1; position: relative; z-index: 0; display: grid; grid-template-columns: repeat(var(--hud-cols, 4), calc(60 * var(--hud-u))); grid-auto-rows: calc(60 * var(--hud-u)); align-content: start; gap: 0; width: calc(240 * var(--hud-u) + 6px); height: auto; min-height: calc(240 * var(--hud-u)); margin-bottom: calc(2 * var(--hud-u)); overflow-x: hidden; overflow-y: auto; }
+.hud-grid { order: 1; position: relative; z-index: 0; display: grid; grid-template-columns: repeat(var(--hud-cols, 4), calc(60 * var(--hud-u))); grid-template-rows: repeat(4, calc(60 * var(--hud-u))) /* 4 × 4 cells = HUD.optionGrid.rows, the minimum look of the panel */; grid-auto-rows: calc(60 * var(--hud-u)); align-content: start; gap: 0; width: calc(240 * var(--hud-u) + 6px); height: auto; margin-bottom: calc(2 * var(--hud-u)); overflow-x: hidden; overflow-y: auto; }
 .hud-tabs { order: 2; display: flex; gap: 3px; margin-bottom: 4px; }
 .hud-summary { order: 3; margin-top: 2px; padding-top: 4px; border-top: 1px solid var(--hud-line); font-size: max(var(--ui-fs-small), calc(11.5 * var(--hud-u))); color: #b9c4cf; }
 .hud-action { order: 4; }
@@ -374,8 +379,8 @@ body #match-observer { top: calc(70 * var(--hud-u)); }
 #hud-root.hud-tiny #player-stats-bar .psb-row { height: auto; padding: 0; box-shadow: none; gap: calc(3 * var(--hud-u)); }
 #hud-root.hud-tiny #player-stats-bar .psb-row::before { display: none; }
 #hud-root.hud-tiny #player-stats-bar .psb-val { flex: 0 0 auto; min-width: calc(30 * var(--hud-u)); }
-/* tiny: the production column scrolls (max height already limited by --hud-prod-col-max); show the scrollbar room */
-#hud-root.hud-tiny .hud-prod-col { overscroll-behavior: contain; }
+/* tiny: the grid inside the production column scrolls (column height limited by --hud-prod-col-max) */
+#hud-root.hud-tiny .hud-prod-col .hud-grid { overscroll-behavior: contain; }
 /* long cell labels: break instead of overflowing the 60 px cell */
 .hud-cell .lbl { word-break: normal; overflow-wrap: normal; } /* never break inside a word; a word wider than the cell is clipped (full text in the tooltip) */
 /* robot panel EJECT: visible size unchanged, invisible layer grows the hit area to --ui-hit real px (--h / --rp-u: slot height in image px) */

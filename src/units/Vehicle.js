@@ -26,6 +26,16 @@ export function distanceToBox(p, box) {
 }
 
 /**
+ * [pathfinding-v2] order.reach read by followPath (Pathfinding.findPath opts.reach): when the target lies in an obstacle,
+ * the unit stands anywhere within `dist` of the raw target shape (circle: radius; box: halfX / halfZ) on the side with
+ * the shortest path. One object per order, rewritten on every call (no allocation after the first).
+ */
+function setReach(order, x, z, radius, halfX, halfZ, dist) {
+  const r = (order.reach ??= { x: 0, z: 0, radius: undefined, halfX: undefined, halfZ: undefined, dist: 0 });
+  r.x = x; r.z = z; r.radius = radius; r.halfX = halfX; r.halfZ = halfZ; r.dist = dist;
+}
+
+/**
  * [A1] Race whose model a unit of `race` shows – the same choice as Stats.resolveUnit makes for the {race} model path
  * (the unit's own race when listed, else the race's modelRace stand-in, else the first listed one).
  */
@@ -482,6 +492,7 @@ export class Vehicle extends THREE.Group {
       // The deposit core is an inflated pathfinding obstacle, so the path can end farther than the range: a truck
       // that stands at the end of its path reaches further (like salvage), and gives up when even that is not enough
       const slack = o.atGoal ? N1B.harvestReachSlack : 0;
+      setReach(o, d.position.x, d.position.z, d.radius, undefined, undefined, range + this.radius); // [pathfinding-v2]
       if (this.#edgeTo(d.position, d.radius) <= range + slack) {
         const want = (this.harvester.ratePerSecond ?? 0) * d.rateFactor * dt;
         const ore = d.mine(this, want);
@@ -499,7 +510,11 @@ export class Vehicle extends THREE.Group {
     if (o.type === 'build') {
       const s = o.structure;
       if (s.complete || s.destroyed || s.removed) { this.order = null; advanceQueue(this); return false; }
-      if (distanceToBox(this.position, s.obstacle) - this.radius <= getStats().rules.construction.builderRange) {
+      const box = s.obstacle;
+      const range = getStats().rules.construction.builderRange;
+      // [pathfinding-v2] stand on whichever side of the building (or of the wall under a tower) the path is shortest
+      setReach(o, box.x, box.z, undefined, box.halfX, box.halfZ, range + this.radius);
+      if (distanceToBox(this.position, box) - this.radius <= range) {
         s.addBuilder(this);
         this.activity = 'building';
         // Races whose buildings go on alone (continuesWithoutBuilder) only start one and are free for the next task
@@ -513,7 +528,13 @@ export class Vehicle extends THREE.Group {
     }
     if (o.type === 'repair') {
       const goal = vehicleRepairStep(this, dt); // null = repairing (activity) or the order ended
-      return goal ? this.#moveTowards(goal, dt, false) : false;
+      if (!goal) return false;
+      // [pathfinding-v2] a building / a powered-down mech is an obstacle: stand where the path to the repair range is shortest
+      const t = o.target;
+      const range = this.repairer.range + this.radius;
+      if (t.isStructure) { const box = t.obstacle; setReach(o, box.x, box.z, undefined, box.halfX, box.halfZ, range); }
+      else setReach(o, t.position.x, t.position.z, t.radius, undefined, undefined, range);
+      return this.#moveTowards(goal, dt, false);
     }
     if (o.type === 'salvage') {
       const w = o.wreck;
@@ -544,7 +565,9 @@ export class Vehicle extends THREE.Group {
       // A big building (assembly bay) has a wide inflated obstacle: the path ends at the nearest free spot, which can be
       // farther than unloadRange. A truck standing at the end of its path reaches further (same slack as for loading).
       const slack = o.atGoal ? MINOR_FIXES.salvageReachSlack : 0;
-      if (distanceToBox(this.position, s.obstacle) - this.radius <= this.salvager.unloadRange + slack) {
+      const box = s.obstacle;
+      setReach(o, box.x, box.z, undefined, box.halfX, box.halfZ, this.salvager.unloadRange + this.radius); // [pathfinding-v2]
+      if (distanceToBox(this.position, box) - this.radius <= this.salvager.unloadRange + slack) {
         this.order = null;
         this.#unload(s);
         return false;

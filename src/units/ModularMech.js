@@ -6,7 +6,7 @@ import { MechAnimator } from '../anim/MechAnimator.js';
 import { MechPart } from './MechPart.js';
 import { ProcRobotAnimator } from '../procedural/robots/ProcRobotAnimator.js'; // [proc-robot]
 import { ProcMechVisual, procRobotCandidate, prepareProcRobots } from './ProcMechVisual.js'; // [proc-robot]
-import { hasGlbSkins, prepareGlbSkins, missingGlbSkins } from './GlbSkinVisual.js'; // [basic-m1] hand-made GLB parts of every race
+import { hasGlbSkins, missingGlbSkins } from './GlbSkinVisual.js'; // [basic-m1] hand-made GLB parts of every race
 import { GlbAttackFx } from '../procedural/robots/GlbAttackFx.js'; // [B5 glb-fx] visual only
 import {
   SOCKETS, MECH, MOVEMENT, TEAMS, PLAYER_TEAM, VFX, ORDERS, RINGS, ARRIVE_DISTANCE, BEHAVIOUR, basicLoadout, PING,
@@ -130,10 +130,6 @@ export class ModularMech extends THREE.Group {
     ]);
     this.animLib = lib;
     await prepareProcRobots(this.race, this.loadout); // [A9/B3] loadout: data-only parts draw procedurally; [proc-robot] style kits for the robot builder (null for other races)
-    // [basic-m1] skin models of the owner's race and of every loadout part's race (a part is drawn by its own race's skin)
-    const skinRaces = new Set([this.race ?? RACE]);
-    for (const k of keys) skinRaces.add(partStats(this.loadout[k], k, this.race, this.team).race ?? this.race ?? RACE);
-    await Promise.all([...skinRaces].map(prepareGlbSkins));
     this.stance ??= getStats().rules.combat.defaultStance;
     this.behaviour ??= getStats().rules.combat.defaultBehaviour;
 
@@ -158,6 +154,7 @@ export class ModularMech extends THREE.Group {
     this.#createRings();
     this.#refreshStats();
 
+    await missingGlbSkins(this, this.race ?? RACE); // [basic-m1/t-parts] skin models of the mounted parts only (display)
     this.animator = new MechAnimator(this, lib);
     // [proc-robot] the procedural display wraps the GLB animator (its clips keep driving the hidden simulation body)
     // [basic-m1] a race with GLB skins gets the display wrapper too (config only, the same on every client)

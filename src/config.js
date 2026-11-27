@@ -9,7 +9,7 @@ export const MODEL_ENCODING = 'glb';
 
 // Version label on the main menu ("test version v22"): the artifact version it is published as.
 // Raise it before every artifact publish (docs/HANDOFF.md, "Artefakt").
-export const GAME_VERSION = 'v34';
+export const GAME_VERSION = 'v35';
 // Game name (brand, shown in the main menu title; not translated)
 export const GAME_NAME = 'STEEL MEN';
 export const BASE64_MODEL_SUFFIX = '.txt';
@@ -109,6 +109,13 @@ export const PATHFINDING = {
   goalTolerance: 1e-3,       // units – planned goal this close to the ordered one = goal reachable as asked
   sidePreference: 0.25,      // blocked goal: weight of "distance from the unit" when picking the free spot
                              // (0 = purely nearest to the goal, higher = prefer the side the unit comes from)
+  // [pathfinding-v2] exact passability (docs/notes/pathfinding-v2.md): a cell is free when any point of its anchor
+  // lattice (anchorSubdiv × anchorSubdiv points, spacing cellSize / anchorSubdiv) lies outside every inflated shape;
+  // edges touching obstacle cells are checked by an exact segment test (with one axis-aligned elbow), corner cutting
+  // allowed when the test passes. false = the old centre sampling + no corner cutting (probe comparison only).
+  exactEdges: true,
+  anchorSubdiv: 5,           // odd: the cell centre is a lattice point
+  reachMargin: 0.5,          // units – opts.reach stand spots must lie this much inside the reach (no edge flicker)
 };
 
 /**
@@ -554,7 +561,8 @@ export const AI = {
   // Building spots: rings around the HQ; `gap` = free space kept around every building (paths); the cone in front of
   // the HQ (cos > frontConeDot, farther than frontClearFrom) stays free for the army and the defences
   // E1: base buildings keep a crew passage (Construction #passageGap: nav cell + 2 × (crew radius + clearance));
-  // passRadius = crew radius used before any own crew exists
+  // passRadius = crew radius used before any own crew exists; [pathfinding-v2] radius at least the widest builder
+  // vehicle's (stats.json, construct ability – HoverTruck), width = Pathfinding.passageWidth
   // [A1-5] denseSpacing = units between spots along a ring once a building found no spot (more than `angles` per ring)
   placement: { minRadius: 30, step: 8, maxRadius: 220, angles: 24, gap: 7, frontConeDot: 0.5, frontClearFrom: 40, defenseSearchRadius: 40, passRadius: 5, denseSpacing: 10 },
   // No spot found for a building: the next search reaches radiusGrowth farther (up to maxRadiusLimit, the front cone
@@ -2662,6 +2670,55 @@ export const PROC_STATE = {
 // races.<R>.enabled, sets.<S>.enabled (before a robot loads), window.steelMen.glbSkins = false (display, next sync).
 const BASIC_M1_DIR = 'RobotPartsBasicM1/';
 const T1_DIR = 'RobotPartsT1/'; // hand-modelled T1 weapon arms
+
+// --- [t-parts] modeller's working exports (blender/export/*_tex.glb, status "v1 waiting for review"), docs/notes/t-parts-skins.md ---
+// Display only. [stats.json set, kind, file stem]: legs / torso = `${stem}${race}.glb`, arm = `Left|Right${stem}${race}.glb`
+// in T_PARTS_DIR. A set listed in GLB_SKINS.races explicitly (Basic, KatanaSword, RocketArm = approved finals) wins.
+const T_PARTS_DIR = 'RobotPartsNew/';
+const T_PARTS = {
+  X: [
+    ['Armor', 'legs', 'ArmorLegs'], ['Armor', 'torso', 'ArmorTorso'], ['DrunkMissile', 'legs', 'DrunkMissileLegs'],
+    ['DrunkMissile', 'torso', 'DrunkMissileTorso'], ['Flak', 'torso', 'FlakTorso'], ['ForceField', 'torso', 'ForceFieldTorso'],
+    ['HighStrength', 'legs', 'HighStrengthLegs'], ['JetPack', 'torso', 'JetPackTorso'], ['IonHeavySword', 'arm', 'IonHeavySwordArm'],
+    ['IonKatana', 'arm', 'IonKatanaArm'], ['IonPulseGun', 'arm', 'IonPulseGunArm'], ['Shield', 'arm', 'ShieldArm'],
+    ['TankCannon', 'arm', 'TankCannonArm'], ['ObservingTorso', 'torso', 'ObservingTorso'], ['PowerShield', 'legs', 'PowerShieldLegs'],
+    ['Recon', 'legs', 'ReconLegs'], ['SelfRepair', 'torso', 'SelfRepairTorso'], ['SprintLegs', 'legs', 'SprintLegs'],
+  ],
+  Y: [
+    ['Armor', 'legs', 'ArmorLegs'], ['Armor', 'torso', 'ArmorTorso'], ['BastionTorso', 'torso', 'BastionTorso'],
+    ['ChargeLegs', 'legs', 'ChargeLegs'], ['ErgonomicsTorso', 'torso', 'ErgonomicsTorso'], ['Flak', 'torso', 'FlakTorso'],
+    ['HTHupgrade', 'legs', 'HTHupgradeLegs'], ['HeavyShieldLegs', 'legs', 'HeavyShieldLegs'], ['HighStrength', 'legs', 'HighStrengthLegs'],
+    ['Howitzer', 'torso', 'HowitzerTorso'], ['CarpetBomb', 'arm', 'CarpetBombArm'], ['Flamethrower', 'arm', 'FlamethrowerArm'],
+    ['GattlingGun', 'arm', 'GattlingGunArm'], ['HammerHand', 'arm', 'HammerHandArm'], ['HeavyRocketArm', 'arm', 'HeavyRocketArm'],
+    ['JetHammer', 'arm', 'JetHammerArm'], ['Shield', 'arm', 'ShieldArm'], ['Recon', 'legs', 'ReconLegs'],
+    ['ShoulderMissileTorso', 'torso', 'ShoulderMissileTorso'],
+  ],
+  Z: [
+    ['Armor', 'legs', 'ArmorLegs'], ['Armor', 'torso', 'ArmorTorso'], ['Camo', 'torso', 'CamoTorso'],
+    ['EMP', 'torso', 'EMPTorso'], ['Flak', 'torso', 'FlakTorso'], ['HighSpeed', 'legs', 'HighSpeedLegs'],
+    ['HighStrength', 'legs', 'HighStrengthLegs'], ['ArcRifle', 'arm', 'ArcRifleArm'], ['ElectroGrip', 'arm', 'ElectroGripArm'],
+    ['EnergyShield', 'arm', 'EnergyShieldArm'], ['PlasmaBlade', 'arm', 'PlasmaBladeArm'], ['PlasmaCannon', 'arm', 'PlasmaCannonArm'],
+    ['PlasmaCutter', 'arm', 'PlasmaCutterArm'], ['PlasmaSniper', 'arm', 'PlasmaSniperArm'], ['LightenedTorso', 'torso', 'LightenedTorso'],
+    ['PlasmaGunsTorso', 'torso', 'PlasmaGunsTorso'], ['PlasmaLegs', 'legs', 'PlasmaLegs'], ['Recon', 'legs', 'ReconLegs'],
+    ['StealthLegs', 'legs', 'StealthLegs'],
+  ],
+};
+/** GLB_SKINS sets of a race from T_PARTS (style native; `own` = explicitly listed sets, they win) */
+function tPartSets(race, own = {}) {
+  const sets = {};
+  for (const [set, kind, stem] of T_PARTS[race] ?? []) {
+    if (own[set]) continue;
+    const s = (sets[set] ??= { style: 'native' });
+    if (kind === 'arm') {
+      s.leftArm = { path: `${T_PARTS_DIR}Left${stem}${race}.glb` };
+      s.rightArm = { path: `${T_PARTS_DIR}Right${stem}${race}.glb` };
+    } else if (kind === 'legs') { // same skeleton and socket_TorsoMount as the Basic M1 legs → the same offset
+      s.legs = { path: `${T_PARTS_DIR}${stem}${race}.glb`, mechOffset: BASIC_M1_LEGS_OFFSET };
+    } else s[kind] = { path: `${T_PARTS_DIR}${stem}${race}.glb` };
+  }
+  return { ...sets, ...own };
+}
+// --- [t-parts] end ---
 // New legs' socket_TorsoMount is 1.7 further forward (z) and 0.6 higher than the stand-in's: the drawing moves back by
 // the z part, so the torso and arms rise 0.6 but stay above the simulation body (shots leave near the drawn barrels)
 const BASIC_M1_LEGS_OFFSET = [0, 0, -1.7];
@@ -2695,7 +2752,7 @@ export const GLB_SKINS = {
   races: {
     X: {
       enabled: true,
-      sets: {
+      sets: tPartSets('X', {
         Basic: basicM1Set('X'),
         // [basic-m1] first textured T1 weapon arms (models/RobotPartsT1). RocketArm is a data-only set (stand-in
         // HomingMissile arm): its launcher block replaces the forearm (nodes Upper → Fore), shots still leave from the
@@ -2710,10 +2767,10 @@ export const GLB_SKINS = {
           leftArm: { path: `${T1_DIR}LeftRocketArmX.glb` },
           rightArm: { path: `${T1_DIR}RightRocketArmX.glb` },
         },
-      },
+      }),
     },
-    Y: { enabled: true, sets: { Basic: basicM1Set('Y') } },
-    Z: { enabled: true, sets: { Basic: basicM1Set('Z') } },
+    Y: { enabled: true, sets: tPartSets('Y', { Basic: basicM1Set('Y') }) },
+    Z: { enabled: true, sets: tPartSets('Z', { Basic: basicM1Set('Z') }) },
     W: {
       enabled: true,
       // [basic-m1] the approved W set replaces the draft Basic (models/RobotPartsMercuryDraft stays on disk). The draft
@@ -3193,7 +3250,7 @@ export const NET_CONTINUE = {
 // src/core/SaveStore.js, docs/notes/j1-save-core.md). Loading checks SIM_VERSION and the data fingerprint, never GAME_VERSION.
 // Raise SIM_VERSION with every change that alters the simulation (combat, balance code, AI decisions, command
 // executors, determinism fixes); text / UI / visual-only releases keep it, so saves stay loadable.
-export const SIM_VERSION = 8; // 8 = A16 (attack charge legs, photon deflector, hover photon jet legs, flamethrower cone, AI shield arms / ability scores); 7 = A15 (content purge per new_units, per-faction requiresTier, hopRun on speed legs, new start arms); 6 = A9 (research T2/T3, super tier, Data network, new buildings / parts, vehicle tiers); 5 = A14 (terrain speed factor per chassis, weighted A*); 4 = A8 (ASCII map wall height 12.3 ± 12 % → line of sight / wall stops); 3 = A7 (crew morale bail-out, melee sweep vs wrecks, formation P2 march); 2 = A1 (simBody of structures, AI production / placement, chunked commands) after v28
+export const SIM_VERSION = 9; // 9 = pathfinding v2 (exact cell anchors / edge tests, corner cutting, stand spot by path length, AI passages for builder vehicles); 8 = A16 (attack charge legs, photon deflector, hover photon jet legs, flamethrower cone, AI shield arms / ability scores); 7 = A15 (content purge per new_units, per-faction requiresTier, hopRun on speed legs, new start arms); 6 = A9 (research T2/T3, super tier, Data network, new buildings / parts, vehicle tiers); 5 = A14 (terrain speed factor per chassis, weighted A*); 4 = A8 (ASCII map wall height 12.3 ± 12 % → line of sight / wall stops); 3 = A7 (crew morale bail-out, melee sweep vs wrecks, formation P2 march); 2 = A1 (simBody of structures, AI production / placement, chunked commands) after v28
 export const SAVE = {
   format: 'steelmen-save',      // marker of a save object / .smsave file
   formatVersion: 1,             // layout of the save object (not the simulation)

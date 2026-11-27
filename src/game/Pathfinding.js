@@ -29,6 +29,18 @@
 // the grid (admissible). With a cost grid the straight line skips A* only when it costs no more than the cheapest
 // possible walk, and line-of-sight smoothing only shortcuts when the straight leg costs no more than the planned cells
 // (TERRAIN_COST.shortcutTolerance). A class whose cells all cost 1 has no grid (= old behaviour).
+//
+// [pathfinding-v2] Exact passability (PATHFINDING.exactEdges, docs/notes/pathfinding-v2.md). Every cell touched by an
+// inflated shape remembers those shapes (linked list per cell). Such a cell is free when a point of its anchor lattice
+// (anchorSubdiv² points, spacing cellSize / anchorSubdiv, the same lattice over the whole map) lies outside all its
+// shapes; the free point nearest to the centre is the cell's ANCHOR (untouched cells: the centre), path points are
+// anchors. An edge touching such cells (for a diagonal also both side cells) is valid when the segment between the two
+// anchors is clear, or an axis-aligned elbow through (a.x, b.z) / (b.x, a.z) is – the elbow becomes a path point.
+// Corner cutting is allowed whenever that test passes (never past impassable terrain). A failed edge is a jet crossing
+// of one step (flight over anything, hop when only rifts block it). So a corridor of inflated width ≥ one lattice step
+// is found, and a thin wall between two free cell centres is never walked through.
+// [pathfinding-v2] opts.reach (stand spot by path length): when the goal lies in an obstacle, every free cell whose
+// anchor is within reach.dist of the reach shape is a goal of one multi-goal A*; the shortest path wins, on any side.
 import * as THREE from 'three';
 import { PATHFINDING, MECH_COLLISION, TERRAIN_COST } from '../config.js';
 import { areAllies } from './Alliances.js';
@@ -48,6 +60,13 @@ const SIG_VALUES = 5; // [H1] refresh(): values per shape in the layout signatur
 const NO_PASS_TEAM = -1; // signature value of a shape without passTeam
 const CROSS_FLY = 1;
 const CROSS_HOP = 2;
+const BLOCK_TERRAIN = 3; // [pathfinding-v2] impassable terrain (solid for jets; no corner cutting past it)
+const VIA_NONE = -1;     // [pathfinding-v2] how an edge passed the exact test: no way / straight / elbow (a.x, b.z) / (b.x, a.z)
+const VIA_DIRECT = 0;
+const VIA_ELBOW_A = 1;
+const VIA_ELBOW_B = 2;
+const NO_LINK = -1;      // end of a cell's shape list
+const LINK_START_CAPACITY = 4096; // initial size of the link buffers (buffer size, not tuning)
 const sameNum = (a, b) => a === b || (a !== a && b !== b);
 
 export class NavGrid {
@@ -71,6 +90,22 @@ export class NavGrid {
   // or absent (all cells cost 1). Built by setTerrain, read only by queries.
   #terrain = {};
   #pathG = [];           // [A14-terrain] findPath scratch: A* cost of each path point (smoothing)
+  // [pathfinding-v2] exact passability buffers (see file header)
+  #head;                 // Int32Array: first link of each cell's shape list (NO_LINK = untouched cell)
+  #linkNext = new Int32Array(LINK_START_CAPACITY);  // per link: next link of the same cell (grows by doubling)
+  #linkShape = new Int32Array(LINK_START_CAPACITY); // per link: index into the query's shape list
+  #full;                 // Uint8Array: cell completely covered (BLOCK_SOLID / BLOCK_RIFT)
+  #ax;                   // Float64Array: anchor of a touched free cell
+  #az;
+  #touched = [];         // cells touched by a shape in the last rasterization
+  #via;                  // Uint8Array: how the A* edge into a cell passed the exact test (VIA_*)
+  #latX;                 // Float64Array: anchor lattice offsets from a cell centre, nearest first
+  #latZ;
+  #goalFlag;             // Uint8Array: opts.reach goal cells of the running query
+  #goalList = [];
+  #goalR = 0;            // octile distance (cells) from the goal cell to the farthest reach goal cell
+  /** [pathfinding-v2] counters of the last findPath (debug / probe only, never read by the simulation) */
+  stats = { expanded: 0, edgeTests: 0 };
 
   /**
    * @param {object} opts
@@ -91,6 +126,26 @@ export class NavGrid {
     this.#closed = new Uint8Array(cells);
     this.#entry = new Uint8Array(cells);
     this.#seen = new Uint8Array(cells);
+    this.#head = new Int32Array(cells).fill(NO_LINK);
+    this.#full = new Uint8Array(cells);
+    this.#ax = new Float64Array(cells);
+    this.#az = new Float64Array(cells);
+    this.#via = new Uint8Array(cells);
+    this.#goalFlag = new Uint8Array(cells);
+    this.#buildLattice();
+  }
+
+  // [pathfinding-v2] Anchor lattice offsets sorted by distance from the centre (ties: z, then x – a fixed order)
+  #buildLattice() {
+    const m = Math.max(1, PATHFINDING.anchorSubdiv | 0);
+    const mid = (m - 1) / 2;
+    const step = this.cellSize / m;
+    const list = [];
+    for (let kz = 0; kz < m; kz++) for (let kx = 0; kx < m; kx++) list.push([kx - mid, kz - mid]);
+    list.sort((a, b) => (a[0] * a[0] + a[1] * a[1]) - (b[0] * b[0] + b[1] * b[1]) || a[1] - b[1] || a[0] - b[0]);
+    this.#latX = new Float64Array(list.length);
+    this.#latZ = new Float64Array(list.length);
+    for (let k = 0; k < list.length; k++) { this.#latX[k] = list[k][0] * step; this.#latZ[k] = list[k][1] * step; }
   }
 
   /**
@@ -266,6 +321,9 @@ export class NavGrid {
    * @param {number} [opts.team]  [H1] team of the moving unit (default body.team): own / allied gates do not block (passTeam)
    * @param {string} [opts.terrainClass]  [A14-terrain] chassis class (TerrainTypes.terrainClassOf): weights the path by
    *   that class's terrain cost grid (see file header); missing / unweighted class = uniform cost
+   * @param {object} [opts.reach]  [pathfinding-v2] stand spot by path length (file header): { x, z, radius } or
+   *   { x, z, halfX, halfZ } (the raw target shape) + dist = the farthest the unit's centre may stand from its edge;
+   *   used only when the goal lies inside an obstacle. null = the nearest free spot (sidePreference) as before.
    * @returns {{ waypoints: THREE.Vector3[], goal: THREE.Vector3, direct: boolean, goalFly: boolean, goalHop: boolean }}
    *   waypoints = intermediate points (without the goal); goal = where the unit can actually get –
    *   the target itself, or the nearest free spot when the target lies inside an obstacle.
@@ -273,8 +331,10 @@ export class NavGrid {
    */
   findPath(from, to, {
     radius = 0, ignore = [], crossRift = false, flyRange = 0, flyPenalty = 0, hopRange = 0, hopPenalty = 0, body = null, team = body?.team,
-    terrainClass = null,
+    terrainClass = null, reach = null,
   } = {}) {
+    this.stats.expanded = 0;
+    this.stats.edgeTests = 0;
     const shapes = this.#inflated(radius, ignore, crossRift, body, team);
     // [A14-terrain] cost grid of the query's class (null = uniform, the code below then runs exactly as before A14)
     const terrain = this.#terrainOf(terrainClass) ?? null;
@@ -285,15 +345,19 @@ export class NavGrid {
     const blocked = this.#rasterize(shapes, terrain);
     const start = this.#cellOf(from);
     let end = this.#cellOf(goal);
+    let goals = 0; // [pathfinding-v2] reach goal cells (multi-goal A*), 0 = one goal cell
     if (blocked[end] || insideAny(goal, shapes)) {
-      end = this.#nearestFree(end, blocked, from, goal);
-      if (end < 0) return none(new THREE.Vector3(from.x, 0, from.z));
-      this.#cellCentre(end, goal);
+      if (reach) goals = this.#collectGoals(reach, blocked, end);
+      if (!goals) {
+        end = this.#nearestFree(end, blocked, from, goal);
+        if (end < 0) return none(new THREE.Vector3(from.x, 0, from.z));
+        this.#cellAnchor(end, goal);
+      }
     }
 
     // Unit pressed into an obstacle: first step out to the nearest free cell
     const free = this.#nearestFree(start, blocked, null, from);
-    if (free < 0) return none(goal);
+    if (free < 0) { this.#clearGoals(); return none(goal); }
     const jets = {
       fly: Math.floor(flyRange / this.cellSize) >= 2 ? flyRange : 0,
       flyPenalty,
@@ -303,19 +367,39 @@ export class NavGrid {
     };
     // [R2] how each cell was entered: CROSS_FLY / CROSS_HOP, 0 = walked
     if (jets.fly || jets.hop) jets.entry = this.#entry.fill(0);
-    const cells = this.#astar(free, end, blocked, jets, terrain);
+    const cells = this.#astar(free, end, blocked, jets, terrain, goals ? this.#goalR : -1, shapes);
     if (free !== start) cells.unshift(start);
-    const reachedEnd = cells[cells.length - 1] === end;
+    const last = cells[cells.length - 1];
+    const reachedEnd = goals ? this.#goalFlag[last] === 1 : last === end;
+    if (goals) { this.#cellAnchor(last, goal); this.#clearGoals(); } // the stand spot chosen by path length
     const entry = jets.entry;
     const pathG = this.#pathG;
     pathG.length = 0;
-    const points = cells.slice(1).map((c) => {
-      const p = this.#cellCentre(c, new THREE.Vector3());
+    const via = this.#via;
+    const parent = this.#from;
+    const points = [];
+    for (let k = 1; k < cells.length; k++) {
+      const c = cells[k];
+      const prev = parent[c];
+      if (prev >= 0 && via[c] !== VIA_DIRECT) { // [pathfinding-v2] the edge passed through an elbow
+        const elbowA = via[c] === VIA_ELBOW_A;
+        const e = elbowA
+          ? new THREE.Vector3(this.#anchorX(prev), 0, this.#anchorZ(c))
+          : new THREE.Vector3(this.#anchorX(c), 0, this.#anchorZ(prev));
+        if (terrain) { // A* cost at the elbow: the edge cost split by the lengths of its two legs
+          const legX = Math.abs(this.#anchorX(c) - this.#anchorX(prev)), legZ = Math.abs(this.#anchorZ(c) - this.#anchorZ(prev));
+          const first = elbowA ? legZ : legX;
+          const share = legX + legZ > 0 ? first / (legX + legZ) : 0;
+          pathG.push(this.#g[prev] + (this.#g[c] - this.#g[prev]) * share);
+        }
+        points.push(e);
+      }
+      const p = this.#cellAnchor(c, new THREE.Vector3());
       if (entry?.[c] === CROSS_FLY) p.fly = true;
       else if (entry?.[c] === CROSS_HOP) p.hop = true;
       if (terrain) pathG.push(this.#g[c]); // [A14-terrain] A* cost to this point (cells), for the smoothing check
-      return p;
-    });
+      points.push(p);
+    }
     const takeFlags = (src) => { if (src.fly) goal.fly = true; if (src.hop) goal.hop = true; };
     if (reachedEnd && points.length) { // exact goal instead of the cell centre
       takeFlags(points[points.length - 1]);
@@ -409,8 +493,104 @@ export class NavGrid {
   }
 
   // Cell values: 0 free, BLOCK_SOLID (any obstacle but a rift), BLOCK_RIFT (only rifts) – [R2] hops cross BLOCK_RIFT only
-  // [A14-terrain] terrain (or null): its impassable cells (speed factor 0) are BLOCK_SOLID too
+  // [A14-terrain] terrain (or null): its impassable cells (speed factor 0) are BLOCK_TERRAIN (solid for jets / hops)
   #rasterize(shapes, terrain = null) {
+    this.#touched.length = 0;
+    this.#head.fill(NO_LINK);
+    const blocked = PATHFINDING.exactEdges ? this.#rasterizeExact(shapes) : this.#rasterizeCentres(shapes);
+    if (terrain) {
+      const list = terrain.impassable;
+      for (let k = 0; k < list.length; k++) if (!blocked[list[k]]) blocked[list[k]] = BLOCK_TERRAIN;
+    }
+    return blocked;
+  }
+
+  // [pathfinding-v2] Shape lists per cell, full coverage, anchors (see file header)
+  #rasterizeExact(shapes) {
+    const n = this.cols;
+    const c = this.cellSize;
+    const hc = c / 2;
+    const half = this.half;
+    const blocked = this.#blocked.fill(0);
+    const full = this.#full.fill(0);
+    const head = this.#head;
+    let next = this.#linkNext;
+    let shapeOf = this.#linkShape;
+    const touched = this.#touched;
+    let links = 0;
+    for (let si = 0; si < shapes.length; si++) {
+      const s = shapes[si];
+      const ex = s.radius ?? s.halfX;
+      const ez = s.radius ?? s.halfZ;
+      const x0 = this.#col(s.x - ex), x1 = this.#col(s.x + ex);
+      const z0 = this.#col(s.z - ez), z1 = this.#col(s.z + ez);
+      const mark = s.rift ? BLOCK_RIFT : BLOCK_SOLID;
+      for (let iz = z0; iz <= z1; iz++) {
+        const cz = (iz + 0.5) * c - half;
+        for (let ix = x0; ix <= x1; ix++) {
+          const cx = (ix + 0.5) * c - half;
+          if (!touchesCell(s, cx, cz, hc)) continue;
+          const i = iz * n + ix;
+          if (head[i] === NO_LINK) touched.push(i);
+          if (links === next.length) { next = this.#growLinks(); shapeOf = this.#linkShape; }
+          next[links] = head[i];
+          shapeOf[links] = si;
+          head[i] = links++;
+          if (full[i] !== BLOCK_SOLID && coversCell(s, cx, cz, hc)) full[i] = mark;
+        }
+      }
+    }
+    // (links past `links` are stale leftovers of bigger queries: no head points to them, the buffers only grow)
+    const latX = this.#latX, latZ = this.#latZ;
+    for (let t = 0; t < touched.length; t++) {
+      const i = touched[t];
+      if (full[i] === BLOCK_SOLID) { blocked[i] = BLOCK_SOLID; continue; }
+      const cx = ((i % n) + 0.5) * c - half, cz = (Math.floor(i / n) + 0.5) * c - half;
+      let found = false;
+      if (!full[i]) {
+        for (let k = 0; k < latX.length; k++) {
+          const px = cx + latX[k], pz = cz + latZ[k];
+          if (this.#pointFree(i, px, pz, shapes)) { this.#ax[i] = px; this.#az[i] = pz; found = true; break; }
+        }
+      }
+      if (!found) blocked[i] = this.#blockKind(i, cx, cz, shapes);
+    }
+    return blocked;
+  }
+
+  // [pathfinding-v2] Doubles the link buffers (copying the links so far); returns the new #linkNext
+  #growLinks() {
+    const size = this.#linkNext.length * 2;
+    const next = new Int32Array(size);
+    const shapeOf = new Int32Array(size);
+    next.set(this.#linkNext);
+    shapeOf.set(this.#linkShape);
+    this.#linkNext = next;
+    this.#linkShape = shapeOf;
+    return next;
+  }
+
+  // [pathfinding-v2] Is the point outside every shape touching cell i?
+  #pointFree(i, px, pz, shapes) {
+    for (let e = this.#head[i]; e !== NO_LINK; e = this.#linkNext[e]) if (insideSq(px, pz, shapes[this.#linkShape[e]])) return false;
+    return true;
+  }
+
+  // [pathfinding-v2] Kind of a blocked touched cell, as the centre rule gave it: solid when its centre lies in a solid
+  // shape, else rift when it lies in a rift, else solid when any solid shape touches it (hops cross rift cells only)
+  #blockKind(i, cx, cz, shapes) {
+    let centreRift = false;
+    let anySolid = false;
+    for (let e = this.#head[i]; e !== NO_LINK; e = this.#linkNext[e]) {
+      const s = shapes[this.#linkShape[e]];
+      const inCentre = insideSq(cx, cz, s);
+      if (!s.rift) { if (inCentre) return BLOCK_SOLID; anySolid = true; } else if (inCentre) centreRift = true;
+    }
+    return centreRift || !anySolid ? BLOCK_RIFT : BLOCK_SOLID;
+  }
+
+  // Old rasterization (PATHFINDING.exactEdges off): a cell is blocked when its centre lies in a shape
+  #rasterizeCentres(shapes) {
     const n = this.cols;
     const blocked = this.#blocked.fill(0);
     const c = this.cellSize;
@@ -430,10 +610,6 @@ export class NavGrid {
         }
       }
     }
-    if (terrain) {
-      const list = terrain.impassable;
-      for (let k = 0; k < list.length; k++) if (!blocked[list[k]]) blocked[list[k]] = BLOCK_SOLID;
-    }
     return blocked;
   }
 
@@ -448,31 +624,39 @@ export class NavGrid {
   // [R2] jets (or null): { fly, flyPenalty, hop, hopPenalty, entry } – crossing edges (see file header); entry marks
   // how each cell on the best path so far was entered.
   // [A14-terrain] terrain (or null): step cost × mean cell cost, heuristic × the grid's cheapest cell (stays admissible)
-  #astar(start, end, blocked, jets = null, terrain = null) {
+  // [pathfinding-v2] goalR ≥ 0: multi-goal search – the goals are the #goalFlag cells (within goalR cells of `end`), the
+  // heuristic is lowered by goalR (stays admissible); shapes = the query's inflated shapes (exact edge tests)
+  #astar(start, end, blocked, jets = null, terrain = null, goalR = -1, shapes = null) {
     const entry = jets?.entry ?? null;
     const n = this.cols;
     const g = this.#g.fill(Infinity);
     const from = this.#from.fill(-1);
     const closed = this.#closed.fill(0);
-    const ex = end % n, ez = Math.floor(end / n);
+    const via = this.#via;
+    const head = this.#head;
+    const exact = PATHFINDING.exactEdges;
+    const goalFlag = goalR >= 0 ? this.#goalFlag : null;
+    this.#hLower = Math.max(0, goalR);
+    this.#hEx = end % n;
+    this.#hEz = Math.floor(end / n);
     const cellCost = terrain ? terrain.cost : null;
-    const hScale = terrain ? terrain.minCost : 1;
-    const h = (i) => {
-      const dx = Math.abs((i % n) - ex), dz = Math.abs(Math.floor(i / n) - ez);
-      return (Math.max(dx, dz) + (SQRT2 - 1) * Math.min(dx, dz)) * hScale;
-    };
+    this.#hScale = terrain ? terrain.minCost : 1;
+    const flyStep = jets?.fly ? jets.flyPenalty / this.cellSize : 0; // [pathfinding-v2] one-step crossings
+    const hopStep = jets?.hop ? jets.hopPenalty / this.cellSize : 0;
+    const stats = this.stats;
     const open = this.#heap;
     open.clear();
     g[start] = 0;
-    open.push(start, h(start));
+    open.push(start, this.#h(start));
     let best = start;
-    let bestH = h(start);
+    let bestH = this.#octile(start);
     while (open.size) {
       const cur = open.pop();
       if (closed[cur]) continue;
       closed[cur] = 1;
-      if (cur === end) { best = end; break; }
-      const hc = h(cur);
+      stats.expanded++;
+      if (goalFlag ? goalFlag[cur] === 1 : cur === end) { best = cur; break; }
+      const hc = this.#octile(cur);
       if (hc < bestH) { best = cur; bestH = hc; }
       const cx = cur % n, cz = Math.floor(cur / n);
       for (let k = 0; k < NEIGHBOURS.length; k++) {
@@ -482,23 +666,58 @@ export class NavGrid {
         if (nx < 0 || nz < 0 || nx >= n || nz >= n) continue;
         const ni = nz * n + nx;
         if (blocked[ni] || closed[ni]) continue;
-        // No corner cutting past a blocked cell
-        if (dx && dz && (blocked[cz * n + nx] || blocked[nz * n + cx])) continue;
-        const ng = g[cur] + (cellCost ? cost * (cellCost[cur] + cellCost[ni]) * 0.5 : cost);
-        if (ng < g[ni]) { g[ni] = ng; from[ni] = cur; if (entry) entry[ni] = 0; open.push(ni, ng + h(ni)); }
+        let side1 = -1, side2 = -1;
+        if (dx && dz) {
+          side1 = cz * n + nx;
+          side2 = nz * n + cx;
+          if (!exact) { if (blocked[side1] || blocked[side2]) continue; } // old: no corner cutting past a blocked cell
+          else if (blocked[side1] === BLOCK_TERRAIN || blocked[side2] === BLOCK_TERRAIN) continue;
+        }
+        let how = VIA_DIRECT, mark = 0, extra = 0;
+        if (exact && (head[cur] !== NO_LINK || head[ni] !== NO_LINK
+          || (side1 >= 0 && (head[side1] !== NO_LINK || head[side2] !== NO_LINK)))) {
+          how = this.#edgeVia(cur, ni, side1, side2, shapes);
+          if (how === VIA_NONE) {
+            // a thin obstacle between two free cells: a one-step flight over anything / a hop over a rift
+            if (jets?.fly) { how = VIA_DIRECT; mark = CROSS_FLY; extra = flyStep; }
+            else if (jets?.hop && this.#segFree(this.#anchorX(cur), this.#anchorZ(cur), this.#anchorX(ni), this.#anchorZ(ni),
+              cur, ni, side1, side2, shapes, true)) { how = VIA_DIRECT; mark = CROSS_HOP; extra = hopStep; }
+            else continue;
+          }
+        }
+        // an elbow costs its real (axis-aligned) length, never less than the grid step (the heuristic stays admissible)
+        const step = how === VIA_DIRECT ? cost : Math.max(cost, (Math.abs(this.#anchorX(ni) - this.#anchorX(cur))
+          + Math.abs(this.#anchorZ(ni) - this.#anchorZ(cur))) / this.cellSize);
+        const ng = g[cur] + (cellCost ? step * (cellCost[cur] + cellCost[ni]) * 0.5 : step) + extra;
+        if (ng < g[ni]) { g[ni] = ng; from[ni] = cur; via[ni] = how; if (entry) entry[ni] = mark; open.push(ni, ng + this.#h(ni)); }
       }
-      if (jets?.fly) this.#crossEdges(cur, cx, cz, blocked, closed, g, from, entry, open, h, jets.fly, jets.flyPenalty, false);
-      if (jets?.hop) this.#crossEdges(cur, cx, cz, blocked, closed, g, from, entry, open, h, jets.hop, jets.hopPenalty, true);
+      if (jets?.fly) this.#crossEdges(cur, cx, cz, blocked, closed, g, from, entry, open, jets.fly, jets.flyPenalty, false);
+      if (jets?.hop) this.#crossEdges(cur, cx, cz, blocked, closed, g, from, entry, open, jets.hop, jets.hopPenalty, true);
     }
     const path = [];
     for (let c = best; c >= 0; c = from[c]) path.push(c);
     return path.reverse();
   }
 
+  // [pathfinding-v2] A* heuristic state of the running query (fields instead of per-query closures)
+  #hEx = 0;      // goal cell column / row
+  #hEz = 0;
+  #hLower = 0;   // multi-goal: octile distance of the farthest goal cell (0 = one goal)
+  #hScale = 1;   // [A14-terrain] cheapest cell cost of the grid (1 = uniform)
+
+  // Octile distance (cells) from cell i to the goal cell
+  #octile(i) {
+    const n = this.cols;
+    const dx = Math.abs((i % n) - this.#hEx), dz = Math.abs(Math.floor(i / n) - this.#hEz);
+    return Math.max(dx, dz) + (SQRT2 - 1) * Math.min(dx, dz);
+  }
+
+  #h(i) { return Math.max(0, this.#octile(i) - this.#hLower) * this.#hScale; }
+
   // [R2] From a free cell, in each of the 8 directions whose first cell is blocked: walk over the blocked run to the
   // first free cell; when it is within range (centre to centre), it is a neighbour costing length + penalty.
   // riftOnly (hop): every cell of the run must be BLOCK_RIFT – a run touching a solid obstacle is no crossing.
-  #crossEdges(cur, cx, cz, blocked, closed, g, from, entry, open, h, range, rangePenalty, riftOnly) {
+  #crossEdges(cur, cx, cz, blocked, closed, g, from, entry, open, range, rangePenalty, riftOnly) {
     const n = this.cols;
     const penalty = rangePenalty / this.cellSize; // A* costs are in cells
     const mark = riftOnly ? CROSS_HOP : CROSS_FLY;
@@ -519,7 +738,7 @@ export class NavGrid {
         }
         if (!closed[ni]) {
           const ng = g[cur] + k * cost + penalty;
-          if (ng < g[ni]) { g[ni] = ng; from[ni] = cur; entry[ni] = mark; open.push(ni, ng + h(ni)); }
+          if (ng < g[ni]) { g[ni] = ng; from[ni] = cur; this.#via[ni] = VIA_DIRECT; entry[ni] = mark; open.push(ni, ng + this.#h(ni)); }
         }
         break; // the first free cell ends the run (no crossing over free ground)
       }
@@ -574,7 +793,7 @@ export class NavGrid {
       for (let ri = 0; ri < ring.length; ri++) {
         const c = ring[ri];
         if (blocked[c]) continue;
-        this.#cellCentre(c, centre);
+        this.#cellAnchor(c, centre);
         const score = centre.distanceTo(origin)
           + (prefer ? PATHFINDING.sidePreference * Math.hypot(centre.x - prefer.x, centre.z - prefer.z) : 0);
         if (score < bestScore) { best = c; bestScore = score; }
@@ -596,12 +815,93 @@ export class NavGrid {
     return best;
   }
 
+  // ---------- [pathfinding-v2] anchors, exact edges, reach goals ----------
+
+  #anchorX(i) { return this.#head[i] !== NO_LINK ? this.#ax[i] : ((i % this.cols) + 0.5) * this.cellSize - this.half; }
+  #anchorZ(i) { return this.#head[i] !== NO_LINK ? this.#az[i] : (Math.floor(i / this.cols) + 0.5) * this.cellSize - this.half; }
+  #cellAnchor(i, out) { return out.set(this.#anchorX(i), 0, this.#anchorZ(i)); }
+
+  // How the edge a -> b passes (VIA_*): straight between the anchors, else through one axis-aligned elbow.
+  // s1 / s2 = the side cells of a diagonal edge (-1 for a straight one). The segments stay inside the cells tested.
+  #edgeVia(a, b, s1, s2, shapes) {
+    const ax = this.#anchorX(a), az = this.#anchorZ(a), bx = this.#anchorX(b), bz = this.#anchorZ(b);
+    if (this.#segFree(ax, az, bx, bz, a, b, s1, s2, shapes, false)) return VIA_DIRECT;
+    if (ax === bx || az === bz) return VIA_NONE;
+    if (this.#segFree(ax, az, ax, bz, a, b, s1, s2, shapes, false)
+      && this.#segFree(ax, bz, bx, bz, a, b, s1, s2, shapes, false)) return VIA_ELBOW_A;
+    if (this.#segFree(ax, az, bx, az, a, b, s1, s2, shapes, false)
+      && this.#segFree(bx, az, bx, bz, a, b, s1, s2, shapes, false)) return VIA_ELBOW_B;
+    return VIA_NONE;
+  }
+
+  // Is the segment clear of every shape touching the cells a, b, s1, s2 (-1 = none)? skipRift: rifts do not count
+  #segFree(ax, az, bx, bz, a, b, s1, s2, shapes, skipRift) {
+    this.stats.edgeTests++;
+    return this.#cellSegFree(a, ax, az, bx, bz, shapes, skipRift) && this.#cellSegFree(b, ax, az, bx, bz, shapes, skipRift)
+      && (s1 < 0 || this.#cellSegFree(s1, ax, az, bx, bz, shapes, skipRift))
+      && (s2 < 0 || this.#cellSegFree(s2, ax, az, bx, bz, shapes, skipRift));
+  }
+
+  #cellSegFree(i, ax, az, bx, bz, shapes, skipRift) {
+    for (let e = this.#head[i]; e !== NO_LINK; e = this.#linkNext[e]) {
+      const s = shapes[this.#linkShape[e]];
+      if (skipRift && s.rift) continue;
+      if (segmentHitsXZ(ax, az, bx, bz, s)) return false;
+    }
+    return true;
+  }
+
+  // Marks the free cells whose anchor lies within reach.dist (− reachMargin) of the reach shape; returns their count
+  // (goal cells of the multi-goal A*, #goalR = the farthest one from `end` in octile cells)
+  #collectGoals(reach, blocked, end) {
+    const list = this.#goalList;
+    const flag = this.#goalFlag;
+    list.length = 0;
+    const n = this.cols;
+    const lim = reach.dist - PATHFINDING.reachMargin;
+    if (!(lim > 0)) return 0;
+    const ex = (reach.radius ?? reach.halfX) + reach.dist;
+    const ez = (reach.radius ?? reach.halfZ) + reach.dist;
+    const x0 = this.#col(reach.x - ex), x1 = this.#col(reach.x + ex);
+    const z0 = this.#col(reach.z - ez), z1 = this.#col(reach.z + ez);
+    const gx = end % n, gz = Math.floor(end / n);
+    let r = 0;
+    for (let iz = z0; iz <= z1; iz++) {
+      for (let ix = x0; ix <= x1; ix++) {
+        const i = iz * n + ix;
+        if (blocked[i] || !withinShape(this.#anchorX(i), this.#anchorZ(i), reach, lim)) continue;
+        flag[i] = 1;
+        list.push(i);
+        const dx = Math.abs(ix - gx), dz = Math.abs(iz - gz);
+        r = Math.max(r, Math.max(dx, dz) + (SQRT2 - 1) * Math.min(dx, dz));
+      }
+    }
+    this.#goalR = r;
+    return list.length;
+  }
+
+  #clearGoals() {
+    const list = this.#goalList;
+    for (let k = 0; k < list.length; k++) this.#goalFlag[list[k]] = 0;
+    list.length = 0;
+  }
+
   #col(v) { return THREE.MathUtils.clamp(Math.floor((v + this.half) / this.cellSize), 0, this.cols - 1); }
   #cellOf(p) { return this.#col(p.z) * this.cols + this.#col(p.x); }
   #cellCentre(i, out) {
     const c = this.cellSize;
     return out.set(((i % this.cols) + 0.5) * c - this.half, 0, (Math.floor(i / this.cols) + 0.5) * c - this.half);
   }
+}
+
+/**
+ * [pathfinding-v2] Free space between two obstacles (units, edge to edge) kept open for a unit of this radius: both
+ * inflations (radius + PATHFINDING.clearance) + one whole cell. The exact grid finds a corridor already from about
+ * two anchor lattice steps (2 × cellSize / anchorSubdiv); the whole cell keeps the passage safe at any grid alignment
+ * and even with exactEdges off. Used to keep passages open between buildings (AI placement).
+ */
+export function passageWidth(radius, cellSize = PATHFINDING.cellSize) {
+  return 2 * (radius + PATHFINDING.clearance) + cellSize;
 }
 
 // ---------- [W7] collision bodies ----------
@@ -634,6 +934,45 @@ function inside(p, s) {
 
 function insideXZ(px, pz, s) {
   if (s.radius !== undefined) return Math.hypot(px - s.x, pz - s.z) < s.radius;
+  return Math.abs(px - s.x) < s.halfX && Math.abs(pz - s.z) < s.halfZ;
+}
+
+// [pathfinding-v2] Does shape s reach into the cell (centre cx, cz, half size hc)? Touching counts (conservative).
+function touchesCell(s, cx, cz, hc) {
+  if (s.radius !== undefined) {
+    const dx = Math.max(Math.abs(s.x - cx) - hc, 0), dz = Math.max(Math.abs(s.z - cz) - hc, 0);
+    return dx * dx + dz * dz <= s.radius * s.radius;
+  }
+  return Math.abs(s.x - cx) <= s.halfX + hc && Math.abs(s.z - cz) <= s.halfZ + hc;
+}
+
+// [pathfinding-v2] Does shape s cover the whole cell (its farthest corner strictly inside)?
+function coversCell(s, cx, cz, hc) {
+  if (s.radius !== undefined) {
+    const dx = Math.abs(s.x - cx) + hc, dz = Math.abs(s.z - cz) + hc;
+    return dx * dx + dz * dz < s.radius * s.radius;
+  }
+  return Math.abs(s.x - cx) + hc < s.halfX && Math.abs(s.z - cz) + hc < s.halfZ;
+}
+
+// [pathfinding-v2] Is (px, pz) within `lim` of a raw shape { x, z, radius } | { x, z, halfX, halfZ } (inside counts)?
+// Squared distances only: Math.hypot is not exactly rounded by the spec (lockstep across browsers); sqrt is.
+function withinShape(px, pz, s, lim) {
+  if (s.radius !== undefined) {
+    const r = s.radius + lim;
+    const dx = px - s.x, dz = pz - s.z;
+    return dx * dx + dz * dz <= r * r;
+  }
+  const dx = Math.max(Math.abs(px - s.x) - s.halfX, 0), dz = Math.max(Math.abs(pz - s.z) - s.halfZ, 0);
+  return dx * dx + dz * dz <= lim * lim;
+}
+
+// [pathfinding-v2] insideXZ with squared distances (new callers: anchors, block kinds – see withinShape)
+function insideSq(px, pz, s) {
+  if (s.radius !== undefined) {
+    const dx = px - s.x, dz = pz - s.z;
+    return dx * dx + dz * dz < s.radius * s.radius;
+  }
   return Math.abs(px - s.x) < s.halfX && Math.abs(pz - s.z) < s.halfZ;
 }
 
@@ -673,30 +1012,33 @@ function rayEntry(px, pz, dx, dz, s) {
  * Does the segment a -> b enter shape s? A segment starting inside the shape only counts when it
  * heads deeper in (a unit pressed against an obstacle may still walk away from it).
  */
-function segmentHits(a, b, s) {
-  const dx = b.x - a.x, dz = b.z - a.z;
+function segmentHits(a, b, s) { return segmentHitsXZ(a.x, a.z, b.x, b.z, s); }
+
+// segmentHits on plain numbers (a = (ax, az), b = (bx, bz))
+function segmentHitsXZ(ax, az, bx, bz, s) {
+  const dx = bx - ax, dz = bz - az;
   if (s.radius !== undefined) {
-    const fx = a.x - s.x, fz = a.z - s.z;
+    const fx = ax - s.x, fz = az - s.z;
     if (fx * fx + fz * fz < s.radius * s.radius) return fx * dx + fz * dz < 0;
     const len2 = dx * dx + dz * dz || EPSILON;
     const t = THREE.MathUtils.clamp(-(fx * dx + fz * dz) / len2, 0, 1);
     return Math.hypot(fx + dx * t, fz + dz * t) < s.radius;
   }
-  if (inside(a, s)) { // inside a box: allowed only if moving away from its centre
-    return (a.x - s.x) * dx + (a.z - s.z) * dz < 0;
+  if (insideXZ(ax, az, s)) { // inside a box: allowed only if moving away from its centre
+    return (ax - s.x) * dx + (az - s.z) * dz < 0;
   }
   // Slab test against the box
   // x slab, then z slab (inline: no temporary arrays)
   let t0 = 0, t1 = 1;
-  if (Math.abs(dx) < EPSILON) { if (Math.abs(a.x - s.x) >= s.halfX) return false; } else {
-    let ta = (s.x - s.halfX - a.x) / dx, tb = (s.x + s.halfX - a.x) / dx;
+  if (Math.abs(dx) < EPSILON) { if (Math.abs(ax - s.x) >= s.halfX) return false; } else {
+    let ta = (s.x - s.halfX - ax) / dx, tb = (s.x + s.halfX - ax) / dx;
     if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
     t0 = Math.max(t0, ta);
     t1 = Math.min(t1, tb);
     if (t0 >= t1) return false;
   }
-  if (Math.abs(dz) < EPSILON) { if (Math.abs(a.z - s.z) >= s.halfZ) return false; } else {
-    let ta = (s.z - s.halfZ - a.z) / dz, tb = (s.z + s.halfZ - a.z) / dz;
+  if (Math.abs(dz) < EPSILON) { if (Math.abs(az - s.z) >= s.halfZ) return false; } else {
+    let ta = (s.z - s.halfZ - az) / dz, tb = (s.z + s.halfZ - az) / dz;
     if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
     t0 = Math.max(t0, ta);
     t1 = Math.min(t1, tb);

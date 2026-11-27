@@ -4,7 +4,8 @@
 // free gap around every building; the cone in front of the HQ stays free for the army and the defences.
 // Buildings are ordered with placeStructure / placeWall / placeTurret commands; their result comes back through a
 // ticket (buildCommands.newTicket), a refused spot is avoided for a while.
-import { AI, AI_RESUME, WALL, CMD_WALL, PATHFINDING } from '../../config.js';
+import { AI, AI_RESUME, WALL, CMD_WALL } from '../../config.js';
+import { passageWidth } from '../../game/Pathfinding.js';
 import { getStats, unitStats } from '../../data/Stats.js';
 import { cachedFootprint, modelFootprint } from '../../units/Structure.js';
 import { canPlace, placementBox, terrainFit } from '../../game/Construction.js';
@@ -17,7 +18,34 @@ import { plannedPower, powerGap } from '../power.js';
 import { TECH_BACK_ROLES } from './Tech.js';
 
 let segmentIds = null;
+/**
+ * [pathfinding-v2] Collision radius of the widest builder vehicle of a race in stats.json (vehicles with a 'construct'
+ * ability; simBody.radius with the race's byRace override – own race, else its modelRace, as Stats.resolveUnit picks
+ * it), 0 when none. Read from the data, so it follows balance changes; cached per stats object and race.
+ */
+const builderRadiusCache = { stats: null, byRace: {} }; // (reset when stats.json is reloaded)
+function builderVehicleRadius(race) {
+  const stats = getStats();
+  if (builderRadiusCache.stats !== stats) { builderRadiusCache.stats = stats; builderRadiusCache.byRace = {}; }
+  const cached = builderRadiusCache.byRace[race];
+  if (cached !== undefined) return cached;
+  const modelRace = stats?.races?.[race]?.modelRace;
+  let radius = 0;
+  const vehicles = stats?.vehicles ?? {};
+  for (const id of Object.keys(vehicles)) {
+    const v = vehicles[id];
+    if (!v?.abilities?.some((a) => a.type === 'construct')) continue;
+    const body = v.simBody;
+    if (!body) continue;
+    const variant = body.byRace?.[race] ?? body.byRace?.[modelRace];
+    radius = Math.max(radius, variant?.radius ?? body.radius ?? 0);
+  }
+  builderRadiusCache.byRace[race] = radius;
+  return radius;
+}
+
 /** Wall posts, wall segments and turrets on posts (built as chains; they take no parallel build slot) */
+
 function isWallPiece(s) {
   segmentIds ??= new Set(Object.values(getStats().structures ?? {}).map((x) => x.wallSegment).filter(Boolean));
   const p = s?.stats?.placement;
@@ -439,17 +467,19 @@ export class ConstructionManager {
   }
 
   /**
-   * [E1] Free space kept around a new base building so a crew squad can always walk between two buildings: the nav
-   * grid blocks a cell whose centre lies in an obstacle inflated by unit radius + PATHFINDING.clearance, so a
-   * corridor stays open only when it is one cell wider than both inflations (wave E2: a hard crew spawned at a
-   * CryoFarm was walled in by buildings 7 u apart). Crew radius = the biggest own squad (formation-based), else
-   * AI.placement.passRadius. Defence pieces keep AI.placement.gap (walls are meant to close).
+   * [E1] / [pathfinding-v2] Free space kept around a new base building so a crew squad and the AI's own builder
+   * vehicles (e.g. the HoverTruck) can always pass between two buildings (wave E2: a hard crew spawned at a CryoFarm was
+   * walled in by buildings 7 u apart). Width = Pathfinding.passageWidth(radius): both inflations (radius +
+   * PATHFINDING.clearance) + one whole nav cell of reserve, safe at any grid alignment. Radius = max(biggest own squad
+   * – else AI.placement.passRadius –, widest builder vehicle of the AI's race). Defence pieces keep AI.placement.gap
+   * (walls are meant to close).
    */
   #passageGap() {
     let radius = 0;
     for (const c of this.own.crews) radius = Math.max(radius, c.radius ?? 0);
     if (!(radius > 0)) radius = AI.placement.passRadius;
-    return Math.max(AI.placement.gap, PATHFINDING.cellSize + 2 * (radius + PATHFINDING.clearance));
+    radius = Math.max(radius, builderVehicleRadius(this.ai.race));
+    return Math.max(AI.placement.gap, passageWidth(radius));
   }
 
   /** v4: what the next building waits for (status().econBlock / buildWait): { id, econ, why, since } */

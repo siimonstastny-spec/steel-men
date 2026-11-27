@@ -256,7 +256,13 @@ export class Hud {
   #fitProduction() {
     this.layoutDirty = false;
     const p = HUD_V2.production;
-    const flow = this.el.prodCol.scrollHeight / this.scale - (p.gridEnd - p.columnTop) - p.flowGap; // extras + queue block
+    // natural height of the column: the grid may be shrunk by max-height (it scrolls), so use its content height
+    const col = this.el.prodCol;
+    const grid = col.querySelector('.hud-grid');
+    const sum = col.querySelector('.hud-summary'); // may be shrunk too (it scrolls)
+    const natural = grid ? col.clientHeight - grid.offsetHeight + grid.scrollHeight
+      + (sum ? sum.scrollHeight - sum.offsetHeight : 0) : col.scrollHeight;
+    const flow = natural / this.scale - (p.gridEnd - p.columnTop) - p.flowGap; // extras + queue block
     const slack = p.plainBottom - p.flowStart; // plain inner area below the first row with no mid strip
     // the mid strip grows with the content up to the room above the idle buttons; beyond that the column scrolls (max-height)
     const mid = Math.min(Math.max(flow - slack, 0), this.prodFree);
@@ -338,7 +344,7 @@ export class Hud {
       <div class="hud-popup hud-help" data-el="help" hidden></div>
       <div class="hud-prod" data-el="prod">
         <div class="hud-prod-art"><i class="t"></i><i class="m"></i><i class="b"></i></div>
-        <div class="hud-prod-col" data-el="prodCol" data-scroll-key="prodCol">
+        <div class="hud-prod-col" data-el="prodCol">
           <div data-el="optionGrid"></div>
         </div>
       </div>
@@ -690,7 +696,7 @@ export class Hud {
   #set(el, html) {
     if (el._html === html) return false;
     el._html = html;
-    setHtmlKeepScroll(el, html); // scroller of the production column (data-scroll-key) must not jump to the top
+    setHtmlKeepScroll(el, html); // the grid / summary scrollers (data-scroll-key) must not jump to the top
     return true;
   }
 }

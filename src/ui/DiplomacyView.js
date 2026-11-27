@@ -20,6 +20,7 @@ import { raceName } from '../data/Stats.js';
 import { isConfirmDialogOpen } from './ConfirmDialog.js';
 import { playerAvatarHtml } from './Avatar.js';
 import { formatAmount } from './formatAmount.js';
+import { setHtmlKeepScroll } from './scrollKeep.js';
 import { onLanguageChange, t } from '../i18n/i18n.js';
 
 const U = DIPLOMACY.ui;
@@ -159,18 +160,18 @@ export class DiplomacyView {
         <td class="dip-state" data-state-of="${team}"></td>
       </tr>${this.#canTrade(team) ? this.#tradeRow(team) : ''}`;
     }).join('');
-    // [A4-UI] 5–8 players: tighter rows, the panel scrolls with a sticky header (diplomacy.css .dip-many)
-    this.el.innerHTML = `<div class="dip-panel${teams.length > A4_UI.dipManyRowsAbove ? ' dip-many' : ''}" role="dialog" aria-label="${esc(t('dip.title'))}">
+    // [A4-UI] 5–8 players: tighter rows, the table scrolls with a sticky header (diplomacy.css .dip-many)
+    setHtmlKeepScroll(this.el, `<div class="dip-panel${teams.length > A4_UI.dipManyRowsAbove ? ' dip-many' : ''}" role="dialog" aria-label="${esc(t('dip.title'))}">
       <h2>${esc(t('dip.title'))}</h2>
       <p class="dip-own" data-own></p>
-      <table class="dip-table">
+      <div class="dip-scroll" data-scroll-key="dip-scroll"><table class="dip-table">
         <thead><tr><th></th><th>${esc(t('dip.col.player'))}</th><th>${esc(t('dip.col.team'))}</th>
           <th>${esc(t('dip.col.planet'))}</th><th>${esc(t('dip.col.state'))}</th></tr></thead>
         <tbody>${rows}</tbody>
-      </table>
+      </table></div>
       <p class="dip-hint">${esc(t('dip.lossHint', { loss: Math.round((1 - tributeKeep()) * U.percent) }))}</p>
       <div class="dip-actions"><button data-act="close">${esc(t('dip.close'))}</button></div>
-    </div>`;
+    </div>`);
     this.#refresh();
   }
 
